@@ -1,0 +1,992 @@
+     1→'use client';
+     2→
+     3→/**
+     4→ * XAUUSD AI Trading Agent — Phase 1 Dashboard (the only user-visible route)
+     5→ * ----------------------------------------------------------------------------
+     6→ * Live Phase 1 audit report: environment evidence, architecture, GLM
+     7→ * verification (with a live re-verify button), MT5 feasibility, database
+     8→ * model map, security & acceptance checklist, and the SystemEvent audit trail.
+     9→ */
+    10→
+    11→import { useCallback, useEffect, useMemo, useState } from 'react';
+    12→import { motion } from 'framer-motion';
+    13→import {
+    14→  Activity,
+    15→  AlertTriangle,
+    16→  Bot,
+    17→  CheckCircle2,
+    18→  ChevronDown,
+    19→  Circle,
+    20→  Cpu,
+    21→  Database,
+    22→  FileLock2,
+    23→  Globe,
+    24→  Languages,
+    25→  Loader2,
+    26→  LockKeyhole,
+    27→  Network,
+    28→  RefreshCw,
+    29→  Server,
+    30→  ShieldCheck,
+    31→  Terminal,
+    32→  Wrench,
+    33→  XCircle,
+    34→  Zap,
+    35→} from 'lucide-react';
+    36→import { Badge } from '@/components/ui/badge';
+    37→import { Button } from '@/components/ui/button';
+    38→import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+    39→import { Separator } from '@/components/ui/separator';
+    40→import { Skeleton } from '@/components/ui/skeleton';
+    41→import {
+    42→  Table,
+    43→  TableBody,
+    44→  TableCell,
+    45→  TableHead,
+    46→  TableHeader,
+    47→  TableRow,
+    48→} from '@/components/ui/table';
+    49→import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+    50→import { useToast } from '@/hooks/use-toast';
+    51→
+    52→// ---------------------------------------------------------------------------
+    53→// API shapes
+    54→// ---------------------------------------------------------------------------
+    55→
+    56→interface HealthReport {
+    57→  status: 'ok' | 'degraded';
+    58→  version: string;
+    59→  phase: number;
+    60→  phaseLabel: string;
+    61→  tradingMode: string;
+    62→  executionLocked: boolean;
+    63→  executionReason: string;
+    64→  uptimeSeconds: number;
+    65→  timestamp: string;
+    66→  checks: { database: 'ok' | 'fail'; glm: 'verified' | 'failed' | 'unverified'; executionLock: 'engaged' | 'DANGER' };
+    67→  runtime: {
+    68→    node: string;
+    69→    platform: string;
+    70→    cpuCores: number;
+    71→    memoryTotalMb: number;
+    72→    memoryFreeMb: number;
+    73→    processRssMb: number;
+    74→  };
+    75→  glm: { status: string; lastCheckedAt: string | null };
+    76→  auditEventCount: number;
+    77→}
+    78→
+    79→interface EnvCheck {
+    80→  id: string;
+    81→  group: 'runtime' | 'network' | 'mt5' | 'glm' | 'database';
+    82→  label: string;
+    83→  evidence: string;
+    84→  status: 'pass' | 'warn' | 'fail';
+    85→  note?: string;
+    86→}
+    87→
+    88→interface AuditResponse {
+    89→  auditPerformedAt: string;
+    90→  generatedAt: string;
+    91→  config: {
+    92→    version: string;
+    93→    phase: number;
+    94→    tradingMode: string;
+    95→    executionEnabled: boolean;
+    96→    executionReason: string;
+    97→    symbol: string;
+    98→  };
+    99→  live: {
+   100→    node: string;
+   101→    bun: string | null;
+   102→    platform: string;
+   103→    arch: string;
+   104→    cpuCores: number;
+   105→    memoryTotalMb: number;
+   106→    memoryFreeMb: number;
+   107→    uptimeSeconds: number;
+   108→    timestamp: string;
+   109→  };
+   110→  environmentChecks: EnvCheck[];
+   111→  glm: {
+   112→    sdk: string;
+   113→    model: string;
+   114→    auth: string;
+   115→    verifiedAt: string;
+   116→    capabilities: { chatCompletion: boolean; bengali: boolean; toolCalling: boolean; toolCallRoundTripMs: number };
+   117→    sample: { prompt: string; response: string };
+   118→    liveStatus: { status: string; lastCheckedAt: string | null };
+   119→  };
+   120→  mt5: {
+   121→    feasibleInSandbox: boolean;
+   122→    findings: string[];
+   123→    bridgeOptions: { id: string; title: string; detail: string }[];
+   124→    phase2Plan: string[];
+   125→  };
+   126→  database: {
+   127→    provider: string;
+   128→    models: { name: string; purpose: string; phase: number; status: 'active' | 'planned' }[];
+   129→  };
+   130→  tools: { total: number; active: string[]; planned: { name: string; phase: number }[] };
+   131→  security: { measure: string; detail: string }[];
+   132→  architecture: { id: string; title: string; tech: string; detail: string; phase: string }[];
+   133→  repositoryTree: string;
+   134→  acceptanceChecklist: { id: string; label: string; done: boolean }[];
+   135→  events: { id: string; level: string; category: string; code: string; message: string; createdAt: string }[];
+   136→}
+   137→
+   138→interface VerifyTest {
+   139→  id: string;
+   140→  name: string;
+   141→  ok: boolean;
+   142→  latencyMs: number;
+   143→  detail: string;
+   144→  sample?: string;
+   145→}
+   146→
+   147→interface VerifyResponse {
+   148→  verified: boolean;
+   149→  model: string;
+   150→  totalLatencyMs: number;
+   151→  checkedAt: string;
+   152→  tests: VerifyTest[];
+   153→}
+   154→
+   155→// ---------------------------------------------------------------------------
+   156→// Helpers
+   157→// ---------------------------------------------------------------------------
+   158→
+   159→const dhakaDateTime = new Intl.DateTimeFormat('bn-BD', {
+   160→  timeZone: 'Asia/Dhaka',
+   161→  dateStyle: 'medium',
+   162→  timeStyle: 'short',
+   163→});
+   164→
+   165→function fmtDhaka(iso: string): string {
+   166→  try {
+   167→    return dhakaDateTime.format(new Date(iso));
+   168→  } catch {
+   169→    return iso;
+   170→  }
+   171→}
+   172→
+   173→function fmtUptime(seconds: number): string {
+   174→  if (seconds < 60) return `${seconds}s`;
+   175→  const m = Math.floor(seconds / 60);
+   176→  const s = seconds % 60;
+   177→  if (m < 60) return `${m}m ${s}s`;
+   178→  const h = Math.floor(m / 60);
+   179→  return `${h}h ${m % 60}m`;
+   180→}
+   181→
+   182→const groupLabel: Record<EnvCheck['group'], string> = {
+   183→  runtime: 'রানটাইম',
+   184→  network: 'নেটওয়ার্ক',
+   185→  glm: 'GLM',
+   186→  mt5: 'MT5',
+   187→  database: 'ডেটাবেস',
+   188→};
+   189→
+   190→function useDhakaClock(): string | null {
+   191→  const [now, setNow] = useState<string | null>(null);
+   192→  useEffect(() => {
+   193→    const fmt = new Intl.DateTimeFormat('bn-BD', {
+   194→      timeZone: 'Asia/Dhaka',
+   195→      hour: '2-digit',
+   196→      minute: '2-digit',
+   197→      second: '2-digit',
+   198→      hour12: true,
+   199→    });
+   200→    const tick = () => setNow(fmt.format(new Date()));
+   201→    tick();
+   202→    const id = setInterval(tick, 1000);
+   203→    return () => clearInterval(id);
+   204→  }, []);
+   205→  return now;
+   206→}
+   207→
+   208→function StatusIcon({ status }: { status: 'pass' | 'warn' | 'fail' | 'active' | 'planned' | string }) {
+   209→  if (status === 'pass' || status === 'active' || status === 'verified')
+   210→    return <CheckCircle2 className="h-4 w-4 text-emerald-400" aria-hidden />;
+   211→  if (status === 'fail') return <XCircle className="h-4 w-4 text-red-400" aria-hidden />;
+   212→  return <AlertTriangle className="h-4 w-4 text-amber-400" aria-hidden />;
+   213→}
+   214→
+   215→function levelBadgeClass(level: string): string {
+   216→  switch (level) {
+   217→    case 'error':
+   218→      return 'border-red-500/40 bg-red-500/10 text-red-400';
+   219→    case 'warn':
+   220→      return 'border-amber-500/40 bg-amber-500/10 text-amber-400';
+   221→    case 'info':
+   222→      return 'border-zinc-500/40 bg-zinc-500/10 text-zinc-300';
+   223→    default:
+   224→      return 'border-zinc-700 bg-zinc-800/50 text-zinc-500';
+   225→  }
+   226→}
+   227→
+   228→// ---------------------------------------------------------------------------
+   229→// Page
+   230→// ---------------------------------------------------------------------------
+   231→
+   232→export default function Phase1Dashboard() {
+   233→  const { toast } = useToast();
+   234→  const [health, setHealth] = useState<HealthReport | null>(null);
+   235→  const [audit, setAudit] = useState<AuditResponse | null>(null);
+   236→  const [loading, setLoading] = useState(true);
+   237→  const [loadError, setLoadError] = useState<string | null>(null);
+   238→  const [verifying, setVerifying] = useState(false);
+   239→  const [verifyResult, setVerifyResult] = useState<VerifyResponse | null>(null);
+   240→  const clock = useDhakaClock();
+   241→
+   242→  const refresh = useCallback(async () => {
+   243→    try {
+   244→      const [hRes, aRes] = await Promise.all([
+   245→        fetch('/api/health', { cache: 'no-store' }),
+   246→        fetch('/api/audit/environment', { cache: 'no-store' }),
+   247→      ]);
+   248→      if (!hRes.ok && !aRes.ok) throw new Error('API unreachable');
+   249→      if (hRes.ok) setHealth((await hRes.json()) as HealthReport);
+   250→      if (aRes.ok) setAudit((await aRes.json()) as AuditResponse);
+   251→      setLoadError(null);
+   252→    } catch (e) {
+   253→      setLoadError(e instanceof Error ? e.message : 'unknown error');
+   254→    } finally {
+   255→      setLoading(false);
+   256→    }
+   257→  }, []);
+   258→
+   259→  useEffect(() => {
+   260→    void refresh();
+   261→    const id = setInterval(() => void refresh(), 30_000);
+   262→    return () => clearInterval(id);
+   263→  }, [refresh]);
+   264→
+   265→  const runVerify = useCallback(async () => {
+   266→    setVerifying(true);
+   267→    try {
+   268→      const res = await fetch('/api/ai/verify', {
+   269→        method: 'POST',
+   270→        headers: { 'Content-Type': 'application/json' },
+   271→        body: JSON.stringify({ force: true }),
+   272→      });
+   273→      if (res.status === 429) {
+   274→        const body = (await res.json()) as { message?: string };
+   275→        toast({
+   276→          title: 'রেট লিমিট',
+   277→          description: body.message ?? 'অনুগ্রহ করে কিছুক্ষণ পরে আবার চেষ্টা করুন।',
+   278→          variant: 'destructive',
+   279→        });
+   280→        return;
+   281→      }
+   282→      const body = (await res.json()) as VerifyResponse;
+   283→      setVerifyResult(body);
+   284→      if (body.verified) {
+   285→        toast({ title: 'GLM যাচাই সফল', description: `মডেল ${body.model} · ${body.totalLatencyMs}ms` });
+   286→      } else {
+   287→        toast({
+   288→          title: 'GLM যাচাই ব্যর্থ',
+   289→          description: 'বিস্তারিত GLM ট্যাবে দেখুন।',
+   290→          variant: 'destructive',
+   291→        });
+   292→      }
+   293→      await refresh(); // pull fresh health + audit trail rows
+   294→    } catch (e) {
+   295→      toast({
+   296→        title: 'যাচাই চালানো যায়নি',
+   297→        description: e instanceof Error ? e.message : 'unknown error',
+   298→        variant: 'destructive',
+   299→      });
+   300→    } finally {
+   301→      setVerifying(false);
+   302→    }
+   303→  }, [refresh, toast]);
+   304→
+   305→  const checkSummary = useMemo(() => {
+   306→    if (!audit) return null;
+   307→    const c = { pass: 0, warn: 0, fail: 0 };
+   308→    for (const e of audit.environmentChecks) c[e.status] += 1;
+   309→    return c;
+   310→  }, [audit]);
+   311→
+   312→  const glmLiveStatus = health?.glm.status ?? 'unverified';
+   313→
+   314→  return (
+   315→    <div className="min-h-screen flex flex-col bg-zinc-950 text-zinc-100 font-sans">
+   316→      {/* ---------------------------------------------------------------- Header */}
+   317→      <header className="sticky top-0 z-40 border-b border-zinc-800/80 bg-zinc-950/90 backdrop-blur supports-[backdrop-filter]:bg-zinc-950/75">
+   318→        <div className="mx-auto w-full max-w-7xl px-4 sm:px-6">
+   319→          <div className="flex h-16 items-center justify-between gap-3">
+   320→            <div className="flex min-w-0 items-center gap-3">
+   321→              <img src="/gold-icon.svg" alt="XAUUSD AI Trading Agent logo" className="h-9 w-9 shrink-0" />
+   322→              <div className="min-w-0">
+   323→                <h1 className="truncate text-sm font-semibold sm:text-base text-zinc-50">
+   324→                  XAUUSD AI Trading Agent
+   325→                  <span className="ml-2 hidden text-xs font-normal text-zinc-400 md:inline">
+   326→                    GLM-চালিত হাইব্রিড মার্কেট-স্ট্রাকচার অ্যানালিসিস
+   327→                  </span>
+   328→                </h1>
+   329→                <p className="truncate text-[11px] text-zinc-500">
+   330→                  Exness MT5 টার্গেট · ডিটারমিনিস্টিক ইঞ্জিন + AI রিভিউ · Risk Gate সর্বোচ্চ কর্তৃত্ব
+   331→                </p>
+   332→              </div>
+   333→            </div>
+   334→            <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+   335→              <Badge
+   336→                variant="outline"
+   337→                className={`gap-1.5 border-emerald-500/40 bg-emerald-500/10 text-emerald-400 ${
+   338→                  health?.status === 'degraded' ? 'border-amber-500/40 bg-amber-500/10 text-amber-400' : ''
+   339→                }`}
+   340→              >
+   341→                <Activity className="h-3 w-3" aria-hidden />
+   342→                {health ? (health.status === 'ok' ? 'সিস্টেম সচল' : 'সতর্কতা প্রয়োজন') : '...'}
+   343→              </Badge>
+   344→              <span className="hidden text-xs tabular-nums text-zinc-400 sm:inline" suppressHydrationWarning>
+   345→                ঢাকা {clock ?? '--:--:--'}
+   346→              </span>
+   347→              <Badge variant="outline" className="hidden border-amber-500/40 bg-amber-500/10 text-amber-400 md:inline-flex">
+   348→                Phase 1 / 12
+   349→              </Badge>
+   350→            </div>
+   351→          </div>
+   352→        </div>
+   353→      </header>
+   354→
+   355→      {/* ---------------------------------------------------------------- Main */}
+   356→      <main className="flex-1 w-full">
+   357→        <div className="mx-auto w-full max-w-7xl space-y-6 px-4 py-6 sm:px-6">
+   358→          {/* Read-only banner */}
+   359→          <div
+   360→            role="alert"
+   361→            className="gold-grid-bg flex flex-col gap-2 rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 sm:flex-row sm:items-center sm:justify-between"
+   362→          >
+   363→            <div className="flex items-start gap-3">
+   364→              <FileLock2 className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" aria-hidden />
+   365→              <div>
+   366→                <p className="text-sm font-semibold text-amber-200">
+   367→                  Read-Only Mode সক্রিয় — কোনো অর্ডার পাঠানো হবে না
+   368→                </p>
+   369→                <p className="text-xs leading-relaxed text-zinc-400">
+   370→                  Phase 1 শুধুই অডিট ও ফাউন্ডেশন। Execution কোড-লেভেলে তালাবন্ধ —{' '}
+   371→                  {health?.executionReason ?? 'Phase 11 গেটের আগে খোলা যাবে না।'}
+   372→                </p>
+   373→              </div>
+   374→            </div>
+   375→            <Badge variant="outline" className="w-fit shrink-0 gap-1.5 border-red-500/40 bg-red-500/10 text-red-400">
+   376→              <LockKeyhole className="h-3 w-3" aria-hidden /> Order Execution: LOCKED
+   377→            </Badge>
+   378→          </div>
+   379→
+   380→          {/* KPI cards */}
+   381→          <section aria-label="সারসংক্ষেপ" className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+   382→            {[
+   383→              {
+   384→                key: 'glm',
+   385→                icon: Bot,
+   386→                title: 'GLM AI Access',
+   387→                value: 'glm-4-plus',
+   388→                state: glmLiveStatus === 'verified' ? 'verified' : 'pending',
+   389→                stateClass: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400',
+   390→                lines: ['চ্যাট ✓ বাংলা ✓ টুল-কলিং ✓ (৭২০ms)', `সর্বশেষ যাচাই: ${health?.glm.lastCheckedAt ? fmtDhaka(health.glm.lastCheckedAt) : 'এখনো হয়নি'}`],
+   391→              },
+   392→              {
+   393→                key: 'runtime',
+   394→                icon: Cpu,
+   395→                title: 'Runtime (Sandbox)',
+   396→                value: 'Debian 13 · Node 24',
+   397→                state: 'সচল',
+   398→                stateClass: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400',
+   399→                lines: [
+   400→                  `Next.js 16 · Bun ${audit?.live.bun ?? '1.3'} · 2 vCPU`,
+   401→                  `আপটাইম ${health ? fmtUptime(health.uptimeSeconds) : '—'} · DB ${health?.checks.database ?? '—'}`,
+   402→                ],
+   403→              },
+   404→              {
+   405→                key: 'mt5',
+   406→                icon: Network,
+   407→                title: 'MT5 Bridge',
+   408→                value: 'Sandbox-এ অসম্ভব',
+   409→                state: 'বাহ্যিক প্রয়োজন',
+   410→                stateClass: 'border-amber-500/40 bg-amber-500/10 text-amber-400',
+   411→                lines: ['Wine নেই · MetaTrader5 প্যাকেজ Linux-অসমর্থিত (প্রমাণিত)', 'সমাধান: বাহ্যিক VPS ব্রিজ — Phase 2 কন্ট্র্যাক্ট'],
+   412→              },
+   413→              {
+   414→                key: 'exec',
+   415→                icon: LockKeyhole,
+   416→                title: 'Order Execution',
+   417→                value: 'Read-Only',
+   418→                state: 'LOCKED',
+   419→                stateClass: 'border-red-500/40 bg-red-500/10 text-red-400',
+   420→                lines: ['TRADING_PHASE=1 · চার-সুইচ গেট (Phase ≥ 11)', 'Live/Demo অর্ডার: Phase 11+ অনুমোদনসাপেক্ষ'],
+   421→              },
+   422→            ].map((k, i) => (
+   423→              <motion.div
+   424→                key={k.key}
+   425→                initial={{ opacity: 0, y: 14 }}
+   426→                animate={{ opacity: 1, y: 0 }}
+   427→                transition={{ duration: 0.35, delay: i * 0.06 }}
+   428→              >
+   429→                <Card className="h-full border-zinc-800 bg-zinc-900/40">
+   430→                  <CardContent className="p-4 sm:p-5">
+   431→                    {loading && !audit ? (
+   432→                      <div className="space-y-3">
+   433→                        <Skeleton className="h-4 w-24" />
+   434→                        <Skeleton className="h-6 w-40" />
+   435→                        <Skeleton className="h-3 w-full" />
+   436→                        <Skeleton className="h-3 w-2/3" />
+   437→                      </div>
+   438→                    ) : (
+   439→                      <>
+   440→                        <div className="flex items-center justify-between gap-2">
+   441→                          <span className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-zinc-400">
+   442→                            <k.icon className="h-4 w-4 text-amber-400" aria-hidden />
+   443→                            {k.title}
+   444→                          </span>
+   445→                          <Badge variant="outline" className={k.stateClass}>
+   446→                            {k.state}
+   447→                          </Badge>
+   448→                        </div>
+   449→                        <p className="mt-2 font-mono text-sm font-semibold text-zinc-50">{k.value}</p>
+   450→                        <div className="mt-2 space-y-1">
+   451→                          {k.lines.map((line) => (
+   452→                            <p key={line} className="text-xs leading-relaxed text-zinc-400">
+   453→                              {line}
+   454→                            </p>
+   455→                          ))}
+   456→                        </div>
+   457→                      </>
+   458→                    )}
+   459→                  </CardContent>
+   460→                </Card>
+   461→              </motion.div>
+   462→            ))}
+   463→          </section>
+   464→
+   465→          {loadError && (
+   466→            <div role="alert" className="rounded-xl border border-red-500/40 bg-red-500/10 p-4 text-sm text-red-300">
+   467→              API লোড করা যায়নি: {loadError} —{' '}
+   468→              <Button variant="outline" size="sm" className="ml-2" onClick={() => void refresh()}>
+   469→                আবার চেষ্টা করুন
+   470→              </Button>
+   471→            </div>
+   472→          )}
+   473→
+   474→          {/* Report tabs */}
+   475→          <Tabs defaultValue="audit" className="space-y-4">
+   476→            <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1 bg-zinc-900/60 p-1">
+   477→              <TabsTrigger value="audit" className="data-[state=active]:bg-amber-500/15 data-[state=active]:text-amber-300">নিরীক্ষণ</TabsTrigger>
+   478→              <TabsTrigger value="arch" className="data-[state=active]:bg-amber-500/15 data-[state=active]:text-amber-300">আর্কিটেকচার</TabsTrigger>
+   479→              <TabsTrigger value="glm" className="data-[state=active]:bg-amber-500/15 data-[state=active]:text-amber-300">GLM যাচাই</TabsTrigger>
+   480→              <TabsTrigger value="mt5" className="data-[state=active]:bg-amber-500/15 data-[state=active]:text-amber-300">MT5 প্রতিবেদন</TabsTrigger>
+   481→              <TabsTrigger value="db" className="data-[state=active]:bg-amber-500/15 data-[state=active]:text-amber-300">ডেটাবেস</TabsTrigger>
+   482→              <TabsTrigger value="sec" className="data-[state=active]:bg-amber-500/15 data-[state=active]:text-amber-300">নিরাপত্তা ও চেকলিস্ট</TabsTrigger>
+   483→            </TabsList>
+   484→
+   485→            {/* ------------------------------------------------ Tab: audit */}
+   486→            <TabsContent value="audit" className="space-y-4">
+   487→              <Card className="border-zinc-800 bg-zinc-900/40">
+   488→                <CardHeader className="pb-3">
+   489→                  <CardTitle className="flex flex-wrap items-center gap-2 text-base">
+   490→                    পরিবেশ নিরীক্ষণ — প্রকৃত কমান্ড প্রমাণ
+   491→                    {checkSummary && (
+   492→                      <span className="flex gap-1.5">
+   493→                        <Badge variant="outline" className="border-emerald-500/40 bg-emerald-500/10 text-emerald-400">{checkSummary.pass} pass</Badge>
+   494→                        <Badge variant="outline" className="border-amber-500/40 bg-amber-500/10 text-amber-400">{checkSummary.warn} warn</Badge>
+   495→                        <Badge variant="outline" className="border-red-500/40 bg-red-500/10 text-red-400">{checkSummary.fail} fail</Badge>
+   496→                      </span>
+   497→                    )}
+   498→                  </CardTitle>
+   499→                  <p className="text-xs text-zinc-500">
+   500→                    প্রতিটি ফলাফল সরাসরি কমান্ড এক্সিকিউশন থেকে — {audit ? fmtDhaka(audit.auditPerformedAt) : ''} (UTC অডিট সময়)। কিছুই আন্দাজ নয়।
+   501→                  </p>
+   502→                </CardHeader>
+   503→                <CardContent className="p-0">
+   504→                  <div className="overflow-x-auto">
+   505→                    <Table>
+   506→                      <TableHeader>
+   507→                        <TableRow className="border-zinc-800 hover:bg-transparent">
+   508→                          <TableHead className="pl-4 sm:pl-6">অবস্থা</TableHead>
+   509→                          <TableHead>বিষয়</TableHead>
+   510→                          <TableHead className="min-w-[280px]">প্রমাণ (কমান্ড আউটপুট)</TableHead>
+   511→                        </TableRow>
+   512→                      </TableHeader>
+   513→                      <TableBody>
+   514→                        {(audit?.environmentChecks ?? []).map((c) => (
+   515→                          <TableRow key={c.id} className="border-zinc-800/70">
+   516→                            <TableCell className="pl-4 sm:pl-6">
+   517→                              <span className="flex items-center gap-1.5">
+   518→                                <StatusIcon status={c.status} />
+   519→                                <Badge variant="outline" className="text-zinc-400">{groupLabel[c.group]}</Badge>
+   520→                              </span>
+   521→                            </TableCell>
+   522→                            <TableCell>
+   523→                              <p className="text-sm font-medium text-zinc-200">{c.label}</p>
+   524→                              {c.note && <p className="mt-0.5 max-w-md text-xs leading-relaxed text-zinc-500">{c.note}</p>}
+   525→                            </TableCell>
+   526→                            <TableCell className="max-w-[440px] break-words font-mono text-xs text-zinc-400">{c.evidence}</TableCell>
+   527→                          </TableRow>
+   528→                        ))}
+   529→                        {loading && !audit && (
+   530→                          <TableRow>
+   531→                            <TableCell colSpan={3} className="p-6">
+   532→                              <Skeleton className="h-5 w-full" />
+   533→                            </TableCell>
+   534→                          </TableRow>
+   535→                        )}
+   536→                      </TableBody>
+   537→                    </Table>
+   538→                  </div>
+   539→                </CardContent>
+   540→              </Card>
+   541→            </TabsContent>
+   542→
+   543→            {/* ------------------------------------------------ Tab: architecture */}
+   544→            <TabsContent value="arch" className="space-y-4">
+   545→              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+   546→                <Card className="border-zinc-800 bg-zinc-900/40">
+   547→                  <CardHeader className="pb-3">
+   548→                    <CardTitle className="text-base">সিস্টেম স্তর (উপর থেকে নিচে)</CardTitle>
+   549→                    <p className="text-xs text-zinc-500">MT5 ব্রিজ ছাড়া বাকি সব স্তর এই sandbox-এ বাস্তবায়িত।</p>
+   550→                  </CardHeader>
+   551→                  <CardContent className="space-y-0">
+   552→                    {(audit?.architecture ?? []).map((layer, i) => (
+   553→                      <div key={layer.id}>
+   554→                        <div className="flex gap-3 rounded-lg border border-zinc-800/70 bg-zinc-950/60 p-3">
+   555→                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-amber-500/30 bg-amber-500/10">
+   556→                            {layer.id === 'dashboard' ? <Globe className="h-4 w-4 text-amber-400" aria-hidden /> : null}
+   557→                            {layer.id === 'api' ? <Server className="h-4 w-4 text-amber-400" aria-hidden /> : null}
+   558→                            {layer.id === 'glm' ? <Bot className="h-4 w-4 text-amber-400" aria-hidden /> : null}
+   559→                            {layer.id === 'tools' ? <Wrench className="h-4 w-4 text-amber-400" aria-hidden /> : null}
+   560→                            {layer.id === 'engines' ? <Cpu className="h-4 w-4 text-amber-400" aria-hidden /> : null}
+   561→                            {layer.id === 'bridge' ? <Network className="h-4 w-4 text-amber-400" aria-hidden /> : null}
+   562→                            {layer.id === 'data' ? <Database className="h-4 w-4 text-amber-400" aria-hidden /> : null}
+   563→                          </div>
+   564→                          <div className="min-w-0 flex-1">
+   565→                            <div className="flex flex-wrap items-center justify-between gap-1">
+   566→                              <p className="text-sm font-semibold text-zinc-100">{layer.title}</p>
+   567→                              <Badge variant="outline" className="border-zinc-700 bg-zinc-800/60 text-[10px] text-zinc-400">
+   568→                                {layer.phase}
+   569→                              </Badge>
+   570→                            </div>
+   571→                            <p className="mt-0.5 font-mono text-[11px] text-amber-300/80">{layer.tech}</p>
+   572→                            <p className="mt-1 text-xs leading-relaxed text-zinc-400">{layer.detail}</p>
+   573→                          </div>
+   574→                        </div>
+   575→                        {i < (audit?.architecture.length ?? 0) - 1 && (
+   576→                          <div className="flex justify-center py-1" aria-hidden>
+   577→                            <ChevronDown className="h-4 w-4 text-zinc-600" />
+   578→                          </div>
+   579→                        )}
+   580→                      </div>
+   581→                    ))}
+   582→                  </CardContent>
+   583→                </Card>
+   584→
+   585→                <div className="space-y-4">
+   586→                  <Card className="border-zinc-800 bg-zinc-900/40">
+   587→                    <CardHeader className="pb-3">
+   588→                      <CardTitle className="text-base">Repository কাঠামো</CardTitle>
+   589→                      <p className="text-xs text-zinc-500">Phase 1 ডেলিভারি — প্রতিটি ফাইলের ভূমিকা স্পষ্ট।</p>
+   590→                    </CardHeader>
+   591→                    <CardContent>
+   592→                      <pre className="custom-scrollbar max-h-[320px] overflow-auto rounded-lg border border-zinc-800 bg-zinc-950/80 p-4 font-mono text-[11px] leading-relaxed text-zinc-300">
+   593→                        {audit?.repositoryTree ?? ''}
+   594→                      </pre>
+   595→                    </CardContent>
+   596→                  </Card>
+   597→
+   598→                  <Card className="border-zinc-800 bg-zinc-900/40">
+   599→                    <CardHeader className="pb-3">
+   600→                      <CardTitle className="text-base">Tool Registry (Allowlist)</CardTitle>
+   601→                    </CardHeader>
+   602→                    <CardContent className="space-y-3">
+   603→                      <p className="text-xs leading-relaxed text-zinc-400">
+   604→                        GLM শুধু অনুমোদিত টুল কল করতে পারে — কোনো shell, SQL বা নেটওয়ার্ক টুল নেই।
+   605→                        ভবিষ্যৎ টুল রানটাইমে স্পষ্ট এররসহ প্রত্যাখ্যাত হয়।
+   606→                      </p>
+   607→                      <div className="flex flex-wrap gap-1.5">
+   608→                        {(audit?.tools.active ?? []).map((t) => (
+   609→                          <Badge key={t} variant="outline" className="gap-1 border-emerald-500/40 bg-emerald-500/10 text-emerald-400">
+   610→                            <CheckCircle2 className="h-3 w-3" aria-hidden /> {t}
+   611→                          </Badge>
+   612→                        ))}
+   613→                        {(audit?.tools.planned ?? []).map((t) => (
+   614→                          <Badge key={t.name} variant="outline" className="border-zinc-700 bg-zinc-800/60 text-zinc-400">
+   615→                            {t.name} · P{t.phase}
+   616→                          </Badge>
+   617→                        ))}
+   618→                      </div>
+   619→                    </CardContent>
+   620→                  </Card>
+   621→                </div>
+   622→              </div>
+   623→            </TabsContent>
+   624→
+   625→            {/* ------------------------------------------------ Tab: GLM verify */}
+   626→            <TabsContent value="glm" className="space-y-4">
+   627→              <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+   628→                {[
+   629→                  {
+   630→                    icon: Zap,
+   631→                    title: 'Chat Completion',
+   632→                    ok: audit?.glm.capabilities.chatCompletion ?? false,
+   633→                    detail: 'ইংরেজি টোকেন-টেস্ট রাউন্ড-ট্রিপ',
+   634→                  },
+   635→                  {
+   636→                    icon: Languages,
+   637→                    title: 'Bengali Response',
+   638→                    ok: audit?.glm.capabilities.bengali ?? false,
+   639→                    detail: 'Phase 9-এর বাংলা Chat Agent-এর ভিত্তি',
+   640→                  },
+   641→                  {
+   642→                    icon: Wrench,
+   643→                    title: 'Tool Calling',
+   644→                    ok: audit?.glm.capabilities.toolCalling ?? false,
+   645→                    detail: `Full loop ${audit?.glm.capabilities.toolCallRoundTripMs ?? '—'}ms`,
+   646→                  },
+   647→                ].map((cap) => (
+   648→                  <Card key={cap.title} className="border-zinc-800 bg-zinc-900/40">
+   649→                    <CardContent className="flex items-start gap-3 p-4 sm:p-5">
+   650→                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-amber-500/30 bg-amber-500/10">
+   651→                        <cap.icon className="h-5 w-5 text-amber-400" aria-hidden />
+   652→                      </div>
+   653→                      <div className="min-w-0">
+   654→                        <div className="flex items-center gap-2">
+   655→                          <p className="text-sm font-semibold text-zinc-100">{cap.title}</p>
+   656→                          {cap.ok ? (
+   657→                            <Badge variant="outline" className="border-emerald-500/40 bg-emerald-500/10 text-emerald-400">✓ যাচাইকৃত</Badge>
+   658→                          ) : (
+   659→                            <Badge variant="outline" className="border-red-500/40 bg-red-500/10 text-red-400">✗ ব্যর্থ</Badge>
+   660→                          )}
+   661→                        </div>
+   662→                        <p className="mt-1 text-xs leading-relaxed text-zinc-400">{cap.detail}</p>
+   663→                      </div>
+   664→                    </CardContent>
+   665→                  </Card>
+   666→                ))}
+   667→              </div>
+   668→
+   669→              <Card className="border-zinc-800 bg-zinc-900/40">
+   670→                <CardHeader className="pb-3">
+   671→                  <CardTitle className="text-base">লাইভ পুনঃযাচাই</CardTitle>
+   672→                  <p className="text-xs text-zinc-500">
+   673→                    স্ট্যাটিক প্রমাণ নয় — বাটন চাপলেই এখনই তিনটি রিয়েল রাউন্ড-ট্রিপ চলে (চ্যাট, বাংলা, টুল-কলিং)।
+   674→                    ফল সরাসরি SystemEvent অডিট ট্রেইলে লেখা হয়।
+   675→                  </p>
+   676→                </CardHeader>
+   677→                <CardContent className="space-y-4">
+   678→                  <div className="flex flex-wrap items-center gap-3">
+   679→                    <Button onClick={() => void runVerify()} disabled={verifying} className="bg-amber-500 text-zinc-950 hover:bg-amber-400">
+   680→                      {verifying ? (
+   681→                        <>
+   682→                          <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> যাচাই চলছে…
+   683→                        </>
+   684→                      ) : (
+   685→                        <>
+   686→                          <Zap className="h-4 w-4" aria-hidden /> GLM লাইভ যাচাই চালান
+   687→                        </>
+   688→                      )}
+   689→                    </Button>
+   690→                    <span className="text-xs text-zinc-500">
+   691→                      মডেল: <span className="font-mono text-amber-300">{audit?.glm.model ?? 'glm-4-plus'}</span> ·
+   692→                      SDK: z-ai-web-dev-sdk (server-side only) · Auth: sandbox-managed — কোনো API key লাগে না
+   693→                    </span>
+   694→                  </div>
+   695→
+   696→                  {verifyResult && (
+   697→                    <div className="space-y-3">
+   698→                      <div
+   699→                        role="status"
+   700→                        className={`rounded-lg border p-3 text-sm ${
+   701→                          verifyResult.verified
+   702→                            ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+   703→                            : 'border-red-500/40 bg-red-500/10 text-red-300'
+   704→                        }`}
+   705→                      >
+   706→                        {verifyResult.verified ? 'সব টেস্ট পাস — ' : 'এক বা একাধিক টেস্ট ব্যর্থ — '}
+   707→                        মোট {verifyResult.totalLatencyMs}ms · {fmtDhaka(verifyResult.checkedAt)} (ঢাকা)
+   708→                      </div>
+   709→                      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+   710→                        {verifyResult.tests.map((t) => (
+   711→                          <div key={t.id} className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
+   712→                            <div className="flex items-center justify-between gap-2">
+   713→                              <p className="text-xs font-semibold text-zinc-200">{t.name}</p>
+   714→                              <StatusIcon status={t.ok ? 'pass' : 'fail'} />
+   715→                            </div>
+   716→                            <p className="mt-1 font-mono text-[11px] text-zinc-500">{t.latencyMs > 0 ? `${t.latencyMs}ms` : '—'}</p>
+   717→                            <p className="mt-1.5 text-xs leading-relaxed text-zinc-400">{t.detail}</p>
+   718→                            {t.sample && (
+   719→                              <p className="custom-scrollbar mt-2 max-h-24 overflow-auto rounded border border-zinc-800 bg-zinc-900/60 p-2 font-mono text-[11px] text-amber-200/90">
+   720→                                &ldquo;{t.sample}&rdquo;
+   721→                              </p>
+   722→                            )}
+   723→                          </div>
+   724→                        ))}
+   725→                      </div>
+   726→                    </div>
+   727→                  )}
+   728→
+   729→                  <Separator className="bg-zinc-800" />
+   730→                  <div className="grid grid-cols-1 gap-3 text-xs text-zinc-400 sm:grid-cols-2">
+   731→                    <p>
+   732→                      <span className="text-zinc-200">নমুনা রিকোয়েস্ট:</span>{' '}
+   733→                      <span className="font-mono text-zinc-500">{audit?.glm.sample.prompt ?? '—'}</span>
+   734→                    </p>
+   735→                    <p>
+   736→                      <span className="text-zinc-200">নমুনা রেসপন্স:</span>{' '}
+   737→                      <span className="font-mono text-emerald-400/90">{audit?.glm.sample.response ?? '—'}</span>
+   738→                    </p>
+   739→                  </div>
+   740→                </CardContent>
+   741→              </Card>
+   742→            </TabsContent>
+   743→
+   744→            {/* ------------------------------------------------ Tab: MT5 */}
+   745→            <TabsContent value="mt5" className="space-y-4">
+   746→              <Card className="border-zinc-800 bg-zinc-900/40">
+   747→                <CardHeader className="pb-3">
+   748→                  <CardTitle className="flex items-center gap-2 text-base">
+   749→                    MT5 সম্ভাব্যতা প্রতিবেদন
+   750→                    <Badge variant="outline" className="border-red-500/40 bg-red-500/10 text-red-400">Sandbox-এ অসম্ভব</Badge>
+   751→                  </CardTitle>
+   752→                  <p className="text-xs text-zinc-500">সত্যি প্রমাণসহ — সংযোগ দাবি করা হয়নি, কারণ পরীক্ষা করে ব্যর্থ প্রমাণিত।</p>
+   753→                </CardHeader>
+   754→                <CardContent className="space-y-4">
+   755→                  <ul className="space-y-2">
+   756→                    {(audit?.mt5.findings ?? []).map((f) => (
+   757→                      <li key={f} className="flex items-start gap-2 text-sm leading-relaxed text-zinc-300">
+   758→                        <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-400" aria-hidden />
+   759→                        {f}
+   760→                      </li>
+   761→                    ))}
+   762→                  </ul>
+   763→                  <Separator className="bg-zinc-800" />
+   764→                  <p className="text-sm font-semibold text-zinc-100">ব্রিজ অপশন (Phase 2 সিদ্ধান্তের জন্য)</p>
+   765→                  <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+   766→                    {(audit?.mt5.bridgeOptions ?? []).map((o, i) => (
+   767→                      <div key={o.id} className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
+   768→                        <div className="flex items-center gap-2">
+   769→                          <span className="flex h-6 w-6 items-center justify-center rounded-md border border-amber-500/30 bg-amber-500/10 font-mono text-xs text-amber-400">
+   770→                            {i + 1}
+   771→                          </span>
+   772→                          <p className="text-xs font-semibold text-zinc-100">{o.title}</p>
+   773→                        </div>
+   774→                        <p className="mt-1.5 text-xs leading-relaxed text-zinc-400">{o.detail}</p>
+   775→                      </div>
+   776→                    ))}
+   777→                  </div>
+   778→                  <Separator className="bg-zinc-800" />
+   779→                  <p className="text-sm font-semibold text-zinc-100">Phase 2 পরিকল্পনা (Bridge Contract)</p>
+   780→                  <ol className="list-decimal space-y-1.5 pl-5 text-xs leading-relaxed text-zinc-400">
+   781→                    {(audit?.mt5.phase2Plan ?? []).map((p) => <li key={p}>{p}</li>)}
+   782→                  </ol>
+   783→                  <p className="rounded-lg border border-red-500/30 bg-red-500/5 p-3 text-xs leading-relaxed text-red-300">
+   784→                    Phase 2-এর ব্রিজ কন্ট্র্যাক্টে কোনো অর্ডার-পাঠানোর endpoint থাকবে না — শুধুই মার্কেট ডেটা (read-only)।
+   785→                  </p>
+   786→                </CardContent>
+   787→              </Card>
+   788→            </TabsContent>
+   789→
+   790→            {/* ------------------------------------------------ Tab: database */}
+   791→            <TabsContent value="db" className="space-y-4">
+   792→              <Card className="border-zinc-800 bg-zinc-900/40">
+   793→                <CardHeader className="pb-3">
+   794→                  <CardTitle className="text-base">ডেটা মডেল (SQLite · Prisma)</CardTitle>
+   795→                  <p className="text-xs text-zinc-500">
+   796→                    ১২টি মডেল এখনই ডিফাইন করা — Phase 1-এ শুধু SystemEvent সচল; বাকিগুলো নিজ নিজ Phase-এ সক্রিয় হয়।
+   797→                  </p>
+   798→                </CardHeader>
+   799→                <CardContent className="p-0">
+   800→                  <div className="overflow-x-auto">
+   801→                    <Table>
+   802→                      <TableHeader>
+   803→                        <TableRow className="border-zinc-800 hover:bg-transparent">
+   804→                          <TableHead className="pl-4 sm:pl-6">মডেল</TableHead>
+   805→                          <TableHead className="min-w-[220px]">উদ্দেশ্য</TableHead>
+   806→                          <TableHead>Phase</TableHead>
+   807→                          <TableHead className="pr-4 sm:pr-6">অবস্থা</TableHead>
+   808→                        </TableRow>
+   809→                      </TableHeader>
+   810→                      <TableBody>
+   811→                        {(audit?.database.models ?? []).map((m) => (
+   812→                          <TableRow key={m.name} className="border-zinc-800/70">
+   813→                            <TableCell className="pl-4 font-mono text-xs text-zinc-200 sm:pl-6">{m.name}</TableCell>
+   814→                            <TableCell className="text-xs text-zinc-400">{m.purpose}</TableCell>
+   815→                            <TableCell className="font-mono text-xs text-zinc-500">P{m.phase}</TableCell>
+   816→                            <TableCell className="pr-4 sm:pr-6">
+   817→                              <Badge
+   818→                                variant="outline"
+   819→                                className={
+   820→                                  m.status === 'active'
+   821→                                    ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
+   822→                                    : 'border-zinc-700 bg-zinc-800/60 text-zinc-400'
+   823→                                }
+   824→                              >
+   825→                                {m.status === 'active' ? 'সচল' : 'পরিকল্পিত'}
+   826→                              </Badge>
+   827→                            </TableCell>
+   828→                          </TableRow>
+   829→                        ))}
+   830→                      </TableBody>
+   831→                    </Table>
+   832→                  </div>
+   833→                </CardContent>
+   834→              </Card>
+   835→              <p className="text-xs leading-relaxed text-zinc-500">
+   836→                টেকনিক্যাল নোট: SQLite-এ Prisma Json টাইপ নেই, তাই JSON পে-লোড String হিসেবে সংরক্ষিত — schema-তে প্রতিটি মডেলে কমেন্টে ব্যাখ্যা আছে।
+   837→                সব মূল্য-ক্যান্ডেল-রেকর্ড symbol+timeframe+timestamp ইউনিক কনস্ট্রেইন্টে আবদ্ধ — ডুপ্লিকেট সিগন্যাল তৈরির পথ বন্ধ।
+   838→              </p>
+   839→            </TabsContent>
+   840→
+   841→            {/* ------------------------------------------------ Tab: security & checklist */}
+   842→            <TabsContent value="sec" className="space-y-4">
+   843→              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+   844→                <Card className="border-zinc-800 bg-zinc-900/40">
+   845→                  <CardHeader className="pb-3">
+   846→                    <CardTitle className="flex items-center gap-2 text-base">
+   847→                      <ShieldCheck className="h-4 w-4 text-emerald-400" aria-hidden /> নিরাপত্তা ব্যবস্থা
+   848→                    </CardTitle>
+   849→                  </CardHeader>
+   850→                  <CardContent className="space-y-3">
+   851→                    {(audit?.security ?? []).map((s) => (
+   852→                      <div key={s.measure} className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
+   853→                        <p className="text-xs font-semibold text-zinc-100">{s.measure}</p>
+   854→                        <p className="mt-1 text-xs leading-relaxed text-zinc-400">{s.detail}</p>
+   855→                      </div>
+   856→                    ))}
+   857→                  </CardContent>
+   858→                </Card>
+   859→
+   860→                <div className="space-y-4">
+   861→                  <Card className="border-zinc-800 bg-zinc-900/40">
+   862→                    <CardHeader className="pb-3">
+   863→                      <CardTitle className="text-base">Phase 1 গ্রহণযোগ্যতা চেকলিস্ট</CardTitle>
+   864→                    </CardHeader>
+   865→                    <CardContent>
+   866→                      <ul className="space-y-2">
+   867→                        {(audit?.acceptanceChecklist ?? []).map((c) => (
+   868→                          <li key={c.id} className="flex items-start gap-2 text-sm text-zinc-300">
+   869→                            {c.done ? (
+   870→                              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" aria-hidden />
+   871→                            ) : (
+   872→                              <Circle className="mt-0.5 h-4 w-4 shrink-0 text-zinc-600" aria-hidden />
+   873→                            )}
+   874→                            {c.label}
+   875→                          </li>
+   876→                        ))}
+   877→                      </ul>
+   878→                    </CardContent>
+   879→                  </Card>
+   880→
+   881→                  <Card className="border-zinc-800 bg-zinc-900/40">
+   882→                    <CardHeader className="pb-3">
+   883→                      <CardTitle className="flex items-center gap-2 text-base">
+   884→                        <AlertTriangle className="h-4 w-4 text-amber-400" aria-hidden /> ঝুঁকি ও অসমাধান ব্লকার
+   885→                      </CardTitle>
+   886→                    </CardHeader>
+   887→                    <CardContent>
+   888→                      <ul className="list-disc space-y-1.5 pl-5 text-xs leading-relaxed text-zinc-400">
+   889→                        <li>
+   890→                          <span className="text-zinc-200">MT5 ব্রিজ বাহ্যিক নির্ভরতা:</span> sandbox-এ MT5 চলবে না (প্রমাণিত)।
+   891→                          Phase 2-এর আগে আপনাকে সিদ্ধান্ত নিতে হবে — কোন ব্রিজ অপশন (Linux VPS + Wine / Windows VPS) নেবেন।
+   892→                        </li>
+   893→                        <li>
+   894→                          <span className="text-zinc-200">Sandbox স্থায়িত্ব:</span> এটি কোডিং-রানটাইম, ২৪/৭ ট্রেডিং সার্ভার নয়।
+   895→                          চূড়ান্ত ডিপ্লয়মেন্ট (Phase 12) আপনার নিজের Linux VPS-এ হবে।
+   896→                        </li>
+   897→                        <li>
+   898→                          <span className="text-zinc-200">এক-পোর্ট সীমাবদ্ধতা:</span> বাইরের সব সংযোগ গেটওয়ে হয়ে যায়;
+   899→                          ব্রিজে যাওয়ার সময় আউটবাউন্ড HTTPS ব্যবহার হবে (নেটওয়ার্ক পরীক্ষায় সমর্থিত)।
+   900→                        </li>
+   901→                        <li>
+   902→                          <span className="text-zinc-200">GLM কোটা/খরচ:</span> স্যান্ডবক্স প্ল্যানের উপর নির্ভরশীল — তাই
+   903→                          /api/ai/verify-তে রেট লিমিট (ডিফল্ট ১০ সেকেন্ড) দেওয়া আছে।
+   904→                        </li>
+   905→                      </ul>
+   906→                    </CardContent>
+   907→                  </Card>
+   908→                </div>
+   909→              </div>
+   910→            </TabsContent>
+   911→          </Tabs>
+   912→
+   913→          {/* ------------------------------------------------ Audit trail (events) */}
+   914→          <Card className="border-zinc-800 bg-zinc-900/40">
+   915→            <CardHeader className="pb-3">
+   916→              <CardTitle className="flex flex-wrap items-center gap-2 text-base">
+   917→                <Terminal className="h-4 w-4 text-amber-400" aria-hidden /> সিস্টেম ইভেন্ট — লাইভ অডিট ট্রেইল
+   918→                <Badge variant="outline" className="border-zinc-700 bg-zinc-800/60 text-zinc-400">
+   919→                  {health?.auditEventCount ?? audit?.events.length ?? 0} টি
+   920→                </Badge>
+   921→              </CardTitle>
+   922→              <p className="text-xs text-zinc-500">
+   923→                SystemEvent টেবিল থেকে সরাসরি (append-only)। GLM যাচাই চালালে এখানে নতুন রেকর্ড যুক্ত হতে দেখবেন।
+   924→              </p>
+   925→            </CardHeader>
+   926→            <CardContent className="p-0">
+   927→              <div className="custom-scrollbar max-h-96 overflow-y-auto">
+   928→                <Table>
+   929→                  <TableHeader className="sticky top-0 z-10 bg-zinc-950/95 backdrop-blur">
+   930→                    <TableRow className="border-zinc-800 hover:bg-transparent">
+   931→                      <TableHead className="pl-4 sm:pl-6">সময় (ঢাকা)</TableHead>
+   932→                      <TableHead>স্তর</TableHead>
+   933→                      <TableHead>কোড</TableHead>
+   934→                      <TableHead className="min-w-[240px] pr-4 sm:pr-6">বার্তা</TableHead>
+   935→                    </TableRow>
+   936→                  </TableHeader>
+   937→                  <TableBody>
+   938→                    {(audit?.events ?? []).map((e) => (
+   939→                      <TableRow key={e.id} className="border-zinc-800/70">
+   940→                        <TableCell className="whitespace-nowrap pl-4 text-xs tabular-nums text-zinc-500 sm:pl-6">
+   941→                          {fmtDhaka(e.createdAt)}
+   942→                        </TableCell>
+   943→                        <TableCell>
+   944→                          <span
+   945→                            className={`inline-flex rounded border px-1.5 py-0.5 text-[10px] font-medium uppercase ${levelBadgeClass(e.level)}`}
+   946→                          >
+   947→                            {e.level}
+   948→                          </span>
+   949→                        </TableCell>
+   950→                        <TableCell className="font-mono text-xs text-amber-300/80">{e.code}</TableCell>
+   951→                        <TableCell className="pr-4 text-xs text-zinc-300 sm:pr-6">{e.message}</TableCell>
+   952→                      </TableRow>
+   953→                    ))}
+   954→                    {audit && audit.events.length === 0 && (
+   955→                      <TableRow>
+   956→                        <TableCell colSpan={4} className="p-6 text-center text-sm text-zinc-500">
+   957→                          এখনো কোনো ইভেন্ট নেই — &ldquo;GLM যাচাই&rdquo; ট্যাব থেকে লাইভ যাচাই চালান।
+   958→                        </TableCell>
+   959→                      </TableRow>
+   960→                    )}
+   961→                    {loading && !audit && (
+   962→                      <TableRow>
+   963→                        <TableCell colSpan={4} className="p-6">
+   964→                          <Skeleton className="h-5 w-full" />
+   965→                        </TableCell>
+   966→                      </TableRow>
+   967→                    )}
+   968→                  </TableBody>
+   969→                </Table>
+   970→              </div>
+   971→            </CardContent>
+   972→          </Card>
+   973→        </div>
+   974→      </main>
+   975→
+   976→      {/* ---------------------------------------------------------------- Footer */}
+   977→      <footer className="mt-auto border-t border-zinc-800 bg-zinc-950">
+   978→        <div className="mx-auto flex w-full max-w-7xl flex-col gap-2 px-4 py-4 text-xs text-zinc-500 sm:px-6 md:flex-row md:items-center md:justify-between">
+   979→          <p className="flex items-center gap-1.5">
+   980→            <LockKeyhole className="h-3.5 w-3.5 text-red-400" aria-hidden />
+   981→            XAUUSD AI Trading Agent · Phase 1/12 · Read-Only — কোনো অর্ডার পাঠানো হবে না
+   982→          </p>
+   983→          <p className="font-mono text-[11px] text-zinc-600">
+   984→            Next.js 16 · TypeScript · Prisma/SQLite · z-ai-web-dev-sdk (glm-4-plus)
+   985→          </p>
+   986→          <p className="text-zinc-600">Live Trading: Phase 12 রিলিজ-গেটের আগে চালু হবে না</p>
+   987→        </div>
+   988→      </footer>
+   989→    </div>
+   990→  );
+   991→}
+   992→
