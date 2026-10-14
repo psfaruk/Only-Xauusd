@@ -1,0 +1,165 @@
+// ============================================================================
+// XAUUSD AI Trading Agent — Prisma Schema (Foundation, Phase 1)
+// ----------------------------------------------------------------------------
+// Design notes:
+// - SQLite provider (sandbox constraint). JSON payloads are stored as String
+//   because Prisma does not support the Json type on SQLite.
+// - Tables for market data / analysis / signals / risk / execution are DEFINED
+//   here as the architectural foundation, but only `SystemEvent` is actively
+//   written by Phase 1 code. Each model is tagged with the phase that will
+//   activate it. No execution-related row is ever written before Phase 11.
+// ============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// ACTIVE IN PHASE 1 — audit logging & system events
+// ============================================================================
+
+/// Central audit trail. Every module (GLM verify, health, future engines)
+/// records machine-readable events here. Never store secrets in `meta`.
+model SystemEvent {
+  id        String   @id @default(cuid())
+  level     String // debug | info | warn | error
+  category  String // app | health | glm | audit | market | analysis | signal | risk | approval | execution | bridge
+  code      String // machine-readable, e.g. GLM_VERIFY_OK
+  message   String
+  meta      String? // JSON string, secret-masked by logger
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([category, level])
+}
+
+// ============================================================================
+// PHASE 3 (planned) — market data persistence
+// ============================================================================
+
+model MarketCandle {
+  id        String   @id @default(cuid())
+  symbol    String
+  timeframe String // M5 | M15 | H1 | H4
+  timestamp DateTime
+  open      Float
+  high      Float
+  low       Float
+  close     Float
+  volume    Float
+  source    String // mt5-bridge | synthetic
+  quality   String   @default("ok") // ok | stale | suspicious
+  createdAt DateTime @default(now())
+
+  @@unique([symbol, timeframe, timestamp])
+  @@index([symbol, timeframe, timestamp])
+}
+
+model MarketTick {
+  id        String   @id @default(cuid())
+  symbol    String
+  bid       Float
+  ask       Float
+  spread    Float
+  timestamp DateTime
+  source    String
+  createdAt DateTime @default(now())
+
+  @@index([symbol, timestamp])
+}
+
+// ============================================================================
+// PHASE 4-5 (planned) — deterministic analysis & signals
+// ============================================================================
+
+model AnalysisRun {
+  id            String    @id @default(cuid())
+  symbol        String
+  engineVersion String
+  timeframes    String // JSON: which timeframes were analysed
+  input         String // JSON: exact inputs used (reproducibility)
+  result        String // JSON: deterministic analysis output
+  status        String    @default("pending") // pending | completed | failed
+  startedAt     DateTime  @default(now())
+  completedAt   DateTime?
+}
+
+model Signal {
+  id         String    @id @default(cuid())
+  setupId     String    @unique
+  analysisId  String?
+  symbol      String
+  direction   String // BUY | SELL | WAIT
+  entry       Float?
+  entryLow    Float?
+  entryHigh   Float?
+  stopLoss    Float?
+  takeProfit  Float?
+  riskReward  Float?
+  expiry      DateTime?
+  status      String    @default("active") // active | expired | rejected | executed
+  reason      String? // human-readable WAIT/block reason
+  createdAt   DateTime  @default(now())
+
+  @@index([symbol, status, createdAt])
+}
+
+// ============================================================================
+// PHASE 6 (planned) — GLM multi-agent reviews
+// ============================================================================
+
+model AiReview {
+  id         String   @id @default(cuid())
+  signalId   String?
+  analysisId String?
+  agent      String // orchestrator | analyst | setup_reviewer | critic | risk_reviewer
+  verdict    String // approve | reject | wait
+  reasoning  String
+  meta       String?
+  createdAt  DateTime @default(now())
+}
+
+// ============================================================================
+// PHASE 7 (planned) — deterministic risk gate
+// ============================================================================
+
+model RiskCheck {
+  id        String   @id @default(cuid())
+  signalId  String
+  checks    String // JSON: [{ rule, passed, detail }]
+  passed    Boolean
+  createdAt DateTime @default(now())
+
+  @@index([signalId])
+}
+
+// ============================================================================
+// PHASE 11 (planned) — approval-based execution (LOCKED until Phase 11 gate)
+// No row is ever written here by Phase 1 code.
+// ============================================================================
+
+model TradeApproval {
+  id        String    @id @default(cuid())
+  signalId  String
+  status    String    @default("pending") // pending | approved | rejected | expired
+  note      String?
+  createdAt DateTime  @default(now())
+  decidedAt DateTime?
+  expiresAt DateTime?
+}
+
+model ExecutionLog {
+  id        String   @id @default(cuid())
+  signalId  String
+  request   String // JSON sent to bridge (never contains account secrets)
+  result    String // JSON broker response
+  status    String // sent | filled | rejected | failed
+  createdAt DateTime @default(now())
+
+  @@index([signalId])
+}
