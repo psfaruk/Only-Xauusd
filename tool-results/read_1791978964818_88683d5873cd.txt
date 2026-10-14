@@ -1,0 +1,938 @@
+     1→/**
+     2→ * MT5 WebSocket protocol client — Exness-MT5Trial6 direct connection.
+     3→ *
+     4→ * Speaks the MT5 web-terminal binary protocol over wss://<gateway>:443/terminal
+     5→ * (AES-256-CBC framed). This is the same protocol the official Exness web
+     6→ * terminal uses — no MetaTrader terminal/PC required.
+     7→ *
+     8→ * Reverse-engineering reference:
+     9→ *   https://github.com/leon-git-21/MT5-Client-Reverse-Engineer
+    10→ * Framing per WS binary message:
+    11→ *   [payload_len:u32 LE][version:u32 LE = 1][AES-256-CBC ciphertext]
+    12→ * Plaintext command:   [rnd:u8][rnd:u8][cmd_id:u16 LE][payload]
+    13→ * Plaintext response:  [tag:u16 LE][cmd_id:u16 LE][res_code:u8][body]
+    14→ */
+    15→
+    16→import { createCipheriv, createDecipheriv } from "node:crypto";
+    17→import { gunzipSync, inflateSync, inflateRawSync } from "node:zlib";
+    18→
+    19→// ── Static web-terminal AUTH key (public, embedded in every MT5 web bundle) ──
+    20→const STATIC_KEY = Buffer.from(
+    21→  "02de02a1a65cc794684fcbea1ecb0fd74ae657e43662c11eee885d2fd64f4964",
+    22→  "hex",
+    23→);
+    24→const ZERO_IV = Buffer.alloc(16);
+    25→
+    26→export const TF_CODE: Record<string, number> = {
+    27→  M1: 1, M5: 5, M15: 15, M30: 30,
+    28→  H1: 16385, H4: 16388, D1: 16408, W1: 32769, MN1: 49153,
+    29→};
+    30→
+    31→export const CMD = {
+    32→  AUTH: 0, ACCOUNT: 3, POSITIONS: 4, DEALS: 5, SUBSCRIBE: 7, QUOTES: 8,
+    33→  CANDLES: 11, TRADE: 12, TRADE_EVENT: 19, LOGIN: 28, SYMBOLS_GZ: 34,
+    34→  HEARTBEAT: 51,
+    35→} as const;
+    36→
+    37→export interface Mt5Candle {
+    38→  time: number; // unix seconds, broker server time
+    39→  open: number; high: number; low: number; close: number;
+    40→  tickVolume: number; spread: number;
+    41→}
+    42→export interface LiveQuote { symbolId: number; timeSec: number; bidRaw: number; askRaw: number; }
+    43→export interface SymbolInfo { id: number; digits: number; name: string; }
+    44→
+    45→/** v16 — broker-side account/trade push (cmd 14 / 19 / 22). These arrive the
+    46→ *  MOMENT something changes at the broker (any connection: this app, the
+    47→ *  MT5 terminal, the server's own SL/TP execution). kind="trade" carries the
+    48→ *  parsed cmd-19 result (Exness stamps "sl"/"tp" in the closing deal's
+    49→ *  comment — classification is possible at push latency); the other two are
+    50→ *  bare "something changed" pokes. */
+    51→export interface BrokerPush {
+    52→  kind: "trade" | "pos_update" | "acct_update";
+    53→  retcode?: number;
+    54→  order?: number;
+    55→  positionId?: number;
+    56→  deal?: number;
+    57→  symbol?: string;
+    58→  volume?: number;
+    59→  price?: number;
+    60→  comment?: string;
+    61→  sl?: number;
+    62→  tp?: number;
+    63→}
+    64→export interface AccountInfo {
+    65→  login: number; balance: number; equity: number;
+    66→  currency: string; group: string; server: string;
+    67→}
+    68→
+    69→// ── trading types ──
+    70→export type TradeSide = "buy" | "sell";
+    71→
+    72→export interface TradeResult {
+    73→  retcode: number;      // 10009 = TRADE_ACCEPTED (final success)
+    74→  deal: number;         // deal ticket
+    75→  order: number;        // order ticket — USE THIS as position id for close/modify
+    76→  volumeRaw: number;    // executed volume (raw units)
+    77→  price: number;        // execution price
+    78→  comment: string;
+    79→}
+    80→
+    81→export interface Mt5Position {
+    82→  id: number;           // position id
+    83→  order: number;        // order ticket (== id on Exness)
+    84→  symbol: string;
+    85→  side: TradeSide;
+    86→  openTime: number;     // epoch ms
+    87→  openPrice: number;
+    88→  sl: number;
+    89→  tp: number;
+    90→  lots: number;
+    91→  profit: number;
+    92→  swap: number;
+    93→  comment: string;
+    94→  magic: number;
+    95→}
+    96→
+    97→/** A PENDING (limit/stop) order — cmd-4's trailing section.
+    98→ *  Layout VERIFIED LIVE 2026-09-30 (probe-p5): place → parse → cancel. */
+    99→export interface Mt5Order {
+   100→  ticket: number;       // order ticket
+   101→  symbol: string;
+   102→  orderType: number;    // 0=BUY 1=SELL 2=BUY_LIMIT 3=SELL_LIMIT 4=BUY_STOP 5=SELL_STOP (6/7 stop-limit)
+   103→  timeSetup: number;    // epoch ms
+   104→  timeExpiration: number; // epoch sec (0 = GTC)
+   105→  price: number;        // limit/stop price
+   106→  priceTrigger: number; // stop-limit trigger
+   107→  priceCurrent: number; // current market
+   108→  sl: number;
+   109→  tp: number;
+   110→  lots: number;         // remaining volume (lots)
+   111→  lotsInitial: number;
+   112→  state: number;        // 1=placed/active, 2=canceled, 4=filled, 5=rejected
+   113→  positionId: number;   // linked position once filled
+   114→  comment: string;
+   115→}
+   116→export const ORDER_TYPE_NAMES: Record<number, string> = {
+   117→  0: "BUY", 1: "SELL", 2: "BUY LIMIT", 3: "SELL LIMIT", 4: "BUY STOP", 5: "SELL STOP",
+   118→  6: "BUY STOP-LIMIT", 7: "SELL STOP-LIMIT",
+   119→};
+   120→
+   121→export interface Mt5Deal {
+   122→  deal: number;
+   123→  order: number;
+   124→  positionId: number;
+   125→  symbol: string;
+   126→  side: TradeSide;
+   127→  entry: "in" | "out" | "inout" | "outby";
+   128→  time: number;         // epoch ms
+   129→  price: number;
+   130→  volume: number;       // lots
+   131→  profit: number;
+   132→  commission: number;
+   133→  swap: number;
+   134→  comment: string;
+   135→}
+   136→
+   137→export const TRADE_RETCODES: Record<number, string> = {
+   138→  0: "SUCCESS", 10002: "ACK (processing)", 10009: "ACCEPTED",
+   139→  10013: "INVALID_PARAMETERS", 10014: "INVALID_VOLUME", 10015: "INVALID_PRICE",
+   140→  10016: "INVALID_STOPS", 10017: "TRADE_DISABLED", 10018: "MARKET_CLOSED",
+   141→  10019: "NO_MONEY", 10023: "NO_RESULT", 10030: "INVALID_TRADE_ACTION",
+   142→  10036: "POSITION_NOT_EXISTS",
+   143→};
+   144→const MT5_DEBUG = !!process.env.MT5_DEBUG;
+   145→
+   146→// ── trading helpers ──
+   147→const OP_SIZE = 248;
+   148→const AP_SIZE = 128;
+   149→const PP_SIZE = 4 + OP_SIZE + AP_SIZE; // 380
+   150→const POS_SIZE = 344;
+   151→const DEAL_SIZE = 356;
+   152→const ORDER_SIZE = 356;
+   153→const LOTS_RAW = 100_000_000; // 0.01 lots = 1,000,000 raw (verified vs P/L math)
+   154→
+   155→function buildOp(opts: {
+   156→  action: number;          // 3=market, 5=pending, 6=modify-deal, 7=modify-order, 8=cancel
+   157→  symbol: string;
+   158→  volumeRaw: number;
+   159→  digits: number;
+   160→  type: number;            // 0=buy, 1=sell (2..7 pending variants)
+   161→  filling: number;         // 0=FOK, 1=IOC, 2=RETURN
+   162→  price: number;
+   163→  sl: number;
+   164→  tp: number;
+   165→  order?: number;          // order ticket (cancel/modify-order)
+   166→  position?: number;       // position/order ticket (close/modify-deal)
+   167→  comment?: string;
+   168→  deviation?: number;      // v12: max slippage in POINTS (0 = broker default)
+   169→}): Buffer {
+   170→  const op = Buffer.alloc(OP_SIZE);
+   171→  op.writeUInt32LE(0, 0);                                         // action_id = 0 (ALWAYS for new orders — non-zero → 10013)
+   172→  op.writeUInt32LE(opts.action, 4);                               // trade_action
+   173→  Buffer.from(opts.symbol, "utf16le").copy(op, 8);                // symbol (64B)
+   174→  op.writeBigUInt64LE(BigInt(Math.max(0, Math.round(opts.volumeRaw))), 72); // volume
+   175→  op.writeUInt32LE(opts.digits, 80);                              // digits
+   176→  op.writeBigUInt64LE(BigInt(opts.order ?? 0), 84);               // trade_order
+   177→  op.writeUInt32LE(opts.type, 92);                                // trade_type
+   178→  op.writeUInt32LE(opts.filling, 96);                             // type_filling
+   179→  op.writeUInt32LE(0, 100);                                       // type_time GTC
+   180→  op.writeUInt32LE(2, 104);                                       // type_flags = new order
+   181→  op.writeUInt32LE(0, 108);                                       // type_reason
+   182→  op.writeDoubleLE(opts.price, 112);                              // price_order
+   183→  op.writeDoubleLE(0, 120);                                       // price_trigger
+   184→  op.writeDoubleLE(opts.sl, 128);                                 // SL
+   185→  op.writeDoubleLE(opts.tp, 136);                                 // TP
+   186→  op.writeUInt32LE(Math.max(0, Math.min(1000, Math.round(opts.deviation ?? 0))), 144); // deviation (v12)
+   187→  op.writeDoubleLE(0, 148);                                       // price_top
+   188→  op.writeDoubleLE(0, 156);                                       // price_bottom
+   189→  if (opts.comment) Buffer.from(opts.comment.slice(0, 31), "utf16le").copy(op, 164); // comment 64B
+   190→  op.writeBigUInt64LE(BigInt(opts.position ?? 0), 228);           // trade_position
+   191→  op.writeBigUInt64LE(0n, 236);                                   // position_by
+   192→  op.writeUInt32LE(0, 244);                                       // expiration
+   193→  return op;
+   194→}
+   195→
+   196→interface PendingTrade {
+   197→  resolve: (r: TradeResult) => void;
+   198→  timer: ReturnType<typeof setTimeout>;
+   199→  op: Buffer;               // the request Op — used to match OUR event among account-wide pushes
+   200→  label: string;            // human tag for debug logs
+   201→}
+   202→
+   203→// ── crypto ──
+   204→function aesEncrypt(key: Buffer, plaintext: Buffer): Buffer {
+   205→  const pad = 16 - (plaintext.length % 16);
+   206→  const padded = Buffer.concat([plaintext, Buffer.alloc(pad, pad)]);
+   207→  return createCipheriv("aes-256-cbc", key, ZERO_IV).update(padded);
+   208→}
+   209→function aesDecrypt(key: Buffer, ciphertext: Buffer): Buffer {
+   210→  const dec = createDecipheriv("aes-256-cbc", key, ZERO_IV);
+   211→  const pt = Buffer.concat([dec.update(ciphertext), dec.final()]);
+   212→  const p = pt[pt.length - 1];
+   213→  if (p >= 1 && p <= 16 && pt.subarray(pt.length - p).every((b) => b === p)) {
+   214→    return pt.subarray(0, pt.length - p);
+   215→  }
+   216→  return pt;
+   217→}
+   218→
+   219→// ── framing ──
+   220→function frame(encrypted: Buffer): Buffer {
+   221→  const hdr = Buffer.alloc(8);
+   222→  hdr.writeUInt32LE(encrypted.length, 0);
+   223→  hdr.writeUInt32LE(1, 4);
+   224→  return Buffer.concat([hdr, encrypted]);
+   225→}
+   226→function buildCommand(cmdId: number, payload: Buffer): Buffer {
+   227→  const cmd = Buffer.alloc(4 + payload.length);
+   228→  cmd[0] = (Math.random() * 256) | 0;
+   229→  cmd[1] = (Math.random() * 256) | 0;
+   230→  cmd.writeUInt16LE(cmdId, 2);
+   231→  payload.copy(cmd, 4);
+   232→  return cmd;
+   233→}
+   234→interface Mt5Response { tag: number; cmdId: number; resCode: number; body: Buffer; }
+   235→function parseResponse(plain: Buffer): Mt5Response | null {
+   236→  if (plain.length < 5) return null;
+   237→  return {
+   238→    tag: plain.readUInt16LE(0),
+   239→    cmdId: plain.readUInt16LE(2),
+   240→    resCode: plain[4],
+   241→    body: plain.subarray(5),
+   242→  };
+   243→}
+   244→function utf16(buf: Buffer): string {
+   245→  const s = buf.toString("utf16le");
+   246→  const nul = s.indexOf("\u0000");
+   247→  return nul >= 0 ? s.slice(0, nul) : s;
+   248→}
+   249→
+   250→export class Mt5WsClient {
+   251→  private ws: WebSocket;
+   252→  private sessionKey: Buffer | null = null;
+   253→  private waiters = new Map<number, Array<(r: Mt5Response) => void>>();
+   254→  private queue: Promise<unknown> = Promise.resolve();
+   255→  private consecFails = 0; // consecutive protocol failures → force reconnect
+   256→  private consecFailsByCmd = new Map<number, number>(); // v11: per-cmdId wedge counters
+   257→  private quoteHandler: ((q: LiveQuote) => void) | null = null;
+   258→  private onCloseCb: (() => void) | null = null;
+   259→  // trading: cmd-19 trade events matched FIFO (trades are serialized)
+   260→  private pendingTrades: PendingTrade[] = [];
+   261→  private tradeEventHandler: ((ev: BrokerPush) => void) | null = null;
+   262→  closed = false;
+   263→  readonly host: string;
+   264→  lastRecvAt = Date.now();
+   265→
+   266→  private constructor(ws: WebSocket, host: string) {
+   267→    this.ws = ws;
+   268→    this.host = host;
+   269→  }
+   270→
+   271→  static async connect(host: string, timeoutMs = 8000): Promise<Mt5WsClient> {
+   272→    const url = `wss://${host}:443/terminal`;
+   273→    // v12 SECURITY (the audit's Critical #4): we used to dial the gateway by
+   274→    // IP with rejectUnauthorized:false — a MITM on the path could harvest the
+   275→    // MT5 login/password and silently rewrite trades. The gateways present a
+   276→    // *.exwebterm.com certificate, so we now send an SNI inside that domain
+   277→    // and VERIFY the chain. Escape hatch (only if a gateway ever serves a
+   278→    // mismatched cert): MT5_TLS_INSECURE=1 re-enables the old behaviour and
+   279→    // logs a loud warning.
+   280→    const insecure = process.env.MT5_TLS_INSECURE === "1";
+   281→    if (insecure) {
+   282→      console.warn("[mt5-client] ⚠ MT5_TLS_INSECURE=1 — certificate verification DISABLED (emergency mode)");
+   283→    }
+   284→    const ws = new WebSocket(url, {
+   285→      headers: {
+   286→        Origin: `https://${host}:443`,
+   287→        "User-Agent":
+   288→          "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+   289→      },
+   290→      ...(insecure
+   291→        ? { tls: { rejectUnauthorized: false } }
+   292→        : { servername: "mt5.exwebterm.com", tls: { rejectUnauthorized: true } }),
+   293→    } as any) as WebSocket;
+   294→    ws.binaryType = "arraybuffer";
+   295→
+   296→    const client = await new Promise<Mt5WsClient>((resolve, reject) => {
+   297→      const t = setTimeout(
+   298→        () => reject(new Error(`WS connect timeout (${url})`)),
+   299→        timeoutMs,
+   300→      );
+   301→      ws.onopen = () => { clearTimeout(t); resolve(new Mt5WsClient(ws, host)); };
+   302→      ws.onerror = () => { clearTimeout(t); reject(new Error(`WS connect failed (${url})`)); };
+   303→    });
+   304→
+   305→    ws.onmessage = (ev: MessageEvent) => {
+   306→      client.lastRecvAt = Date.now();
+   307→      if (!(ev.data instanceof ArrayBuffer)) return;
+   308→      const raw = Buffer.from(ev.data);
+   309→      if (raw.length <= 8) return;
+   310→      const key = client.sessionKey ?? STATIC_KEY;
+   311→      let plain: Buffer;
+   312→      try { plain = aesDecrypt(key, raw.subarray(8)); } catch { return; }
+   313→      const resp = parseResponse(plain);
+   314→      if (!resp) return;
+   315→      if (resp.cmdId === CMD.QUOTES) { client.emitQuotes(resp.body); return; }
+   316→      // ── trading pushes ──
+   317→      if (resp.cmdId === CMD.TRADE_EVENT) { client.handleTradeEvent(resp.body); return; }
+   318→      if (resp.cmdId === 22 || resp.cmdId === 14) {
+   319→        client.tradeEventHandler?.({ kind: resp.cmdId === 22 ? "pos_update" : "acct_update" });
+   320→        return;
+   321→      }
+   322→      const q = client.waiters.get(resp.cmdId);
+   323→      if (q && q.length) {
+   324→        q.shift()!(resp);
+   325→        if (!q.length) client.waiters.delete(resp.cmdId);
+   326→      }
+   327→    };
+   328→    ws.onclose = () => {
+   329→      if (!client.closed) {
+   330→        client.closed = true;
+   331→        client.onCloseCb?.();
+   332→      }
+   333→    };
+   334→    ws.onerror = () => {
+   335→      if (!client.closed) {
+   336→        client.closed = true;
+   337→        try { ws.close(); } catch {}
+   338→        client.onCloseCb?.();
+   339→      }
+   340→    };
+   341→    return client;
+   342→  }
+   343→
+   344→  get isOpen() { return !this.closed && this.ws.readyState === WebSocket.OPEN; }
+   345→  onClose(cb: () => void) { this.onCloseCb = cb; }
+   346→  onQuotes(h: (q: LiveQuote) => void) { this.quoteHandler = h; }
+   347→  /** v16: the full broker push payload — everything already parsed off the
+   348→   *  cmd-19 Op/Ap echo, forwarded so the manager/trader can mirror account
+   349→   *  state on the BROKER'S word (event-first) instead of polling.
+   350→   *  kind="trade"   → cmd 19 (a trade executed: open/close/modify, ANY connection)
+   351→   *  kind="pos_update" → cmd 22 (position list changed at the broker)
+   352→   *  kind="acct_update" → cmd 14 (account state changed: balance/equity) */
+   353→  onTradeEvent(h: (ev: BrokerPush) => void) { this.tradeEventHandler = h; }
+   354→
+   355→  /** cmd 19 push — 380B: [seq u32][Op 248B][Ap 128B].
+   356→   *
+   357→   *  CRITICAL (Sep-29 incident, root cause): cmd-19 pushes are ACCOUNT-WIDE —
+   358→   *  they fire for trades from OTHER connections on the same login AND for
+   359→   *  server-side SL/TP closes. Matching them to pending requests FIFO stole
+   360→   *  foreign results (a failed modify's 10036 answered an unrelated open;
+   361→   *  a server-side close's 10009 "confirmed" a close that never executed →
+   362→   *  phantom settles → re-adopt churn).
+   363→   *
+   364→   *  FIX: the event carries an Op echo of the request that produced it. Match
+   365→   *  the event to the pending request by IDENTITY (action, symbol, volume,
+   366→   *  type, position ticket). Unmatched non-ACK events are FOREIGN — they go
+   367→   *  to the handler only and never resolve anything. */
+   368→  private handleTradeEvent(body: Buffer) {
+   369→    try {
+   370→      if (body.length < PP_SIZE) return;
+   371→      const apOff = 4 + OP_SIZE;                     // 252
+   372→      const retcode = body.readUInt32LE(apOff);
+   373→      const order = Number(body.readBigInt64LE(apOff + 12));
+   374→      const result: TradeResult = {
+   375→        retcode,
+   376→        deal: Number(body.readBigInt64LE(apOff + 4)),
+   377→        order,
+   378→        volumeRaw: Number(body.readBigInt64LE(apOff + 20)),
+   379→        price: body.readDoubleLE(apOff + 28),
+   380→        comment: utf16(body.subarray(apOff + 64, apOff + 128)),
+   381→      };
+   382→      // Op echo sits right after the 4-byte seq
+   383→      const opEcho = body.subarray(4, 4 + OP_SIZE);
+   384→      const ev = {
+   385→        action: opEcho.readUInt32LE(4),
+   386→        symbol: utf16(opEcho.subarray(8, 72)),
+   387→        volumeRaw: Number(opEcho.readBigUInt64LE(72)),
+   388→        type: opEcho.readUInt32LE(92),
+   389→        position: Number(opEcho.readBigUInt64LE(228)),
+   390→        sl: opEcho.readDoubleLE(128),
+   391→        tp: opEcho.readDoubleLE(136),
+   392→      };
+   393→      if (MT5_DEBUG) {
+   394→        // rate-limited: a stuck foreign source can push the same dead-position
+   395→        // event dozens of times per second — one line per 10s per retcode
+   396→        const nowMs = Date.now();
+   397→        const dbgKey = (globalThis as unknown as { __mt5DbgAt?: number; __mt5DbgRc?: number });
+   398→        const sameRc = dbgKey.__mt5DbgRc === retcode;
+   399→        if (!sameRc || nowMs - (dbgKey.__mt5DbgAt ?? 0) > 10_000) {
+   400→          dbgKey.__mt5DbgAt = nowMs;
+   401→          dbgKey.__mt5DbgRc = retcode;
+   402→          console.log(
+   403→            `[mt5] cmd19 rc=${retcode} ${TRADE_RETCODES[retcode] ?? "?"} echo{sym=${ev.symbol} act=${ev.action} type=${ev.type} vol=${ev.volumeRaw / 1e8} pos=${ev.position} order=${order} price=${result.price}` +
+   404→            ` sl=${ev.sl} tp=${ev.tp}} pend=${this.pendingTrades.length}${this.pendingTrades.length ? ` head=${this.pendingTrades[0].label}` : ""}`,
+   405→          );
+   406→        }
+   407→      }
+   408→      if (retcode === 10002) return; // ACK — not a result
+   409→
+   410→ // resolve only the pending request whose Op IDENTITY matches this event
+   411→      let matched = -1;
+   412→      for (let i = 0; i < this.pendingTrades.length; i++) {
+   413→        const p = this.pendingTrades[i];
+   414→        const req = p.op;
+   415→        const same =
+   416→          req.readUInt32LE(4) === ev.action &&
+   417→          utf16(req.subarray(8, 72)) === ev.symbol &&
+   418→          Number(req.readBigUInt64LE(72)) === ev.volumeRaw &&
+   419→          req.readUInt32LE(92) === ev.type &&
+   420→          Number(req.readBigUInt64LE(228)) === ev.position;
+   421→        if (same) { matched = i; break; }
+   422→      }
+   423→      if (matched >= 0) {
+   424→        const pend = this.pendingTrades.splice(matched, 1)[0];
+   425→        clearTimeout(pend.timer);
+   426→        if (MT5_DEBUG) console.log(`[mt5] cmd19 → resolved "${pend.label}" (identity match)`);
+   427→        pend.resolve(result);
+   428→      } else if (this.pendingTrades.length && MT5_DEBUG) {
+   429→        console.log(`[mt5] cmd19 FOREIGN (no identity match) — pending kept: ${this.pendingTrades.map((t) => t.label).join(",")}`);
+   430→      }
+   431→      // v16: forward the RICH payload — the trader can classify TP/SL from
+   432→      // the deal comment at the push's own latency (one round-trip), not at
+   433→      // the next poll. positionId prefers the Op echo's position ticket
+   434→      // (the `order` field is the ORDER id, not the position id).
+   435→      this.tradeEventHandler?.({
+   436→        kind: "trade", retcode, order,
+   437→        positionId: ev.position || order,
+   438→        deal: result.deal,
+   439→        symbol: ev.symbol || undefined,
+   440→        volume: result.volumeRaw > 0 ? result.volumeRaw / 1e8 : undefined,
+   441→        price: result.price || undefined,
+   442→        comment: result.comment || undefined,
+   443→        sl: ev.sl || undefined,
+   444→        tp: ev.tp || undefined,
+   445→      });
+   446→    } catch { /* never die on a malformed trade event */ }
+   447→  }
+   448→
+   449→  private emitQuotes(body: Buffer) {
+   450→    const n = Math.floor(body.length / 50);
+   451→    for (let i = 0; i < n; i++) {
+   452→      const off = i * 50;
+   453→      if (off + 50 > body.length) break;
+   454→      this.quoteHandler?.({
+   455→        symbolId: body.readUInt32LE(off),
+   456→        timeSec: body.readInt32LE(off + 4),
+   457→        bidRaw: body.readDoubleLE(off + 12),
+   458→        askRaw: body.readDoubleLE(off + 20),
+   459→      });
+   460→    }
+   461→  }
+   462→
+   463→  private send(cmdId: number, payload: Buffer, key?: Buffer) {
+   464→    const k = key ?? this.sessionKey;
+   465→    if (!k) throw new Error("no session key");
+   466→    this.ws.send(frame(aesEncrypt(k, buildCommand(cmdId, payload))));
+   467→  }
+   468→
+   469→  /** Serialize requests that share a cmd_id (responses are matched FIFO). */
+   470→  private run<T>(fn: () => Promise<T>): Promise<T> {
+   471→    const p = this.queue.then(fn, fn);
+   472→    this.queue = p.catch(() => {});
+   473→    return p;
+   474→  }
+   475→
+   476→  private async request(
+   477→    cmdId: number,
+   478→    payload: Buffer = Buffer.alloc(0),
+   479→    key?: Buffer,
+   480→    timeoutMs = 15000,
+   481→  ): Promise<Mt5Response> {
+   482→    // ── v10.3 ── never queue work on a session the manager has already put
+   483→    //    down (recycle/wedge escape) — it would just time out 15 s later and
+   484→    //    inflate the failure counter of a dead object.
+   485→    if (this.closed) throw new Error("mt5 not connected (session closed)");
+   486→    if (!this.waiters.has(cmdId)) this.waiters.set(cmdId, []);
+   487→    const queue = this.waiters.get(cmdId)!;
+   488→    let waiter!: (r: Mt5Response) => void;
+   489→    const p = new Promise<Mt5Response>((resolve) => {
+   490→      waiter = resolve;
+   491→      queue.push(waiter);
+   492→    });
+   493→    this.send(cmdId, payload, key);
+   494→    let timer: ReturnType<typeof setTimeout> | null = setTimeout(() => {
+   495→      timer = null;
+   496→      // ── DEAD-WAITER HYGIENE (the Sep 28 stale-candle root cause) ──
+   497→      // Responses are matched to requests POSITIONALLY (FIFO per cmdId).
+   498→      // A timed-out request used to leave its resolve callback in the queue,
+   499→      // so every later response was delivered to the PREVIOUS (dead) waiter
+   500→      // and each request received the WRONG window's data — the candle cache
+   501→      // kept being replaced with 30-minute-old bars. Remove OUR waiter so a
+   502→      // late response finds an empty queue (dropped harmlessly) and the next
+   503→      // request matches its own response again.
+   504→      const idx = queue.indexOf(waiter);
+   505→      if (idx >= 0) queue.splice(idx, 1);
+   506→      if (!queue.length) this.waiters.delete(cmdId);
+   507→      // ── v10.3 DEAD-SESSION SILENCE ── a closed client is the manager's
+   508→      // business now (it owns reconnection). The Sep-30 storm logs showed a
+   509→      // dying session's leftover timers climbing "6,7,8,9 consecutive
+   510→      // request failures — forcing reconnect" on an already-dead socket,
+   511→      // each re-calling close() — pure noise that masked the real state.
+   512→      if (this.closed) {
+   513→        timeoutRej(new Error(`timeout waiting cmd ${cmdId} (session already closed)`));
+   514→        return;
+   515→      }
+   516→      // per-cmd failure count (v11) — only the SAME cmd's success resets it
+   517→      const cmdFails = (this.consecFailsByCmd.get(cmdId) ?? 0) + 1;
+   518→      this.consecFailsByCmd.set(cmdId, cmdFails);
+   519→      if (cmdFails >= 2) {
+   520→        // this command's waiter chain is wedged beyond repair (other cmds may
+   521→        // still flow) — force a clean reconnect
+   522→        console.error(`[mt5-client] cmd ${cmdId} wedged (${cmdFails} consecutive timeouts) — forcing reconnect`);
+   523→        this.consecFailsByCmd.delete(cmdId);
+   524→        this.close();
+   525→      }
+   526→      if (++this.consecFails >= 3) {
+   527→        // session is wedged beyond repair — force a clean reconnect
+   528→        console.error(`[mt5-client] ${this.consecFails} consecutive request failures — forcing reconnect`);
+   529→        this.close();
+   530→      }
+   531→      timeoutRej(new Error(`timeout waiting cmd ${cmdId}`));
+   532→    }, timeoutMs);
+   533→    let timeoutRej!: (e: Error) => void;
+   534→    const t = new Promise<never>((_, rej) => { timeoutRej = rej; });
+   535→    try {
+   536→      const r = await Promise.race([p, t]);
+   537→      // ── v11 PER-CMD WEDGE COUNTERS ── a session can wedge for ONE command
+   538→      // (cmd-4 dies while quotes/deals/candles still flow — the Sep-30
+   539→      // livelock). A GLOBAL counter kept getting reset by healthy requests on
+   540→      // OTHER cmd ids, so the wedged command never accumulated failures and
+   541→      // the client never reconnected. Count per cmdId: only success of the
+   542→      // SAME command resets its counter.
+   543→      this.consecFailsByCmd.delete(cmdId);
+   544→      this.consecFails = 0;
+   545→      return r;
+   546→    } finally {
+   547→      if (timer) clearTimeout(timer);
+   548→      const idx = queue.indexOf(waiter);
+   549→      if (idx >= 0) queue.splice(idx, 1);
+   550→      if (!queue.length) this.waiters.delete(cmdId);
+   551→    }
+   552→  }
+   553→
+   554→  async auth(): Promise<Buffer> {
+   555→    const r = await this.request(CMD.AUTH, Buffer.alloc(64), STATIC_KEY);
+   556→    if (r.resCode !== 0) throw new Error(`AUTH failed: res_code=${r.resCode}`);
+   557→    this.sessionKey = Buffer.from(r.body.subarray(r.body.length - 32));
+   558→    return this.sessionKey;
+   559→  }
+   560→
+   561→  async login(login: number, password: string): Promise<bigint> {
+   562→    const h = Buffer.alloc(912);
+   563→    Buffer.from(password, "utf16le").copy(h, 4);
+   564→    h.writeUInt32LE(this.host.length, 476);
+   565→    Buffer.from(this.host, "utf16le").copy(h, 480);
+   566→    h.writeBigUInt64LE(BigInt(login), 736);
+   567→    const r = await this.request(CMD.LOGIN, h);
+   568→    if (r.resCode !== 0) {
+   569→      throw new Error(
+   570→        `LOGIN failed: res_code=${r.resCode} body=${r.body.toString("hex").slice(0, 96)}`,
+   571→      );
+   572→    }
+   573→    return r.body.length >= 168 ? r.body.readBigUInt64LE(160) : 0n;
+   574→  }
+   575→
+   576→  async account(): Promise<AccountInfo> {
+   577→    const r = await this.request(CMD.ACCOUNT);
+   578→    const b = r.body;
+   579→    return {
+   580→      login: 0,
+   581→      balance: b.readDoubleLE(9),
+   582→      equity: b.length >= 25 ? b.readDoubleLE(17) : b.readDoubleLE(9),
+   583→      currency: utf16(b.subarray(25, 25 + 64)),
+   584→      group: utf16(b.subarray(97, 97 + 256)),
+   585→      server: utf16(b.subarray(355, 355 + 128)),
+   586→    };
+   587→  }
+   588→
+   589→  async symbols(): Promise<Map<string, SymbolInfo>> {
+   590→    const r = await this.request(CMD.SYMBOLS_GZ, undefined, undefined, 20000);
+   591→    let decompressed: Buffer;
+   592→    const blob = r.body.subarray(4);
+   593→    try { decompressed = gunzipSync(blob); }
+   594→    catch { try { decompressed = inflateSync(blob); } catch { decompressed = inflateRawSync(blob); } }
+   595→    const count = decompressed.readUInt32LE(0);
+   596→    const map = new Map<string, SymbolInfo>();
+   597→    let off = 4;
+   598→    const REC = 526;
+   599→    for (let i = 0; i < count && off + REC <= decompressed.length; i++, off += REC) {
+   600→      const name = utf16(decompressed.subarray(off, off + 64));
+   601→      const digits = decompressed.readUInt32LE(off + 192);
+   602→      const id = decompressed.readUInt32LE(off + 196);
+   603→      if (name) map.set(name, { id, digits, name });
+   604→    }
+   605→    return map;
+   606→  }
+   607→
+   608→  /** A response was parsed but failed request-level validation — count it
+   609→   *  toward the reconnect circuit breaker (wrong-window data is worse than
+   610→   *  no data: it once froze the chart for 30 minutes). */
+   611→  noteProtocolError(what: string) {
+   612→    if (++this.consecFails >= 3) {
+   613→      console.error(`[mt5-client] ${this.consecFails} consecutive protocol errors (${what}) — forcing reconnect`);
+   614→      this.close();
+   615→    }
+   616→  }
+   617→
+   618→  async candles(
+   619→    symbol: string, tf: number, fromSec: number, toSec: number,
+   620→  ): Promise<Mt5Candle[]> {
+   621→    return this.run(async () => {
+   622→      const pl = Buffer.alloc(74);
+   623→      Buffer.from(symbol, "utf16le").copy(pl, 0);
+   624→      pl.writeUInt16LE(tf, 64);
+   625→      pl.writeInt32LE(fromSec, 66);
+   626→      pl.writeInt32LE(toSec, 70);
+   627→      const r = await this.request(CMD.CANDLES, pl, undefined, 25000);
+   628→      const out: Mt5Candle[] = [];
+   629→      for (let off = 0; off + 48 <= r.body.length; off += 48) {
+   630→        const b = r.body;
+   631→        out.push({
+   632→          time: b.readInt32LE(off),
+   633→          open: b.readDoubleLE(off + 4),
+   634→          high: b.readDoubleLE(off + 12),
+   635→          low: b.readDoubleLE(off + 20),
+   636→          close: b.readDoubleLE(off + 28),
+   637→          tickVolume: Number(b.readBigInt64LE(off + 36)),
+   638→          spread: b.readInt32LE(off + 44),
+   639→        });
+   640→      }
+   641→      // ── WINDOW VALIDATION (never return another request's data) ──
+   642→      // If the FIFO response matching ever mis-delivers, this is the wall
+   643→      // the wrong payload hits: every bar must belong to the window we asked
+   644→      // for (± one day of slack so wide backfill windows stay valid). A
+   645→      // mismatch throws instead of poisoning the candle cache with a
+   646→      // different request's bars.
+   647→      const slack = 86400;
+   648→      for (const b of out) {
+   649→        if (b.time < fromSec - slack || b.time > toSec + slack) {
+   650→          this.noteProtocolError(`candles window mismatch ${symbol} tf=${tf} bar@${b.time} ∉ [${fromSec},${toSec}]`);
+   651→          throw new Error(
+   652→            `candles response outside requested window (bar ${b.time}, window [${fromSec}, ${toSec}]) — possible response mismatch`,
+   653→          );
+   654→        }
+   655→      }
+   656→      return out;
+   657→    });
+   658→  }
+   659→
+   660→  subscribe(...symbolIds: number[]) {
+   661→    const pl = Buffer.alloc(4 + 4 * symbolIds.length);
+   662→    pl.writeUInt32LE(symbolIds.length, 0);
+   663→    symbolIds.forEach((id, i) => pl.writeUInt32LE(id, 4 + 4 * i));
+   664→    this.send(CMD.SUBSCRIBE, pl);
+   665→  }
+   666→
+   667→  heartbeat() { this.send(CMD.HEARTBEAT, Buffer.alloc(0)); }
+   668→  close() { this.closed = true; try { this.ws.close(); } catch {} }
+   669→
+   670→  // ═════════════════════════════ trading ═════════════════════════════
+   671→
+   672→  /** Send a trade request and wait for OUR cmd-19 event (identity-matched —
+   673→   *  see handleTradeEvent). Callers should serialize (the trader does). */
+   674→  private async sendTradeAndWait(op: Buffer, timeoutMs = 12000, label = ""): Promise<TradeResult> {
+   675→    let resolveFn: (r: TradeResult) => void = () => {};
+   676→    const p = new Promise<TradeResult>((resolve) => {
+   677→      resolveFn = resolve;
+   678→      const timer = setTimeout(() => {
+   679→        const idx = this.pendingTrades.findIndex((t) => t.resolve === resolveFn);
+   680→        if (idx >= 0) this.pendingTrades.splice(idx, 1);
+   681→        resolve({ retcode: -1, deal: 0, order: 0, volumeRaw: 0, price: 0, comment: "timeout" });
+   682→      }, timeoutMs);
+   683→      this.pendingTrades.push({ resolve: resolveFn, timer, op, label });
+   684→    });
+   685→    let imm: Mt5Response;
+   686→    try {
+   687→      imm = await this.request(CMD.TRADE, op, undefined, timeoutMs);
+   688→    } catch (e) {
+   689→      const idx = this.pendingTrades.findIndex((t) => t.resolve === resolveFn);
+   690→      if (idx >= 0) { const pend = this.pendingTrades.splice(idx, 1)[0]; clearTimeout(pend.timer); }
+   691→      throw e;
+   692→    }
+   693→    // immediate hard error (body[0:4] = retcode) → resolve now, don't wait for event
+   694→    if (imm.body.length >= 4) {
+   695→      const rc = imm.body.readUInt32LE(0);
+   696→      if (rc !== 0 && rc !== 10002 && rc !== 10009) {
+   697→        const idx = this.pendingTrades.findIndex((t) => t.resolve === resolveFn);
+   698→        if (idx >= 0) { const pend = this.pendingTrades.splice(idx, 1)[0]; clearTimeout(pend.timer); }
+   699→        return { retcode: rc, deal: 0, order: 0, volumeRaw: 0, price: 0, comment: TRADE_RETCODES[rc] ?? "error" };
+   700→      }
+   701→    }
+   702→    return p;
+   703→  }
+   704→
+   705→  /** Market BUY/SELL with optional SL/TP (0 = none). Returns the final result —
+   706→   *  `order` is the ticket to use for close/modify. */
+   707→  async marketOrder(
+   708→    symbol: string, side: TradeSide, lots: number,
+   709→    opts?: { sl?: number; tp?: number; comment?: string; digits?: number },
+   710→  ): Promise<TradeResult> {
+   711→    const digits = opts?.digits ?? 2;
+   712→    // v12: FOK is rejected by Exness on fast markets (10030) — send IOC with a
+   713→    // 50-point deviation budget, then fall back FOK → RETURN if unsupported.
+   714→    return this.sendMarketWithFillLadder(symbol, side, lots, 0, opts, digits, "market");
+   715→  }
+   716→
+   717→  /** Market order at an explicit price (ask for buy, bid for sell). */
+   718→  async marketOrderAt(
+   719→    symbol: string, side: TradeSide, lots: number, price: number,
+   720→    opts?: { sl?: number; tp?: number; comment?: string; digits?: number },
+   721→  ): Promise<TradeResult> {
+   722→    const digits = opts?.digits ?? 2;
+   723→    return this.sendMarketWithFillLadder(symbol, side, lots, price, opts, digits, `open:${symbol}:${side}:${lots}`);
+   724→  }
+   725→
+   726→  /** v12 — market order / close with a FILLING-MODE LADDER:
+   727→   *  IOC(1) → FOK(0) → RETURN(2). A 10030 (unsupported filling) on one mode
+   728→   *  retries the next, so a "close failed, position burning" (the audit's
+   729→   *  High #9) can no longer happen because the broker disliked FOK. All
+   730→   *  attempts carry a 50-point deviation so gold's spread-widening doesn't
+   731→   *  reject our own exit. */
+   732→  private async sendMarketWithFillLadder(
+   733→    symbol: string, side: TradeSide, lots: number, price: number,
+   734→    opts: { sl?: number; tp?: number; comment?: string; position?: number } | undefined,
+   735→    digits: number, label: string,
+   736→  ): Promise<TradeResult> {
+   737→    const ladder: number[] = [1, 0, 2]; // IOC → FOK → RETURN
+   738→    let last: TradeResult = { retcode: -1, deal: 0, order: 0, volumeRaw: 0, price: 0, comment: "no attempt" };
+   739→    for (const filling of ladder) {
+   740→      const op = buildOp({
+   741→        action: 3, symbol,
+   742→        volumeRaw: Math.round(lots * LOTS_RAW),
+   743→        digits,
+   744→        type: side === "buy" ? 0 : 1,
+   745→        filling,
+   746→        price,
+   747→        sl: opts?.sl ?? 0,
+   748→        tp: opts?.tp ?? 0,
+   749→        comment: opts?.comment,
+   750→        deviation: 50,
+   751→        ...(opts?.position ? { position: opts.position } : {}),
+   752→      });
+   753→      last = await this.sendTradeAndWait(op, 12000, `${label}:fill${filling}`);
+   754→      if (last.retcode !== 10030) return last; // filled / real error → done
+   755→      // 10030 = this filling mode unsupported → try the next mode
+   756→    }
+   757→    return last;
+   758→  }
+   759→
+   760→  /** Close an open position: MARKET order in the OPPOSITE direction with the
+   761→   *  position's order ticket (trade_action=3, NOT 10 — 10 returns 10030).
+   762→   *  v12: close rides the SAME filling ladder + deviation as opens — a close
+   763→   *  must never be stranded by an FOK rejection on a fast market. The
+   764→   *  position ticket rides EVERY ladder attempt (without it the broker would
+   765→   *  OPEN a hedge instead of closing — that must be impossible). */
+   766→  async closePosition(
+   767→    symbol: string, side: TradeSide, lots: number, price: number,
+   768→    positionTicket: number, opts?: { digits?: number; comment?: string },
+   769→  ): Promise<TradeResult> {
+   770→    const digits = opts?.digits ?? 2;
+   771→    const opposite: TradeSide = side === "buy" ? "sell" : "buy";
+   772→    return this.sendMarketWithFillLadder(
+   773→      symbol, opposite, lots, price,
+   774→      { comment: opts?.comment ?? "close", position: positionTicket },
+   775→      digits,
+   776→      `close:${symbol}#${positionTicket}:${lots}`,
+   777→    );
+   778→  }
+   779→
+   780→  /** Modify SL/TP of an open position (trade_action=6).
+   781→   *  positionTicket = the position id (== opening order ticket).
+   782→   *  VERIFIED LIVE (Sep-29, probe-modify variant A): the server requires the
+   783→   *  ticket in BOTH @84 (trade_order) AND @228 (trade_position) — with @84=0
+   784→   *  every modify failed 10036 POSITION_NOT_EXISTS (breakeven/trail never ran). */
+   785→  async modifyPosition(
+   786→    symbol: string, side: TradeSide, lots: number, price: number,
+   787→    positionTicket: number, sl: number, tp: number,
+   788→    opts?: { digits?: number },
+   789→  ): Promise<TradeResult> {
+   790→    const op = buildOp({
+   791→      action: 6, symbol,
+   792→      volumeRaw: Math.round(lots * LOTS_RAW),
+   793→      digits: opts?.digits ?? 2,
+   794→      type: side === "buy" ? 0 : 1, // ORIGINAL direction for modify
+   795→      filling: 2, // RETURN
+   796→      price,
+   797→      sl, tp,
+   798→      order: positionTicket,
+   799→      position: positionTicket,
+   800→    });
+   801→    return this.sendTradeAndWait(op, 12000, `mod:${symbol}#${positionTicket}:${lots}`);
+   802→  }
+   803→
+   804→  /** Positions + PENDING orders. cmd 4 → [posCount][positions×344][ordCount][orders×356].
+   805→   *  The trailing order records are the account's PENDING (limit/stop) orders
+   806→   *  — VERIFIED live: placed a buy-limit via cmd-12 action 5, appeared here,
+   807→   *  canceled via action 8. v11: they are PARSED (the user's pending orders
+   808→   *  must be mirrored in the app in real time). */
+   809→  async positions(): Promise<{ positions: Mt5Position[]; pendingOrders: number; orders: Mt5Order[] }> {
+   810→    // 2.5s timeout — a healthy cmd-4 answers in ~40-150ms (16× headroom);
+   811→    // the old 15s let a wedged waiter chain block the sync loop for 15s per
+   812→    // attempt (v11). With the per-cmd wedge counter at 2, a wedged cmd-4 is
+   813→    // detected and recycled within ~5s.
+   814→    const r = await this.request(CMD.POSITIONS, undefined, undefined, 2500);
+   815→    const b = r.body;
+   816→    const positions: Mt5Position[] = [];
+   817→    let off = 0;
+   818→    const posCount = b.length >= 4 ? b.readUInt32LE(0) : 0;
+   819→    off = 4;
+   820→    for (let i = 0; i < posCount && off + POS_SIZE <= b.length; i++, off += POS_SIZE) {
+   821→      positions.push({
+   822→        id: Number(b.readBigInt64LE(off)),
+   823→        order: Number(b.readBigInt64LE(off + 8)),
+   824→        openTime: b.readUInt32LE(off + 16) * 1000 + b.readInt32LE(off + 336),
+   825→        symbol: utf16(b.subarray(off + 24, off + 88)),
+   826→        side: b.readUInt32LE(off + 88) === 0 ? "buy" : "sell",
+   827→        openPrice: b.readDoubleLE(off + 92),
+   828→        sl: b.readDoubleLE(off + 108),
+   829→        tp: b.readDoubleLE(off + 116),
+   830→        lots: Number(b.readBigUInt64LE(off + 124)) / LOTS_RAW,
+   831→        profit: b.readDoubleLE(off + 132),
+   832→        swap: b.readDoubleLE(off + 164),
+   833→        comment: utf16(b.subarray(off + 188, off + 252)),
+   834→        magic: b.readUInt32LE(off + 268),
+   835→      });
+   836→    }
+   837→    // ── PENDING ORDERS (ORDER_SCHEMA, all offsets verified live) ──
+   838→    const orders: Mt5Order[] = [];
+   839→    if (off + 4 <= b.length) {
+   840→      const ordCount = Math.min(b.readUInt32LE(off), Math.floor((b.length - off - 4) / ORDER_SIZE));
+   841→      off += 4;
+   842→      for (let i = 0; i < ordCount && off + ORDER_SIZE <= b.length; i++, off += ORDER_SIZE) {
+   843→        const o = b.subarray(off, off + ORDER_SIZE);
+   844→        orders.push({
+   845→          ticket: Number(o.readBigInt64LE(0)),
+   846→          symbol: utf16(o.subarray(72, 136)),
+   847→          orderType: o.readUInt32LE(148),
+   848→          timeSetup: o.readUInt32LE(136) * 1000 + o.readInt32LE(348),
+   849→          timeExpiration: o.readUInt32LE(140),
+   850→          price: o.readDoubleLE(164),
+   851→          priceTrigger: o.readDoubleLE(172),
+   852→          priceCurrent: o.readDoubleLE(180),
+   853→          sl: o.readDoubleLE(188),
+   854→          tp: o.readDoubleLE(196),
+   855→          lotsInitial: Number(o.readBigInt64LE(204)) / LOTS_RAW,
+   856→          lots: Number(o.readBigInt64LE(212)) / LOTS_RAW,
+   857→          state: o.readUInt32LE(220),
+   858→          positionId: Number(o.readBigInt64LE(232)),
+   859→          comment: utf16(o.subarray(240, 304)),
+   860→        });
+   861→      }
+   862→      return { positions, pendingOrders: orders.length, orders };
+   863→    }
+   864→    return { positions, pendingOrders: 0, orders };
+   865→  }
+   866→
+   867→  /** Place a PENDING order (limit/stop). VERIFIED LIVE 2026-09-30 (probe-p5):
+   868→   *  action=5, type 2..5, filling=RETURN(2), price_order=trigger price,
+   869→   *  volume raw = lots×10^8. Accepts 10009 + order ticket. */
+   870→  async pendingOrder(
+   871→    symbol: string, orderType: 2 | 3 | 4 | 5, lots: number, price: number,
+   872→    opts?: { sl?: number; tp?: number; digits?: number; comment?: string },
+   873→  ): Promise<TradeResult> {
+   874→    const op = buildOp({
+   875→      action: 5, symbol,
+   876→      volumeRaw: Math.round(lots * LOTS_RAW),
+   877→      digits: opts?.digits ?? 2,
+   878→      type: orderType,
+   879→      filling: 2, // RETURN — FOK is rejected for pendings (10030)
+   880→      price,
+   881→      sl: opts?.sl ?? 0,
+   882→      tp: opts?.tp ?? 0,
+   883→      comment: opts?.comment,
+   884→    });
+   885→    return this.sendTradeAndWait(op, 12000, `pending:${symbol}:${orderType}:${price}`);
+   886→  }
+   887→
+   888→  /** Cancel a PENDING order (action 8). VERIFIED LIVE: needs the ORIGINAL
+   889→   *  order type + original price + ticket at trade_order (@84). */
+   890→  async cancelOrder(
+   891→    symbol: string, orderType: number, lots: number, price: number, ticket: number,
+   892→    opts?: { digits?: number },
+   893→  ): Promise<TradeResult> {
+   894→    const op = buildOp({
+   895→      action: 8, symbol,
+   896→      volumeRaw: Math.round(lots * LOTS_RAW),
+   897→      digits: opts?.digits ?? 2,
+   898→      type: orderType, // must MATCH the original (else 10023)
+   899→      filling: 2,
+   900→      price,
+   901→      sl: 0, tp: 0,
+   902→      order: ticket,
+   903→    });
+   904→    return this.sendTradeAndWait(op, 12000, `cancel:${symbol}#${ticket}`);
+   905→  }
+   906→
+   907→  /** Deal history. cmd 5 → [dealCount][deals×356][ordCount][orders×356]. */
+   908→  async deals(fromSec = 0, toSec = 0): Promise<Mt5Deal[]> {
+   909→    const pl = Buffer.alloc(8);
+   910→    pl.writeUInt32LE(fromSec, 0);
+   911→    pl.writeUInt32LE(toSec, 4);
+   912→    const r = await this.request(CMD.DEALS, pl, undefined, 15000);
+   913→    const b = r.body;
+   914→    const deals: Mt5Deal[] = [];
+   915→    const count = b.length >= 4 ? b.readUInt32LE(0) : 0;
+   916→    let off = 4;
+   917→    for (let i = 0; i < count && off + DEAL_SIZE <= b.length; i++, off += DEAL_SIZE) {
+   918→      const entryCode = b.readUInt32LE(off + 156);
+   919→      deals.push({
+   920→        deal: Number(b.readBigInt64LE(off)),
+   921→        order: Number(b.readBigInt64LE(off + 72)),
+   922→        positionId: Number(b.readBigInt64LE(off + 248)),
+   923→        symbol: utf16(b.subarray(off + 88, off + 152)),
+   924→        side: b.readUInt32LE(off + 152) === 0 ? "buy" : "sell",
+   925→        entry: entryCode === 0 ? "in" : entryCode === 1 ? "out" : "inout",
+   926→        time: b.readUInt32LE(off + 80) * 1000 + b.readInt32LE(off + 340),
+   927→        price: b.readDoubleLE(off + 160),
+   928→        volume: Number(b.readBigUInt64LE(off + 192)) / LOTS_RAW,
+   929→        profit: b.readDoubleLE(off + 200),
+   930→        commission: b.readDoubleLE(off + 224),
+   931→        swap: b.readDoubleLE(off + 232),
+   932→        comment: utf16(b.subarray(off + 256, off + 320)),
+   933→      });
+   934→    }
+   935→    return deals;
+   936→  }
+   937→}
+   938→

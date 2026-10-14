@@ -23,3 +23,25 @@ Stage Summary:
 - Execution is hard-locked in code (4-switch gate). No order-sending code exists anywhere in Phase 1.
 - Artifacts: prisma/schema.prisma (12 models), src/lib/{config,logger,health}.ts, src/lib/tools/registry.ts, src/lib/audit/static-audit.ts, 3 API routes, dashboard page, README.md, .env.example, audit/glm-tool-call.ts + screenshots (audit/phase1-*.png).
 - Next step: Phase 2 (Linux MT5 Bridge) — starts only after user reviews this report and picks a bridge option.
+
+---
+Task ID: 2-research
+Agent: Z.ai Code (main orchestrator)
+Task: User-directed research — clone psfaruk/xauusd-trad and determine how MT5 runs in the sandbox; report before receiving Phase 3
+
+Work Log:
+- Cloned https://github.com/psfaruk/xauusd-trad to /home/z/xauusd-trad (user's own prior project "AURUM·T" — live MT5 gold trading terminal, v20).
+- Read README, mt5-poc/PROTOCOL.md, mini-services/mt5-service (mt5-client.ts 938L, manager.ts 1324L, index.ts 811L, auth.ts, credentials.ts), src/lib/mt5-spawn.ts.
+- Key discovery: MT5 runs in the sandbox WITHOUT Wine/VPS/terminal — via the MT5 WEB-TERMINAL binary protocol: wss://<gateway>:443/terminal, AES-256-CBC framed messages, commands AUTH(0)/LOGIN(28)/SYMBOLS(34)/SUBSCRIBE(7)/QUOTES(8)/CANDLES(11)/HEARTBEAT(51); trading cmds (12/4/5) exist but will NOT be ported.
+- MY OWN VERIFICATION from this sandbox (all REAL, no mocks):
+  · TCP 443 reachable to all 5 tested Exness-MT5Trial6 gateway IPs
+  · MetaQuotes discovery API live (search.mtapi.io returned Exness access IPs)
+  · web-terminal endpoint HTTPS 200 at gateway IP
+  · Wrote audit/mt5-auth-probe.ts (AUTH-only, anonymous, zero credentials) → RAN IT: AUTH handshake PROVEN, broker returned 32-byte session key over verified TLS (SNI mt5.exwebterm.com)
+- Evidence artifact: audit/mt5-auth-probe.ts (run: bun run audit/mt5-auth-probe.ts → "RESULT: PROVEN").
+
+Stage Summary:
+- ARCHITECTURE CHANGE for Phase 2: the planned "Linux VPS + Wine + MT5 Terminal + FastAPI bridge" is OBSOLETE. The read-only bridge can run INSIDE this sandbox as a Bun mini-service (port 3031) speaking the MT5 web-terminal protocol directly. No VPS needed for market data.
+- Still unproven (needs user's Exness DEMO credentials in .env — MT5_LOGIN/MT5_PASSWORD/MT5_SERVER): LOGIN → XAUUSDm symbol resolution → M5/M15/H1/H4 candles → live quotes. Recommend investor (read-only) password where possible.
+- Repo provenance: battle-tested code (v20) with documented incidents & fixes (FIFO response matching, dead-waiter hygiene, monotonic candle merge, broker→UTC offset quantization, SSRF-filtered discovery, honest demo mode, AES-GCM credential store, reconnect gateway rotation). Port read-only parts only.
+- Stopped as instructed; awaiting user's Phase 3 prompt.
