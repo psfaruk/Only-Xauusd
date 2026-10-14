@@ -6,7 +6,16 @@
  * for API responses. Never logs or exposes secret values.
  */
 
-const VERSION = '0.1.0-phase1';
+const VERSION = '0.1.0-phase3';
+
+function csv(name: string, fallback: string): string[] {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return fallback.split(',').map((s) => s.trim()).filter(Boolean);
+  return raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
 
 function num(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -67,10 +76,46 @@ export const config = {
     minVerifyIntervalMs: num('GLM_MIN_VERIFY_INTERVAL_MS', 10_000),
   },
   bridge: {
-    url: process.env.MT5_BRIDGE_URL ?? '',
+    url: (process.env.MT5_BRIDGE_URL ?? '').replace(/\/+$/, ''),
     timeoutMs: num('MT5_BRIDGE_TIMEOUT_MS', 8_000),
+    maxRetries: Math.min(Math.max(0, num('MT5_BRIDGE_MAX_RETRIES', 2)), 5),
     // Token presence flag only — the value never leaves the server.
     hasToken: Boolean(process.env.MT5_BRIDGE_TOKEN),
+  },
+  market: {
+    /** Strict symbol allowlist — anything else is rejected (SYMBOL_NOT_ALLOWED). */
+    symbols: csv('MARKET_SYMBOLS', 'XAUUSDm'),
+    /** Strict timeframe allowlist (subset of M5/M15/H1/H4). */
+    timeframes: (() => {
+      const all = ['M5', 'M15', 'H1', 'H4'] as const;
+      const requested = csv('MARKET_TIMEFRAMES', 'M5,M15,H1,H4');
+      const valid = requested.filter((tf): tf is (typeof all)[number] =>
+        (all as readonly string[]).includes(tf),
+      );
+      return valid.length > 0 ? valid : [...all];
+    })(),
+    /** Per-timeframe staleness thresholds (seconds) — configurable per tf. */
+    staleTickSec: num('MARKET_STALE_TICK_SEC', 120),
+    staleTfSec: {
+      M5: num('MARKET_STALE_M5_SEC', 3 * 300),
+      M15: num('MARKET_STALE_M15_SEC', 3 * 900),
+      H1: num('MARKET_STALE_H1_SEC', 3 * 3_600),
+      H4: num('MARKET_STALE_H4_SEC', 3 * 14_400),
+    },
+    /** Bounded fetch limits. */
+    maxCandlesPerRequest: Math.min(Math.max(50, num('MARKET_MAX_CANDLES_PER_REQUEST', 500)), 1_000),
+    backfillMaxBars: Math.min(Math.max(100, num('MARKET_BACKFILL_MAX_BARS', 5_000)), 20_000),
+    backfillMaxDays: Math.min(Math.max(1, num('MARKET_BACKFILL_MAX_DAYS', 30)), 365),
+    /** Demo-source ingestion opt-in (default: skip and record SOURCE_DEMO). */
+    ingestDemo: bool('MARKET_INGEST_DEMO', false),
+    /** Scheduled sync interval; 0 = OFF (default). */
+    syncIntervalMs: Math.max(0, num('MARKET_SYNC_INTERVAL_MS', 0)),
+    maxIssuesPerRun: Math.min(Math.max(5, num('MARKET_MAX_ISSUES_PER_RUN', 50)), 200),
+  },
+  dataApi: {
+    /** Optional bearer token — when set, ALL /api/data/* require it. */
+    hasToken: Boolean(process.env.DATA_API_TOKEN),
+    rateLimitPerMin: Math.min(Math.max(10, num('DATA_API_RATE_LIMIT_PER_MIN', 120)), 600),
   },
   limits: {
     maxEventsReturned: Math.min(Math.max(1, num('MAX_EVENTS_RETURNED', 100)), 500),
@@ -93,7 +138,23 @@ export function configSnapshot() {
     executionReason: config.execution.reason,
     symbol: config.symbol,
     glm: { model: config.glm.model, timeoutMs: config.glm.timeoutMs, maxRetries: config.glm.maxRetries },
-    bridge: { configured: config.bridge.url !== '', timeoutMs: config.bridge.timeoutMs },
+    bridge: {
+      configured: config.bridge.url !== '',
+      timeoutMs: config.bridge.timeoutMs,
+      maxRetries: config.bridge.maxRetries,
+    },
+    market: {
+      symbols: config.market.symbols,
+      timeframes: config.market.timeframes,
+      staleTickSec: config.market.staleTickSec,
+      staleTfSec: config.market.staleTfSec,
+      ingestDemo: config.market.ingestDemo,
+      syncIntervalMs: config.market.syncIntervalMs,
+      maxCandlesPerRequest: config.market.maxCandlesPerRequest,
+      backfillMaxBars: config.market.backfillMaxBars,
+      backfillMaxDays: config.market.backfillMaxDays,
+    },
+    dataApi: { tokenProtected: config.dataApi.hasToken, rateLimitPerMin: config.dataApi.rateLimitPerMin },
     limits: { maxEventsReturned: config.limits.maxEventsReturned },
   };
 }

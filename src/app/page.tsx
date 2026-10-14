@@ -22,6 +22,7 @@ import {
   FileLock2,
   Globe,
   Languages,
+  LineChart,
   Loader2,
   LockKeyhole,
   Network,
@@ -153,6 +154,195 @@ interface VerifyResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Phase 3 — market data API shapes (/api/data/*)
+// ---------------------------------------------------------------------------
+
+type QualityState = 'VALID' | 'WARNING' | 'INVALID' | 'STALE' | 'MISSING' | 'UNAVAILABLE';
+
+interface TfReadiness {
+  timeframe: string;
+  state: QualityState;
+  lastClosedCandleTimeUtc: string | null;
+  lastClosedCandleAgeSeconds: number | null;
+  stalenessThresholdSeconds: number;
+  scannedCandles: number;
+  missingCandles: number;
+  possibleClosureGaps: number;
+  errorCodes: string[];
+}
+
+interface MarketStatusResponse {
+  ok: true;
+  symbol: string;
+  bridge: {
+    configured: boolean;
+    reachable: boolean;
+    probedAtUtc: string;
+    health: { ok: boolean; service: string | null; connected: boolean | null; uptimeSec: number | null } | null;
+    status: { connected: boolean; source: string; server: string | null; latencyMs: number | null; reason: string | null } | null;
+    error: { code: string; message: string } | null;
+  };
+  readiness: {
+    ready: boolean;
+    symbol: string;
+    timeframesChecked: string[];
+    source: string | null;
+    checkedAtUtc: string;
+    lastTickTimeUtc: string | null;
+    lastClosedCandleTimeUtc: string | null;
+    dataAgeSeconds: number | null;
+    qualityState: QualityState;
+    errorCodes: string[];
+    tick: {
+      state: QualityState;
+      bid: string | null;
+      ask: string | null;
+      spread: string | null;
+      lastTickTimeUtc: string | null;
+      ageSeconds: number | null;
+      stalenessThresholdSeconds: number;
+      errorCodes: string[];
+    };
+    timeframes: TfReadiness[];
+  };
+  sync: {
+    running: boolean;
+    lastRun: SyncRunSummary | null;
+    lastSuccess: SyncRunSummary | null;
+    lastFailure: SyncRunSummary | null;
+  };
+  config: {
+    symbols: string[];
+    timeframes: string[];
+    staleTickSec: number;
+    staleTfSec: Record<string, number>;
+    ingestDemo: boolean;
+    syncIntervalMs: number;
+  };
+  generatedAtUtc: string;
+}
+
+interface SyncRunSummary {
+  id: string;
+  mode: string;
+  source: string;
+  symbol: string;
+  timeframes: string[];
+  status: string;
+  startedAtUtc: string;
+  endedAtUtc: string | null;
+  durationMs: number | null;
+  requested: number;
+  received: number;
+  inserted: number;
+  updated: number;
+  rejected: number;
+  duplicates: number;
+  errorCode: string | null;
+  errorMessage: string | null;
+}
+
+interface QualityIssueRow {
+  id: string;
+  checkType: string;
+  timeframe: string | null;
+  severity: string;
+  errorCode: string;
+  targetTimeUtc: string | null;
+  details: { detail?: string };
+  checkedAtUtc: string;
+}
+
+interface QualityResponse {
+  ok: true;
+  symbol: string;
+  openIssues: QualityIssueRow[];
+  generatedAtUtc: string;
+}
+
+/** Bengali renderings of the stable machine-readable error codes. */
+const bnErrorText: Record<string, string> = {
+  BRIDGE_NOT_CONFIGURED: 'MT5 ব্রিজ কনফিগার করা হয়নি — MT5_BRIDGE_URL ফাঁকা আছে।',
+  BRIDGE_UNREACHABLE: 'ব্রিজ সার্ভারে পৌঁছানো যাচ্ছে না।',
+  BRIDGE_TIMEOUT: 'ব্রিজ সময়মতো সাড়া দেয়নি (টাইমআউট)।',
+  BRIDGE_AUTH_FAILED: 'ব্রিজ অনুরোধ প্রত্যাখ্যান করেছে (অননুমোদিত)।',
+  BRIDGE_RATE_LIMITED: 'ব্রিজের রেট লিমিট ছুঁয়ে গেছে — কিছুক্ষণ পরে আবার চেষ্টা হবে।',
+  BRIDGE_BAD_RESPONSE: 'ব্রিজ থেকে প্রত্যাশিত ফরম্যাটে উত্তর আসেনি।',
+  BRIDGE_PARTIAL_RESPONSE: 'ব্রিজ আংশিক উত্তর দিয়েছে — কিছু ডেটা পাওয়া যায়নি।',
+  SOURCE_DEMO: 'ব্রিজ এখন স্পষ্টভাবে চিহ্নিত ডেমো ডেটা দিচ্ছে — এটি লাইভ বাজার নয়।',
+  SOURCE_DISCONNECTED: 'MT5 টার্মিনাল সংযোগ বিচ্ছিন্ন আছে।',
+  SYMBOL_NOT_ALLOWED: 'এই সিম্বলটি অনুমোদিত তালিকায় নেই।',
+  SYMBOL_NOT_FOUND: 'ব্রিজে এই সিম্বলটি পাওয়া যায়নি।',
+  TIMEFRAME_NOT_ALLOWED: 'এই টাইমফ্রেমটি অনুমোদিত তালিকায় নেই।',
+  DATA_MISSING: 'প্রয়োজনীয় ডেটা এখনো সংরক্ষিত হয়নি।',
+  DATA_STALE: 'সংরক্ষিত ডেটা পুরোনো হয়ে গেছে।',
+  TICK_STALE: 'সর্বশেষ টিক পুরোনো হয়ে গেছে।',
+  TICK_CROSSED: 'টিকের Bid/Ask অসঙ্গতিপূর্ণ (Ask < Bid)।',
+  TICK_NON_POSITIVE: 'টিকের দাম শূন্য বা ঋণাত্মক — প্রত্যাখ্যাত।',
+  GAP_POSSIBLE: 'সম্ভবত একটি ক্যান্ডেল অনুপস্থিত — বাজার ছুটি (অজানা সময়সূচি) বা ডেটা ত্রুটি হতে পারে।',
+  GAP_MARKET_LIKELY_CLOSED: 'সম্ভাব্য ফাঁক — সম্ভবত বাজার বন্ধ ছিল (উইকেন্ড/বিরতি, আনুমানিক)।',
+  SPEC_MISSING: 'সিম্বল স্পেসিফিকেশন এখনো যাচাই করা হয়নি।',
+  CANDLE_OHLC_INCONSISTENT: 'ক্যান্ডেলের OHLC মান পরস্পরবিরোধী।',
+  CANDLE_NON_FINITE: 'ক্যান্ডেলের দাম সংখ্যা নয় (NaN/অসীম)।',
+  CANDLE_NON_POSITIVE: 'ক্যান্ডেলের দাম শূন্য বা ঋণাত্মক।',
+  CANDLE_DUPLICATE_KEY: 'একই সময়ের ক্যান্ডেল একাধিকবার এসেছে — ডুপ্লিকেট গণনা করা হয়েছে।',
+  CANDLE_OUT_OF_ORDER: 'ক্যান্ডেলগুলো সময় অনুযায়ী সাজানো ছিল না — সাজিয়ে নেওয়া হয়েছে।',
+  CANDLE_PRICE_PRECISION_ANOMALY: 'দামে প্রত্যাশিত দশমিক-অঙ্কের চেয়ে বেশি অঙ্ক এসেছে — সতর্কতা সহ সংরক্ষিত।',
+  DB_TX_FAILED: 'ডেটাবেস লেনদেন ব্যর্থ হয়েছে।',
+  DB_ERROR: 'ডেটাবেস ত্রুটি।',
+  SYNC_IN_PROGRESS: 'একটি সিঙ্ক ইতিমধ্যেই চলছে — নতুনটি বাতিল।',
+};
+
+function bnForCode(code: string): string {
+  return bnErrorText[code] ?? `অজানা সমস্যা (${code})।`;
+}
+
+function fmtAge(sec: number | null | undefined): string {
+  if (sec === null || sec === undefined) return '—';
+  if (sec < 60) return `${sec} সেকেন্ড`;
+  if (sec < 3600) return `${Math.floor(sec / 60)} মিনিট`;
+  if (sec < 86400) return `${Math.floor(sec / 3600)} ঘণ্টা`;
+  return `${Math.floor(sec / 86400)} দিন`;
+}
+
+function qualityStateBadgeClass(state: string): string {
+  switch (state) {
+    case 'VALID':
+      return 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400';
+    case 'WARNING':
+      return 'border-amber-500/40 bg-amber-500/10 text-amber-400';
+    case 'STALE':
+      return 'border-orange-500/40 bg-orange-500/10 text-orange-400';
+    case 'MISSING':
+      return 'border-red-500/40 bg-red-500/10 text-red-400';
+    case 'INVALID':
+      return 'border-red-600/50 bg-red-600/15 text-red-300';
+    default:
+      return 'border-zinc-600/50 bg-zinc-700/20 text-zinc-400'; // UNAVAILABLE
+  }
+}
+
+const qualityStateBn: Record<string, string> = {
+  VALID: 'বৈধ',
+  WARNING: 'সতর্কতা',
+  INVALID: 'অবৈধ',
+  STALE: 'পুরোনো',
+  MISSING: 'অনুপস্থিত',
+  UNAVAILABLE: 'অনুপলব্ধ',
+};
+
+function syncStatusBn(status: string): string {
+  switch (status) {
+    case 'success': return 'সফল';
+    case 'partial': return 'আংশিক';
+    case 'failed': return 'ব্যর্থ';
+    case 'skipped': return 'স্কিপ';
+    case 'running': return 'চলছে';
+    default: return status;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -237,17 +427,24 @@ export default function Phase1Dashboard() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [verifying, setVerifying] = useState(false);
   const [verifyResult, setVerifyResult] = useState<VerifyResponse | null>(null);
+  const [marketStatus, setMarketStatus] = useState<MarketStatusResponse | null>(null);
+  const [marketQuality, setMarketQuality] = useState<QualityResponse | null>(null);
+  const [syncing, setSyncing] = useState(false);
   const clock = useDhakaClock();
 
   const refresh = useCallback(async () => {
     try {
-      const [hRes, aRes] = await Promise.all([
+      const [hRes, aRes, mRes, qRes] = await Promise.all([
         fetch('/api/health', { cache: 'no-store' }),
         fetch('/api/audit/environment', { cache: 'no-store' }),
+        fetch('/api/data/status', { cache: 'no-store' }).catch(() => null),
+        fetch('/api/data/quality', { cache: 'no-store' }).catch(() => null),
       ]);
       if (!hRes.ok && !aRes.ok) throw new Error('API unreachable');
       if (hRes.ok) setHealth((await hRes.json()) as HealthReport);
       if (aRes.ok) setAudit((await aRes.json()) as AuditResponse);
+      if (mRes && mRes.ok) setMarketStatus((await mRes.json()) as MarketStatusResponse);
+      if (qRes && qRes.ok) setMarketQuality((await qRes.json()) as QualityResponse);
       setLoadError(null);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : 'unknown error');
@@ -302,6 +499,56 @@ export default function Phase1Dashboard() {
     }
   }, [refresh, toast]);
 
+  const runSyncNow = useCallback(async () => {
+    setSyncing(true);
+    try {
+      const symbol = marketStatus?.symbol ?? 'XAUUSDm';
+      const res = await fetch('/api/data/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbol, mode: 'manual' }),
+      });
+      const body = (await res.json()) as {
+        ok: boolean;
+        outcome?: SyncRunSummary & { status: string };
+        error?: { code: string; message: string };
+      };
+      if (res.status === 429) {
+        toast({
+          title: 'রেট লিমিট',
+          description: 'খুব ঘন ঘন সিঙ্ক চালানো হচ্ছে — কিছুক্ষণ পরে চেষ্টা করুন।',
+          variant: 'destructive',
+        });
+      } else if (body.ok && body.outcome?.status === 'success') {
+        toast({
+          title: 'সিঙ্ক সফল',
+          description: `নতুন ${body.outcome.inserted}টি, আপডেট ${body.outcome.updated}টি ক্যান্ডেল।`,
+        });
+      } else if (body.ok && body.outcome) {
+        toast({
+          title: `সিঙ্ক ${syncStatusBn(body.outcome.status)}`,
+          description: body.outcome.errorCode ? bnForCode(body.outcome.errorCode) : 'কিছু টাইমফ্রেম সম্পূর্ণ হয়নি।',
+          variant: 'destructive',
+        });
+      } else {
+        toast({
+          title: 'সিঙ্ক ব্যর্থ',
+          description: body.error ? bnForCode(body.error.code) : 'অজানা ত্রুটি।',
+          variant: 'destructive',
+        });
+      }
+      await refresh();
+    } catch (e) {
+      toast({
+        title: 'সিঙ্ক চালানো যায়নি',
+        description: e instanceof Error ? e.message : 'unknown error',
+        variant: 'destructive',
+      });
+    } finally {
+      setSyncing(false);
+    }
+  }, [marketStatus?.symbol, refresh, toast]);
+
   const checkSummary = useMemo(() => {
     if (!audit) return null;
     const c = { pass: 0, warn: 0, fail: 0 };
@@ -345,7 +592,7 @@ export default function Phase1Dashboard() {
                 ঢাকা {clock ?? '--:--:--'}
               </span>
               <Badge variant="outline" className="hidden border-amber-500/40 bg-amber-500/10 text-amber-400 md:inline-flex">
-                Phase 1 / 12
+                Phase 3 / 12
               </Badge>
             </div>
           </div>
@@ -405,10 +652,31 @@ export default function Phase1Dashboard() {
                 key: 'mt5',
                 icon: Network,
                 title: 'MT5 Bridge',
-                value: 'Sandbox-এ অসম্ভব',
-                state: 'বাহ্যিক প্রয়োজন',
-                stateClass: 'border-amber-500/40 bg-amber-500/10 text-amber-400',
-                lines: ['Wine নেই · MetaTrader5 প্যাকেজ Linux-অসমর্থিত (প্রমাণিত)', 'সমাধান: বাহ্যিক VPS ব্রিজ — Phase 2 কন্ট্র্যাক্ট'],
+                value: marketStatus
+                  ? marketStatus.bridge.configured
+                    ? marketStatus.bridge.reachable
+                      ? `${marketStatus.symbol} · ${marketStatus.bridge.status?.source ?? '…'}`
+                      : 'ব্রিজ অনুপলব্ধ'
+                    : 'কনফিগার করা হয়নি'
+                  : '…',
+                state: marketStatus
+                  ? marketStatus.bridge.configured
+                    ? marketStatus.bridge.reachable && marketStatus.bridge.status?.connected
+                      ? marketStatus.bridge.status?.source === 'demo' ? 'ডেমো ফিড' : 'সংযুক্ত'
+                      : 'সংযোগ নেই'
+                    : 'অনুপলব্ধ'
+                  : '…',
+                stateClass: marketStatus
+                  ? marketStatus.bridge.configured && marketStatus.bridge.reachable && marketStatus.bridge.status?.connected
+                    ? marketStatus.bridge.status?.source === 'demo'
+                      ? 'border-amber-500/40 bg-amber-500/10 text-amber-400'
+                      : 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
+                    : 'border-amber-500/40 bg-amber-500/10 text-amber-400'
+                  : 'border-zinc-600/50 bg-zinc-700/20 text-zinc-400',
+                lines: [
+                  `ডেটা অবস্থা: ${marketStatus ? qualityStateBn[marketStatus.readiness.qualityState] : '—'} · প্রস্তুত: ${marketStatus?.readiness.ready ? 'হ্যাঁ' : 'না'}`,
+                  'ওয়েব-টার্মিনাল প্রোটোকল প্রমাণিত · ব্রিজ বসানো Phase 2-এর কাজ',
+                ],
               },
               {
                 key: 'exec',
@@ -475,6 +743,7 @@ export default function Phase1Dashboard() {
           <Tabs defaultValue="audit" className="space-y-4">
             <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1 bg-zinc-900/60 p-1">
               <TabsTrigger value="audit" className="data-[state=active]:bg-amber-500/15 data-[state=active]:text-amber-300">নিরীক্ষণ</TabsTrigger>
+              <TabsTrigger value="market" className="data-[state=active]:bg-amber-500/15 data-[state=active]:text-amber-300">মার্কেট ডেটা</TabsTrigger>
               <TabsTrigger value="arch" className="data-[state=active]:bg-amber-500/15 data-[state=active]:text-amber-300">আর্কিটেকচার</TabsTrigger>
               <TabsTrigger value="glm" className="data-[state=active]:bg-amber-500/15 data-[state=active]:text-amber-300">GLM যাচাই</TabsTrigger>
               <TabsTrigger value="mt5" className="data-[state=active]:bg-amber-500/15 data-[state=active]:text-amber-300">MT5 প্রতিবেদন</TabsTrigger>
@@ -529,6 +798,317 @@ export default function Phase1Dashboard() {
                         {loading && !audit && (
                           <TableRow>
                             <TableCell colSpan={3} className="p-6">
+                              <Skeleton className="h-5 w-full" />
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            {/* ------------------------------------------------ Tab: market data (Phase 3) */}
+            <TabsContent value="market" className="space-y-4">
+              {/* Fail-closed banner */}
+              {marketStatus && (!marketStatus.bridge.configured || !marketStatus.bridge.reachable || !marketStatus.bridge.status?.connected) && (
+                <div
+                  role="alert"
+                  className="flex flex-col gap-2 rounded-xl border border-red-500/40 bg-red-500/10 p-4 sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-400" aria-hidden />
+                    <div>
+                      <p className="text-sm font-semibold text-red-200">ডেটা পাওয়া যাচ্ছে না</p>
+                      <p className="mt-0.5 text-xs leading-relaxed text-zinc-400">
+                        {marketStatus.bridge.error
+                          ? `${bnForCode(marketStatus.bridge.error.code)} `
+                          : 'MT5 ব্রিজ এখনো বসানো হয়নি (Phase 2 ডেলিভারেবল)। '}
+                        ডেটা পাইপলাইন fail-closed — কোনো ডেটা বানানো হবে না; ব্রিজ সচল হলে স্বয়ংক্রিয়ভাবে যুক্ত হবে।
+                      </p>
+                    </div>
+                  </div>
+                  <Badge variant="outline" className="w-fit shrink-0 border-zinc-600/50 bg-zinc-700/20 font-mono text-zinc-400">
+                    {marketStatus.bridge.error?.code ?? 'BRIDGE_NOT_DEPLOYED'}
+                  </Badge>
+                </div>
+              )}
+
+              {/* Demo-source banner (clearly labelled) */}
+              {marketStatus?.bridge.status?.source === 'demo' && (
+                <div
+                  role="status"
+                  className="flex items-center gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 p-4"
+                >
+                  <AlertTriangle className="h-5 w-5 shrink-0 text-amber-400" aria-hidden />
+                  <p className="text-xs leading-relaxed text-amber-200">
+                    <span className="font-semibold">ডেমো ডেটা চিহ্নিত:</span> ব্রিজ কোনো ক্রেডেনশিয়াল ছাড়া স্পষ্টভাবে লেবেল-করা সিন্থেটিক ফিড দিচ্ছে।
+                    এটি লাইভ বাজার নয় — বিশ্লেষণ-প্রস্তুতি কখনোই “প্রস্তুত” হবে না এবং কোনো দাম লাইভ হিসেবে দেখানো হবে না।
+                  </p>
+                </div>
+              )}
+
+              {/* Bridge + tick cards */}
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <Card className="border-zinc-800 bg-zinc-900/40">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="flex flex-wrap items-center gap-2 text-base">
+                      <Network className="h-4 w-4 text-amber-400" aria-hidden /> MT5 ব্রিজ সংযোগ
+                      {marketStatus?.bridge.status?.source && (
+                        <Badge variant="outline" className="font-mono text-[10px] text-zinc-400">source: {marketStatus.bridge.status.source}</Badge>
+                      )}
+                    </CardTitle>
+                    <p className="text-xs text-zinc-500">রিড-ওনলি REST চুক্তি (/health, /api/status, /api/quote, /api/candles) · প্রোব প্রতি ১০ সেকেন্ডে ক্যাশ হয়।</p>
+                  </CardHeader>
+                  <CardContent className="space-y-2 text-xs">
+                    {([
+                      ['কনফিগারড (MT5_BRIDGE_URL)', marketStatus ? (marketStatus.bridge.configured ? 'হ্যাঁ' : 'না') : '—'],
+                      ['সার্ভার পৌঁছানো যায়', marketStatus ? (marketStatus.bridge.reachable ? 'হ্যাঁ' : 'না') : '—'],
+                      ['MT5 সংযুক্ত', marketStatus?.bridge.status ? (marketStatus.bridge.status.connected ? 'হ্যাঁ' : 'না') : '—'],
+                      ['সার্ভার', marketStatus?.bridge.status?.server ?? '—'],
+                      ['লেটেন্সি', marketStatus?.bridge.status?.latencyMs != null ? `${marketStatus.bridge.status.latencyMs}ms` : '—'],
+                      ['প্রোব সময় (ঢাকা)', marketStatus ? fmtDhaka(marketStatus.bridge.probedAtUtc) : '—'],
+                    ] as Array<[string, string]>).map(([k, v]) => (
+                      <div key={k} className="flex items-center justify-between gap-3 border-b border-zinc-800/60 pb-1.5 last:border-0 last:pb-0">
+                        <span className="text-zinc-500">{k}</span>
+                        <span className="text-right font-mono text-zinc-200">{v}</span>
+                      </div>
+                    ))}
+                  </CardContent>
+                </Card>
+
+                <Card className="border-zinc-800 bg-zinc-900/40">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="flex flex-wrap items-center gap-2 text-base">
+                      <Zap className="h-4 w-4 text-amber-400" aria-hidden /> সর্বশেষ টিক — {marketStatus?.symbol ?? 'XAUUSDm'}
+                      {marketStatus?.readiness.tick.state && (
+                        <Badge variant="outline" className={qualityStateBadgeClass(marketStatus.readiness.tick.state)}>
+                          {qualityStateBn[marketStatus.readiness.tick.state]}
+                        </Badge>
+                      )}
+                    </CardTitle>
+                    <p className="text-xs text-zinc-500">প্রতি সিম্বলে একটি স্ন্যাপশট (উচ্চ-ফ্রিকোয়েন্সি টিক ইতিহাস নয় — ইচ্ছাকৃত সীমাবদ্ধতা)।</p>
+                  </CardHeader>
+                  <CardContent className="space-y-2 text-xs">
+                    {marketStatus?.readiness.tick.bid ? (
+                      <>
+                        <div className="grid grid-cols-3 gap-2">
+                          {([
+                            ['Bid', marketStatus.readiness.tick.bid],
+                            ['Ask', marketStatus.readiness.tick.ask],
+                            ['Spread', marketStatus.readiness.tick.spread],
+                          ] as Array<[string, string | null]>).map(([k, v]) => (
+                            <div key={k} className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-2 text-center">
+                              <p className="text-[10px] uppercase tracking-wide text-zinc-500">{k}</p>
+                              <p className="mt-0.5 font-mono text-sm text-amber-200">{v ?? '—'}</p>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="flex items-center justify-between border-b border-zinc-800/60 pb-1.5 text-zinc-500">
+                          <span>টিক সময় (ঢাকা)</span>
+                          <span className="font-mono text-zinc-200">{marketStatus.readiness.tick.lastTickTimeUtc ? fmtDhaka(marketStatus.readiness.tick.lastTickTimeUtc) : '—'}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-zinc-500">
+                          <span>ডেটার বয়স</span>
+                          <span className="font-mono text-zinc-200">
+                            {fmtAge(marketStatus.readiness.tick.ageSeconds)} / সীমা {fmtAge(marketStatus.readiness.tick.stalenessThresholdSeconds)}
+                          </span>
+                        </div>
+                      </>
+                    ) : (
+                      <p className="rounded-lg border border-dashed border-zinc-800 p-3 text-center text-zinc-500">
+                        এখনো কোনো বৈধ টিক সংরক্ষিত হয়নি — ব্রিজ সচল হলে সিঙ্কের পর এখানে আসবে।
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Per-timeframe readiness */}
+              <Card className="border-zinc-800 bg-zinc-900/40">
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex flex-wrap items-center gap-2 text-base">
+                    <LineChart className="h-4 w-4 text-amber-400" aria-hidden /> টাইমফ্রেম অনুযায়ী ডেটা-গুণমান
+                    <Badge variant="outline" className={qualityStateBadgeClass(marketStatus?.readiness.qualityState ?? 'UNAVAILABLE')}>
+                      সামগ্রিক: {qualityStateBn[marketStatus?.readiness.qualityState ?? 'UNAVAILABLE']}
+                    </Badge>
+                  </CardTitle>
+                  <p className="text-xs text-zinc-500">
+                    ফর্মিং ক্যান্ডেল কখনোই নিশ্চিত ইতিহাস হিসেবে গণ্য হয় না — শুধু বন্ধ (closed) ক্যান্ডেল বিবেচিত। সেশন-সচেতন ফাঁক-স্ক্যান উইকেন্ড/বিরতিকে “সম্ভাব্য বাজার-বন্ধ” হিসেবে দেখায় (আনুমানিক, ব্রোকার-যাচাইকৃত নয়)।
+                  </p>
+                </CardHeader>
+                <CardContent className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  {(marketStatus?.readiness.timeframes ?? []).map((tf) => (
+                    <div key={tf.timeframe} className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-mono text-sm font-semibold text-zinc-100">{tf.timeframe}</span>
+                        <Badge variant="outline" className={qualityStateBadgeClass(tf.state)}>{qualityStateBn[tf.state]}</Badge>
+                      </div>
+                      <dl className="mt-2 space-y-1 text-[11px] leading-relaxed text-zinc-400">
+                        <div className="flex justify-between gap-2">
+                          <dt className="text-zinc-500">শেষ বন্ধ ক্যান্ডেল</dt>
+                          <dd className="text-right">{tf.lastClosedCandleTimeUtc ? fmtDhaka(tf.lastClosedCandleTimeUtc) : '—'}</dd>
+                        </div>
+                        <div className="flex justify-between gap-2">
+                          <dt className="text-zinc-500">বয়স / সীমা</dt>
+                          <dd className="text-right font-mono">{fmtAge(tf.lastClosedCandleAgeSeconds)} / {fmtAge(tf.stalenessThresholdSeconds)}</dd>
+                        </div>
+                        <div className="flex justify-between gap-2">
+                          <dt className="text-zinc-500">স্ক্যান / সন্দেহজনক ফাঁক</dt>
+                          <dd className="text-right font-mono">{tf.scannedCandles} / <span className={tf.missingCandles > 0 ? 'text-amber-400' : 'text-zinc-300'}>{tf.missingCandles}</span></dd>
+                        </div>
+                        <div className="flex justify-between gap-2">
+                          <dt className="text-zinc-500">সম্ভাব্য বাজার-বন্ধ ফাঁক</dt>
+                          <dd className="text-right font-mono text-zinc-400">{tf.possibleClosureGaps}</dd>
+                        </div>
+                      </dl>
+                      {tf.errorCodes.length > 0 && (
+                        <p className="mt-2 border-t border-zinc-800/70 pt-1.5 text-[10px] leading-relaxed text-amber-300/80">
+                          {tf.errorCodes.map((c) => bnForCode(c)).join(' ')}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                  {marketStatus && marketStatus.readiness.timeframes.length === 0 && (
+                    <p className="col-span-full rounded-lg border border-dashed border-zinc-800 p-3 text-center text-xs text-zinc-500">
+                      কনফিগারকৃত টাইমফ্রেম নেই।
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Readiness verdict + sync */}
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <Card className="border-zinc-800 bg-zinc-900/40">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="flex flex-wrap items-center gap-2 text-base">
+                      <ShieldCheck className="h-4 w-4 text-amber-400" aria-hidden /> বিশ্লেষণ-প্রস্তুতি (Data Readiness)
+                    </CardTitle>
+                    <p className="text-xs text-zinc-500">
+                      শুধুই ডেটা-প্রস্তুতি নির্দেশক — <span className="text-zinc-300">কোনো ট্রেড সিগন্যাল নয়</span>। প্রস্তুত না হলে ডাউনস্ট্রিম বিশ্লেষণ স্ট্রাকচার্ড “অনুপলব্ধ” ফল পায় — বানানো ক্যান্ডেল বা জোর করে BUY/SELL কখনোই নয়।
+                    </p>
+                  </CardHeader>
+                  <CardContent className="space-y-3 text-xs">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant="outline" className={(marketStatus?.readiness.ready ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400' : 'border-red-500/40 bg-red-500/10 text-red-400')}>
+                        {marketStatus?.readiness.ready ? 'প্রস্তুত (ready)' : 'প্রস্তুত নয় (not ready)'}
+                      </Badge>
+                      <Badge variant="outline" className={qualityStateBadgeClass(marketStatus?.readiness.qualityState ?? 'UNAVAILABLE')}>
+                        quality: {marketStatus?.readiness.qualityState ?? '—'}
+                      </Badge>
+                      <span className="text-zinc-500">ডেটার বয়স: <span className="font-mono text-zinc-300">{fmtAge(marketStatus?.readiness.dataAgeSeconds)}</span></span>
+                    </div>
+                    {marketStatus && marketStatus.readiness.errorCodes.length > 0 ? (
+                      <ul className="space-y-1">
+                        {marketStatus.readiness.errorCodes.map((c) => (
+                          <li key={c} className="flex items-start gap-1.5 text-[11px] leading-relaxed text-zinc-400">
+                            <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0 text-amber-400" aria-hidden />
+                            <span>{bnForCode(c)} <span className="font-mono text-zinc-600">[{c}]</span></span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="text-[11px] text-zinc-500">কোনো ত্রুটি কোড নেই — সব টাইমফ্রেম ও টিক সদ্য-সদ্য সতেজ।</p>
+                    )}
+                  </CardContent>
+                </Card>
+
+                <Card className="border-zinc-800 bg-zinc-900/40">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="flex flex-wrap items-center gap-2 text-base">
+                      <Database className="h-4 w-4 text-amber-400" aria-hidden /> ডেটাবেস সিঙ্ক অবস্থা
+                      {marketStatus?.sync.running && (
+                        <Badge variant="outline" className="border-emerald-500/40 bg-emerald-500/10 text-emerald-400">চলছে…</Badge>
+                      )}
+                    </CardTitle>
+                    <p className="text-xs text-zinc-500">আইডেমপোটেন্ট আপসার্ট — একই ক্যান্ডেল দুবার সিঙ্ক করলেও ডুপ্লিকেট রেকর্ড হয় না।</p>
+                  </CardHeader>
+                  <CardContent className="space-y-3 text-xs">
+                    {([
+                      ['সর্বশেষ রান', marketStatus?.sync.lastRun],
+                      ['সর্বশেষ সফল', marketStatus?.sync.lastSuccess],
+                      ['সর্বশেষ ব্যর্থ/আংশিক', marketStatus?.sync.lastFailure],
+                    ] as Array<[string, SyncRunSummary | null | undefined]>).map(([label, run]) => (
+                      <div key={label} className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-2.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-zinc-500">{label}</span>
+                          {run ? (
+                            <Badge variant="outline" className={run.status === 'success' ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400' : run.status === 'partial' ? 'border-amber-500/40 bg-amber-500/10 text-amber-400' : 'border-red-500/40 bg-red-500/10 text-red-400'}>
+                              {syncStatusBn(run.status)}
+                            </Badge>
+                          ) : (
+                            <span className="text-zinc-600">এখনো নেই</span>
+                          )}
+                        </div>
+                        {run && (
+                          <p className="mt-1 font-mono text-[10px] leading-relaxed text-zinc-400">
+                            {fmtDhaka(run.startedAtUtc)} · {run.mode} · {run.timeframes.join('/')}
+                            {' '}· প্রাপ্ত {run.received} · নতুন {run.inserted} · আপডেট {run.updated} · বাতিল {run.rejected} · ডুপ {run.duplicates}
+                            {run.durationMs != null ? ` · ${(run.durationMs / 1000).toFixed(1)}s` : ''}
+                            {run.errorCode ? ` · [${run.errorCode}]` : ''}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                    <Button
+                      onClick={() => void runSyncNow()}
+                      disabled={syncing || !marketStatus}
+                      className="w-full gap-2 bg-amber-500/15 text-amber-300 hover:bg-amber-500/25"
+                      variant="outline"
+                    >
+                      {syncing ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <RefreshCw className="h-4 w-4" aria-hidden />}
+                      {syncing ? 'সিঙ্ক চলছে…' : 'এখনই সিঙ্ক করুন (ম্যানুয়াল)'}
+                    </Button>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Data-quality issues */}
+              <Card className="border-zinc-800 bg-zinc-900/40">
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex flex-wrap items-center gap-2 text-base">
+                    <AlertTriangle className="h-4 w-4 text-amber-400" aria-hidden /> ডেটা-গুণমান সমস্যা (খোলা)
+                    <Badge variant="outline" className="border-zinc-700 bg-zinc-800/60 text-zinc-400">{marketQuality?.openIssues.length ?? 0} টি</Badge>
+                  </CardTitle>
+                  <p className="text-xs text-zinc-500">প্রতি সিঙ্ক রানে সীমিত সংখ্যক সমস্যা সংরক্ষিত হয় (ফ্লাড নিয়ন্ত্রণ) — বিস্তারিত নিরাপদ ডায়াগনস্টিক।</p>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <div className="custom-scrollbar max-h-96 overflow-y-auto">
+                    <Table>
+                      <TableHeader className="sticky top-0 z-10 bg-zinc-950/95 backdrop-blur">
+                        <TableRow className="border-zinc-800 hover:bg-transparent">
+                          <TableHead className="pl-4 sm:pl-6">সময় (ঢাকা)</TableHead>
+                          <TableHead>মাত্রা</TableHead>
+                          <TableHead>কোড</TableHead>
+                          <TableHead>টাইমফ্রেম</TableHead>
+                          <TableHead className="pr-4 sm:pr-6">বিবরণ</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {(marketQuality?.openIssues ?? []).map((i) => (
+                          <TableRow key={i.id} className="border-zinc-800/70">
+                            <TableCell className="whitespace-nowrap pl-4 text-xs tabular-nums text-zinc-500 sm:pl-6">{fmtDhaka(i.checkedAtUtc)}</TableCell>
+                            <TableCell>
+                              <span className={`inline-flex rounded border px-1.5 py-0.5 text-[10px] font-medium uppercase ${levelBadgeClass(i.severity === 'error' ? 'error' : i.severity === 'warning' ? 'warn' : 'info')}`}>
+                                {i.severity}
+                              </span>
+                            </TableCell>
+                            <TableCell className="font-mono text-xs text-amber-300/80">{i.errorCode}</TableCell>
+                            <TableCell className="font-mono text-xs text-zinc-400">{i.timeframe ?? '—'}</TableCell>
+                            <TableCell className="pr-4 text-xs text-zinc-300 sm:pr-6">{bnForCode(i.errorCode)}{i.details?.detail ? <span className="block text-[10px] text-zinc-500">{i.details.detail}</span> : null}</TableCell>
+                          </TableRow>
+                        ))}
+                        {marketQuality && marketQuality.openIssues.length === 0 && (
+                          <TableRow>
+                            <TableCell colSpan={5} className="p-6 text-center text-sm text-zinc-500">
+                              কোনো খোলা সমস্যা নেই।
+                            </TableCell>
+                          </TableRow>
+                        )}
+                        {!marketQuality && (
+                          <TableRow>
+                            <TableCell colSpan={5} className="p-6">
                               <Skeleton className="h-5 w-full" />
                             </TableCell>
                           </TableRow>
@@ -978,7 +1558,7 @@ export default function Phase1Dashboard() {
         <div className="mx-auto flex w-full max-w-7xl flex-col gap-2 px-4 py-4 text-xs text-zinc-500 sm:px-6 md:flex-row md:items-center md:justify-between">
           <p className="flex items-center gap-1.5">
             <LockKeyhole className="h-3.5 w-3.5 text-red-400" aria-hidden />
-            XAUUSD AI Trading Agent · Phase 1/12 · Read-Only — কোনো অর্ডার পাঠানো হবে না
+            XAUUSD AI Trading Agent · Phase 3/12 · Read-Only — কোনো অর্ডার পাঠানো হবে না
           </p>
           <p className="font-mono text-[11px] text-zinc-600">
             Next.js 16 · TypeScript · Prisma/SQLite · z-ai-web-dev-sdk (glm-4-plus)

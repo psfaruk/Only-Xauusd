@@ -39,38 +39,124 @@ model SystemEvent {
 }
 
 // ============================================================================
-// PHASE 3 (planned) — market data persistence
+// PHASE 3 (ACTIVE) — market data persistence
+// ----------------------------------------------------------------------------
+// Price storage decision (empirically verified, see audit/phase3-audit.md):
+// Prisma "Decimal" on SQLite maps to a DECIMAL-affinity column which SQLite
+// stores as REAL (float64) — typeof() === 'real' — so it is NOT a true decimal.
+// To avoid binary floating-point artifacts in PERSISTED prices, all price
+// fields are canonical decimal TEXT strings (e.g. "2654.32"), produced via
+// toFixed(verifiedDigits) from broker metadata. Exact, immutable, no drift.
+// Time-based queries never filter on price; analysis parses at read time.
 // ============================================================================
 
+/// Broker candles. One row per (symbol, timeframe, bar-open-UTC) — idempotent
+/// upsert target. The latest FORMING bar is stored with isForming=true and is
+/// never exposed as confirmed historical data.
 model MarketCandle {
-  id        String   @id @default(cuid())
-  symbol    String
-  timeframe String // M5 | M15 | H1 | H4
-  timestamp DateTime
-  open      Float
-  high      Float
-  low       Float
-  close     Float
-  volume    Float
-  source    String // mt5-bridge | synthetic
-  quality   String   @default("ok") // ok | stale | suspicious
-  createdAt DateTime @default(now())
+  id               String   @id @default(cuid())
+  symbol           String
+  timeframe        String // M5 | M15 | H1 | H4 (allowlist-enforced at ingestion)
+  candleTimeUtc    DateTime // bar OPEN time, UTC (bridge normalizes broker→UTC)
+  open             String // canonical decimal text — exact price
+  high             String
+  low              String
+  close            String
+  tickVolume       Int? // broker tick volume when supplied
+  spread           String? // candle spread in PRICE units when supplied
+  source           String // row-level provenance, e.g. mt5-bridge | demo-bridge
+  isForming        Boolean  @default(false)
+  validationStatus String   @default("VALID") // VALID | WARNING | INVALID
+  receivedAtUtc    DateTime
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
-  @@unique([symbol, timeframe, timestamp])
-  @@index([symbol, timeframe, timestamp])
+  @@unique([symbol, timeframe, candleTimeUtc])
+  @@index([symbol, timeframe, candleTimeUtc])
 }
 
-model MarketTick {
-  id        String   @id @default(cuid())
-  symbol    String
-  bid       Float
-  ask       Float
-  spread    Float
-  timestamp DateTime
-  source    String
-  createdAt DateTime @default(now())
+/// Latest-tick snapshot — exactly one row per symbol (id = symbol).
+/// Deliberately NOT a high-frequency tick history: excessive tick writes are
+/// avoided by design (spec Phase 3 §B). Staleness is judged by tickTimeUtc.
+model MarketLatestTick {
+  symbol           String   @id
+  bid              String // canonical decimal text
+  ask              String
+  spread           String? // ask − bid, PRICE units
+  spreadPoints     String? // (ask − bid) / point — only when point is calculable from verified digits
+  tickTimeUtc      DateTime
+  receivedAtUtc    DateTime
+  source           String
+  validationStatus String   @default("VALID") // VALID | WARNING | INVALID
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
 
-  @@index([symbol, timestamp])
+/// Only VERIFIED broker/MT5 values. Nullable fields stay null until the
+/// bridge actually reports them — nothing is inferred from assumptions.
+/// verifiedFields lists which columns came from the bridge vs. derived
+/// (e.g. point = 10^-digits is marked derived in meta, never claimed as broker-reported).
+model SymbolSpec {
+  symbol         String   @id
+  digits         Int?
+  point          String? // canonical decimal text
+  tickSize       String?
+  tickValue      String?
+  volumeMin      String?
+  volumeMax      String?
+  volumeStep     String?
+  source         String
+  verifiedFields String // JSON array of field names actually verified
+  meta           String? // JSON provenance notes (derivations) — never secrets
+  lastVerifiedAt DateTime
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+/// Data-quality check outcomes (bounded per sync run — never floods).
+model DataQualityIssue {
+  id               String    @id @default(cuid())
+  checkType        String // e.g. OHLC_CONSISTENCY | MISSING_CANDLE | STALE_TICK | GAP_SCAN
+  symbol           String?
+  timeframe        String?
+  targetTimeUtc    DateTime?
+  targetRecordId   String?
+  severity         String // info | warning | error
+  errorCode        String // stable machine-readable code
+  details          String // JSON — safe diagnostics only, no credentials
+  checkedAtUtc     DateTime
+  resolutionStatus String    @default("open") // open | resolved | ignored
+  resolvedAt       DateTime?
+
+  @@index([symbol, timeframe, checkedAtUtc])
+  @@index([resolutionStatus, severity])
+}
+
+/// Every ingestion run — honest bookkeeping. Incomplete runs are never
+/// marked successful (status: running | success | partial | failed | skipped).
+model SyncRun {
+  id            String    @id @default(cuid())
+  mode          String // scheduled | manual | backfill
+  source        String // bridge feed source at run time (mt5 | demo | none)
+  symbol        String
+  timeframes    String // JSON array of requested timeframes
+  rangeStartUtc DateTime?
+  rangeEndUtc   DateTime?
+  startedAtUtc  DateTime  @default(now())
+  endedAtUtc    DateTime?
+  requested     Int       @default(0) // bars the caller asked the bridge for
+  received      Int       @default(0) // bars the bridge returned
+  inserted      Int       @default(0)
+  updated       Int       @default(0)
+  rejected      Int       @default(0) // failed validation
+  duplicates    Int       @default(0) // same key received more than once in one run
+  status        String    @default("running")
+  errorCode     String?
+  errorMessage  String? // safe, non-secret
+  durationMs    Int?
+
+  @@index([startedAtUtc])
+  @@index([symbol, status])
 }
 
 // ============================================================================
