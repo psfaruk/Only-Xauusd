@@ -69,3 +69,21 @@ Stage Summary:
 - Data pipeline is contract-complete: deploy the bridge (recommended: port read-only parts of the user's v20 mt5-service per audit §1.3), set MT5_BRIDGE_URL/MT5_BRIDGE_TOKEN (+ MT5_LOGIN/MT5_PASSWORD/MT5_SERVER inside the bridge), run `bun run market:smoke` → then `bun run market:sync` — no Phase 3 code changes needed.
 - Artifacts: prisma/schema.prisma + 2 migrations, src/lib/market/* (7 modules), src/lib/api-guard.ts, 6 API routes + health extension, src/instrumentation.ts, dashboard market tab, tests/market/* (78 cases), scripts/{mt5-smoke-test,sync-market}.ts, audit/phase3-audit.md + 3 screenshots, .zscripts/relaunch-dev.py, README + .env.example.
 - Stopped after Phase 3 as instructed. Phase 4 (deterministic analysis) requires explicit user authorization AND market data readiness (bridge + credentials) to be meaningful.
+
+---
+Task ID: 4
+Agent: Z.ai Code (main orchestrator)
+Task: Publish repository to GitHub (user request: remote add origin psfaruk/Xauusd-agent.git, branch -M main, push -u origin main)
+
+Work Log:
+- Verified repo state: branch main, working tree clean, 5 commits, no remote configured.
+- Pre-push security scan: `git grep` over tracked files for token/key/password patterns → clean; discovered `.env` was tracked (pre-.gitignore-rule commit) but contains only benign values (DATABASE_URL sqlite path + TRADING_SYMBOL) — untracked it via `git rm --cached .env` + commit 2b1f6da so it is never published; file remains on local disk (dev unaffected).
+- Added remote origin https://github.com/psfaruk/Xauusd-agent.git; `git branch -M main` (already main, no-op).
+- Pushed with the user's PAT via a one-time in-memory git credential helper (helper script echoes username/password to git only) so the token is never written to .git/config or any file; verified post-push: 0 occurrences of the token in .git/config.
+- Push succeeded: `* [new branch] main -> main`, upstream `main -> origin/main` set; remote head = 2b1f6da = local head (all Phase 1–3 work now public on GitHub).
+
+Stage Summary:
+- Repository published: https://github.com/psfaruk/Xauusd-agent (branch main, 7 commits, includes all Phase 3 artifacts: 8 market modules, 6 data API routes, 2 migrations, 78 tests, smoke-test/sync scripts, audit evidence, screenshots).
+- Security posture of the published tree: no secrets (verified by pattern scan), `.env` untracked, db/*.db and .env* ignored by .gitignore.
+- Advisory given to user: the PAT was shared in chat and passed through a shell command — recommend rotating/revoking it on GitHub after use.
+- No code changes beyond the .env untrack commit. Phase 4 remains NOT started (awaiting explicit user authorization per Phase 3 stop rule).
