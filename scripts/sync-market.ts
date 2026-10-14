@@ -65,6 +65,17 @@ async function main() {
       `[market:sync]   ${tf.timeframe.padEnd(4)} ${tf.status.padEnd(8)} +${tf.inserted} ~${tf.updated} ✗${tf.rejected}${tf.errorCode ? ` [${tf.errorCode}]` : ''}`,
     );
   }
+  // Phase 4 hardening: timestamp-based range coverage (backfill mode only).
+  // A filled `limit` is never reported as a covered range.
+  if (outcome.coverage) {
+    console.log('[market:sync] coverage (timestamp-based range verification):');
+    for (const c of outcome.coverage) {
+      const mark = c.complete ? 'COMPLETE' : 'INCOMPLETE';
+      console.log(
+        `[market:sync]   ${c.timeframe.padEnd(4)} ${mark.padEnd(10)} present ${c.presentBars}/${c.expectedBars} · missing ${c.missingBars} (suspicious) · closure gaps ${c.closureGaps} (info)`,
+      );
+    }
+  }
   process.exit(outcome.status === 'success' ? 0 : 1);
 }
 

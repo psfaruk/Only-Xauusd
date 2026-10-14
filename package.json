@@ -11,7 +11,7 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:reset": "prisma migrate reset",
-    "test": "bun test tests/market",
+    "test": "bun test",
     "market:smoke": "bun run scripts/mt5-smoke-test.ts",
     "market:sync": "bun run scripts/sync-market.ts"
   },

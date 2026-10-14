@@ -1,16 +1,22 @@
 /**
- * XAUUSD AI Trading Agent — API Guard (Phase 3)
+ * XAUUSD AI Trading Agent — API Guard (Phase 3, hardened in Phase 4)
  * ----------------------------------------------------------------------------
- * Shared authentication + rate limiting for the /api/data/* surface.
+ * Shared authentication + rate limiting for the /api/data/* and /api/analysis/*
+ * surface.
  *
- * Auth model (documented in README §Security):
- *   · When DATA_API_TOKEN is set → EVERY /api/data/* request must present
- *     `Authorization: Bearer <token>` (timing-safe compare). Fail-closed 401.
- *   · When unset → read-only GETs remain public (same posture as the Phase 1
- *     health endpoints); the sync trigger is rate-limited harder.
+ * Security posture (Phase 4 hardening — fail closed, README §Security):
+ *   · TRIGGER endpoints (POST /api/data/sync, POST /api/analysis/run) require
+ *     DATA_API_TOKEN ALWAYS. When the token is unset they respond 503
+ *     MARKET_API_TOKEN_NOT_CONFIGURED and never run. There is no bypass.
+ *   · READ endpoints (GET) require the bearer token whenever it is set.
+ *     When it is unset they fail closed with the same 503 UNLESS the operator
+ *     explicitly opts in via MARKET_API_PUBLIC_READS=true (preview/dashboards
+ *     only — never in production).
+ *   · Token comparison is timing-safe; the value is never logged or echoed.
  *
  * Rate limiting: fixed-window per client IP, in-memory (per server instance).
- * The bearer token is NEVER logged and never echoed back.
+ * Reads behind a token get the standard budget; unauthenticated reads (public
+ * opt-in) get a smaller one. Triggers are always tightly bounded.
  */
 
 import { NextResponse } from 'next/server';
@@ -69,8 +75,12 @@ export function jsonError(
 }
 
 /**
- * Guard a /api/data/* request: bearer auth (when configured) + rate limit.
- * `bucket` separates read vs trigger budgets.
+ * Guard a protected request. `bucket`:
+ *   · 'trigger' — write/trigger endpoints (POST sync / POST analysis run):
+ *     bearer token ALWAYS required; unset token → 503 fail closed.
+ *   · 'read' — read endpoints (GET): token required when set; when unset,
+ *     allowed only with the explicit MARKET_API_PUBLIC_READS opt-in,
+ *     otherwise 503 fail closed.
  */
 export function guardDataApi(
   request: Request,
@@ -89,22 +99,54 @@ export function guardDataApi(
     };
   }
 
-  // ---- Bearer auth (only when DATA_API_TOKEN is configured) -----------------
+  // ---- Bearer auth ----------------------------------------------------------
   // Read at CALL time so operators (and tests) can enable/disable without a
   // process restart; the value itself never leaves this function.
   const token = process.env.DATA_API_TOKEN ?? '';
-  if (token) {
-    const auth = request.headers.get('authorization') ?? '';
-    const presented = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
-    if (!presented) {
-      return { ok: false, response: jsonError(401, ErrorCode.AUTH_MISSING_TOKEN, 'Missing Authorization: Bearer token (DATA_API_TOKEN is configured).') };
+
+  const requireToken = () => {
+    if (token) {
+      const auth = request.headers.get('authorization') ?? '';
+      const presented = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+      if (!presented) {
+        return jsonError(401, ErrorCode.AUTH_MISSING_TOKEN, 'Missing Authorization: Bearer token (DATA_API_TOKEN is configured).');
+      }
+      if (!safeBearerEqual(presented, token)) {
+        return jsonError(401, ErrorCode.AUTH_INVALID_TOKEN, 'Invalid bearer token.');
+      }
+      return null; // authorized
     }
-    if (!safeBearerEqual(presented, token)) {
-      return { ok: false, response: jsonError(401, ErrorCode.AUTH_INVALID_TOKEN, 'Invalid bearer token.') };
-    }
+    return jsonError(
+      503,
+      ErrorCode.MARKET_API_TOKEN_NOT_CONFIGURED,
+      'Fail-closed: DATA_API_TOKEN is not set. This endpoint never runs unauthenticated. Set DATA_API_TOKEN (see README §Security).',
+    );
+  };
+
+  if (bucket === 'trigger') {
+    // Triggers ALWAYS require the token — no bypass, no opt-in.
+    const failure = requireToken();
+    if (failure) return { ok: false, response: failure };
+    return { ok: true };
   }
 
-  return { ok: true };
+  // Reads: token set → bearer required. Token unset → public opt-in or 503.
+  if (token) {
+    const failure = requireToken();
+    if (failure) return { ok: false, response: failure };
+    return { ok: true };
+  }
+  if (process.env.MARKET_API_PUBLIC_READS === 'true' || process.env.MARKET_API_PUBLIC_READS === '1') {
+    return { ok: true }; // explicitly opted-in public read (preview only)
+  }
+  return {
+    ok: false,
+    response: jsonError(
+      503,
+      ErrorCode.MARKET_API_TOKEN_NOT_CONFIGURED,
+      'Fail-closed: DATA_API_TOKEN is not set and public reads are not enabled. Set DATA_API_TOKEN (recommended) or MARKET_API_PUBLIC_READS=true for preview dashboards only (see README §Security).',
+    ),
+  };
 }
 
 /** Parse + validate query params through a zod schema; fail-closed 400. */

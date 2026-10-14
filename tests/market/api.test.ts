@@ -164,39 +164,84 @@ describe('GET /api/data/sync-status & /api/data/latest', () => {
 });
 
 describe('POST /api/data/sync (case 15-adjacent + validation)', () => {
+  // Phase 4 hardening: POST triggers require DATA_API_TOKEN ALWAYS. These
+  // route-level tests set the token so the guard passes and the ORIGINAL
+  // validation/fail-closed behavior below the guard is still exercised.
+  const TOKEN = 'test-secret-token-123';
+  /** Merge extra headers with the Authorization header. */
+  const authed = (headers: Record<string, string> = {}): { headers: Record<string, string> } => ({
+    headers: { ...headers, Authorization: `Bearer ${TOKEN}` },
+  });
+
+  test('unauthenticated POST is refused before any work (fail closed, no bypass)', async () => {
+    const hadToken = process.env.DATA_API_TOKEN;
+    const hadFlag = process.env.MARKET_API_PUBLIC_READS;
+    delete process.env.DATA_API_TOKEN;
+    process.env.MARKET_API_PUBLIC_READS = 'true'; // even with public reads ON…
+    try {
+      const { POST } = await import('@/app/api/data/sync/route');
+      const res = await POST(
+        req('/api/data/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ symbol: SYMBOL, mode: 'manual' }),
+        }),
+      );
+      expect(res.status).toBe(503);
+      const body = (await res.json()) as { ok: boolean; error: { code: string } };
+      expect(body.ok).toBe(false);
+      expect(body.error.code).toBe('MARKET_API_TOKEN_NOT_CONFIGURED');
+    } finally {
+      if (hadToken === undefined) delete process.env.DATA_API_TOKEN;
+      else process.env.DATA_API_TOKEN = hadToken;
+      if (hadFlag === undefined) delete process.env.MARKET_API_PUBLIC_READS;
+      else process.env.MARKET_API_PUBLIC_READS = hadFlag;
+    }
+  });
+
   test('invalid body (bad timeframe) → 400; no run executed', async () => {
-    const { POST } = await import('@/app/api/data/sync/route');
-    const res = await POST(
-      req('/api/data/sync', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ symbol: SYMBOL, timeframes: ['M7'], mode: 'manual' }),
-      }),
-    );
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { ok: boolean; error: { code: string } };
-    expect(body.ok).toBe(false);
-    expect(body.error.code).toBe('BAD_REQUEST');
+    process.env.DATA_API_TOKEN = TOKEN;
+    try {
+      const { POST } = await import('@/app/api/data/sync/route');
+      const res = await POST(
+        req('/api/data/sync', {
+          method: 'POST',
+          ...authed({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({ symbol: SYMBOL, timeframes: ['M7'], mode: 'manual' }),
+        }),
+      );
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { ok: boolean; error: { code: string } };
+      expect(body.ok).toBe(false);
+      expect(body.error.code).toBe('BAD_REQUEST');
+    } finally {
+      delete process.env.DATA_API_TOKEN;
+    }
   });
 
   test('fail-closed: bridge not configured → 503 with structured outcome', async () => {
-    const { POST } = await import('@/app/api/data/sync/route');
-    const res = await POST(
-      req('/api/data/sync', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ symbol: SYMBOL, mode: 'manual' }),
-      }),
-    );
-    expect(res.status).toBe(503);
-    const body = (await res.json()) as { ok: boolean; outcome: { status: string; errorCode: string } };
-    expect(body.ok).toBe(true);
-    expect(body.outcome.status).toBe('failed');
-    expect(body.outcome.errorCode).toBe('BRIDGE_NOT_CONFIGURED');
+    process.env.DATA_API_TOKEN = TOKEN;
+    try {
+      const { POST } = await import('@/app/api/data/sync/route');
+      const res = await POST(
+        req('/api/data/sync', {
+          method: 'POST',
+          ...authed({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({ symbol: SYMBOL, mode: 'manual' }),
+        }),
+      );
+      expect(res.status).toBe(503);
+      const body = (await res.json()) as { ok: boolean; outcome: { status: string; errorCode: string } };
+      expect(body.ok).toBe(true);
+      expect(body.outcome.status).toBe('failed');
+      expect(body.outcome.errorCode).toBe('BRIDGE_NOT_CONFIGURED');
+    } finally {
+      delete process.env.DATA_API_TOKEN;
+    }
   });
 });
 
-describe('case 15 — authentication (DATA_API_TOKEN)', () => {
+describe('case 15 — authentication (DATA_API_TOKEN, Phase 4 hardened posture)', () => {
   test('missing token → 401 AUTH_MISSING_TOKEN; wrong token → 401 AUTH_INVALID_TOKEN; valid → 200', async () => {
     process.env.DATA_API_TOKEN = 'test-secret-token-123';
     try {
@@ -213,14 +258,45 @@ describe('case 15 — authentication (DATA_API_TOKEN)', () => {
       const goodAuth = await GET(req('/api/data/status', { headers: { Authorization: 'Bearer test-secret-token-123' } }));
       expect(goodAuth.status).toBe(200);
     } finally {
-      delete process.env.DATA_API_TOKEN; // restore open-reads posture for other tests
+      delete process.env.DATA_API_TOKEN;
     }
   });
 
-  test('after unsetting the token, reads are open again (documented posture)', async () => {
-    const { GET } = await import('@/app/api/data/status/route');
-    const res = await GET(req('/api/data/status'));
-    expect(res.status).toBe(200);
+  test('token unset + no public-reads opt-in → reads fail closed 503 (new default posture)', async () => {
+    const hadToken = process.env.DATA_API_TOKEN;
+    const hadFlag = process.env.MARKET_API_PUBLIC_READS;
+    delete process.env.DATA_API_TOKEN;
+    delete process.env.MARKET_API_PUBLIC_READS;
+    try {
+      const { GET } = await import('@/app/api/data/status/route');
+      const res = await GET(req('/api/data/status'));
+      expect(res.status).toBe(503);
+      const body = (await res.json()) as { ok: boolean; error: { code: string } };
+      expect(body.ok).toBe(false);
+      expect(body.error.code).toBe('MARKET_API_TOKEN_NOT_CONFIGURED');
+    } finally {
+      if (hadToken === undefined) delete process.env.DATA_API_TOKEN;
+      else process.env.DATA_API_TOKEN = hadToken;
+      if (hadFlag === undefined) delete process.env.MARKET_API_PUBLIC_READS;
+      else process.env.MARKET_API_PUBLIC_READS = hadFlag;
+    }
+  });
+
+  test('token unset + explicit MARKET_API_PUBLIC_READS=true → reads open (documented opt-in)', async () => {
+    const hadToken = process.env.DATA_API_TOKEN;
+    const hadFlag = process.env.MARKET_API_PUBLIC_READS;
+    delete process.env.DATA_API_TOKEN;
+    process.env.MARKET_API_PUBLIC_READS = 'true';
+    try {
+      const { GET } = await import('@/app/api/data/status/route');
+      const res = await GET(req('/api/data/status'));
+      expect(res.status).toBe(200);
+    } finally {
+      if (hadToken === undefined) delete process.env.DATA_API_TOKEN;
+      else process.env.DATA_API_TOKEN = hadToken;
+      if (hadFlag === undefined) delete process.env.MARKET_API_PUBLIC_READS;
+      else process.env.MARKET_API_PUBLIC_READS = hadFlag;
+    }
   });
 });
 

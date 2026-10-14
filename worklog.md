@@ -87,3 +87,28 @@ Stage Summary:
 - Security posture of the published tree: no secrets (verified by pattern scan), `.env` untracked, db/*.db and .env* ignored by .gitignore.
 - Advisory given to user: the PAT was shared in chat and passed through a shell command — recommend rotating/revoking it on GitHub after use.
 - No code changes beyond the .env untrack commit. Phase 4 remains NOT started (awaiting explicit user authorization per Phase 3 stop rule).
+
+---
+Task ID: 5
+Agent: Z.ai Code (main orchestrator)
+Task: Phase 4 — Deterministic Market Analysis Engine + Phase 3 review fixes (user-authorized)
+
+Work Log:
+- Step 0 inspection recorded in audit/phase4-audit.md §0: bun test 78/78 exit 0, lint exit 0, DB state (SystemEvent 5 intact, market tables 0, migrations 0_init+phase3), bridge honestly undeployed.
+- Prerequisite fix #1 (auth): guardDataApi hardened — POST triggers (/api/data/sync, /api/analysis/run) require DATA_API_TOKEN ALWAYS (unset → 503 MARKET_API_TOKEN_NOT_CONFIGURED, no bypass even with public reads ON); GETs fail closed by default, open only with explicit MARKET_API_PUBLIC_READS=true (sandbox .env sets it for preview; documented never-for-production). Phase 3 auth tests rewritten for the new posture (strengthened, not weakened).
+- Prerequisite fix #5 (backfill): computeBackfillCoverage builds the due-bar grid for the requested range and counts actually-persisted closed candles; incomplete range → run NEVER success (all-incomplete→failed, some→partial) with BACKFILL_INCOMPLETE + per-tf coverage in SyncOutcome; sync-market.ts prints the coverage table. The old test expecting success for a 100/288-bar day was the bug — now 3 tests pin the new behavior.
+- Prerequisite fix #3 (audit): audit/phase4-audit.md created for the current tree — resolves the phase3-audit contradictions (§1.1 old-schema text = Step-1 history; §1.2 Decimal note = decision trail, current schema is canonical decimal TEXT by design; §1.3 MarketTick drop happened with 0 rows in the affected tables — verified; Phase 4 migration is additive-only going forward).
+- Phase 4 engine (src/lib/analysis/*, 9 modules): types (ENGINE_VERSION 4.0.0, typed reason codes), readiness (per-tf gate reusing Phase 3 semantics + tick gate), swings (both-sides window, strict-left/non-strict-right, tie rule earlier-wins, original+confirmation timestamps), structure (HH/HL/LH/LL + UNCLEAR on ties; close-only BOS/CHoCH with consumed levels, unconfirmed wick crossings recorded separately, trend-at-break preserved), indicators (EMA 20/50/200 SMA-seed; RSI/ATR/ADX 14 Wilder; ADX DI± surfaced; non-finite → error never a value), engine (orchestration + sha256 input fingerprint over exact decimal-text), persistence (loader with read-time re-validation incl. 'NaN'-text rejection; honest AnalysisRun saver), schemas (zod), service (audit trail ANALYSIS_RUN_*).
+- Blocked semantics: ANY gate failure (tick/tf/demo/insufficient/in-window gap) → whole run BLOCKED; structure/indicators OMITTED, never partially fabricated.
+- Migration 20261014133225_phase4_analysis_runs: additive only (6 ALTER ADD COLUMN + 2 CREATE INDEX; no DROP/ALTER COLUMN) — verified by reading the SQL + unchanged row counts (SystemEvent 5, SyncRun 4 preserved).
+- API: POST /api/analysis/run (always-auth trigger; BLOCKED is HTTP 200 honest verdict, FAILED → 500 ANALYSIS_ERROR) + GET /api/analysis/latest. No order/trade/position endpoints anywhere (static scans cover the new routes + src/lib/analysis has no BUY/SELL/order/position/lot tokens).
+- Dashboard: new "বিশ্লেষণ" tab (engine card, per-tf readiness chips, per-tf structure+indicator cards, BLOCKED banner with Bengali reason text, run button with honest fail-closed errors, explicit not-a-signal disclaimers); header/KPI/footer updated to Phase 4; stale Phase-1 texts corrected.
+- Tests: 62 new Phase 4 tests (indicators 17 with hand-computed references — EMA closed form n+1−9.5, RSI 750/14 & 9750/196, ATR 29/14 & 447/196, ADX=100/DI+=100, flat-market 50/0 warnings; structure 16 with pinned fixtures; readiness 13; persistence/API 16 incl. real synchronous-fault injection for FAILED). Total suite 144/144; lint 0; tsc no new errors.
+- E2E browser verification (agent-browser): all 8 tabs render; analysis tab shows honest BLOCKED (persisted run) with fingerprint matching the API payload; POST without token → 503 live-verified; authed POST through the browser (temp token, removed after) → 200 BLOCKED [DATA_MISSING, INSUFFICIENT_DATA], hasStructure:false; audit trail ANALYSIS_RUN_BLOCKED recorded; mobile 390px NO-OVERFLOW; 0 console/page errors; VLM QA desktop 7/7 PASS + mobile PASS (screenshots audit/phase4-{desktop,mobile}.png).
+- Transient observed & resolved: sandbox GLM tool-calling leg failed once (GLM_VERIFY_FAIL) then re-verified OK on retry (1438ms) — /api/health back to 200 ok (glm verified, execution lock engaged). Pre-existing Phase 1 mechanism; unrelated to Phase 4 code (Phase 4 is LLM-free).
+
+Stage Summary:
+- Phase 4 COMPLETE and browser-verified; 144/144 tests; lint clean; migration additive-only with data preserved (row counts verified before/after).
+- Real MT5 smoke test still NOT performed and NOT claimed (bridge undeployed, no credentials) — every analysis in the sandbox today honestly returns BLOCKED; the engine is contract-complete and will run for real once Phase 2 lands.
+- Security posture hardened per the Phase 3 review: POST triggers always-auth (no bypass), GETs opt-in public reads (preview only), backfill coverage timestamp-verified.
+- STOPPED after Phase 4 as instructed. Phase 5 (signal construction) NOT started — no BUY/SELL/order/position code exists anywhere (statically tested).

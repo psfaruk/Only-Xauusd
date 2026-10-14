@@ -123,6 +123,19 @@ export const ErrorCode = {
   DB_ERROR: 'DB_ERROR',
   DB_TX_FAILED: 'DB_TX_FAILED',
   SYNC_IN_PROGRESS: 'SYNC_IN_PROGRESS',
+
+  // API security posture (Phase 4 hardening — fail closed)
+  MARKET_API_TOKEN_NOT_CONFIGURED: 'MARKET_API_TOKEN_NOT_CONFIGURED',
+
+  // Backfill coverage (Phase 4 hardening — range vs received)
+  BACKFILL_INCOMPLETE: 'BACKFILL_INCOMPLETE',
+
+  // Analysis engine (Phase 4 — analysis-only, never signals)
+  ANALYSIS_ERROR: 'ANALYSIS_ERROR',
+  DATA_NOT_READY: 'DATA_NOT_READY',
+  DATA_INVALID: 'DATA_INVALID',
+  DEMO_DATA_BLOCKED: 'DEMO_DATA_BLOCKED',
+  INSUFFICIENT_DATA: 'INSUFFICIENT_DATA',
 } as const;
 
 export type ErrorCodeValue = (typeof ErrorCode)[keyof typeof ErrorCode];
@@ -305,6 +318,17 @@ export interface SyncOutcome {
   durationMs: number;
   errorCode: string | null;
   errorMessage: string | null;
+  /** Backfill-only: timestamp-based verification that the requested range is
+   * actually covered by persisted candles (Phase 4 hardening — a filled `limit`
+   * is never mistaken for a covered range). Null for non-backfill modes. */
+  coverage: Array<{
+    timeframe: Timeframe;
+    expectedBars: number; // grid bars that were due (closed) in [rangeStart, rangeEnd)
+    presentBars: number; // of those, actually persisted as closed candles
+    missingBars: number; // expected-but-absent OUTSIDE approximate closure windows (suspicious)
+    closureGaps: number; // expected-but-absent inside approximate closure envelopes (info)
+    complete: boolean; // true only when missingBars === 0
+  }> | null;
   perTimeframe: Array<{
     timeframe: Timeframe;
     status: 'success' | 'failed' | 'skipped';

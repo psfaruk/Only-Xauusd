@@ -238,9 +238,9 @@ describe('ingestion — bounded historical backfill (case 16)', () => {
     expect(limit.error).toBe('RANGE_TOO_LARGE');
   });
 
-  test('valid bounded range runs and honestly records requested vs received', async () => {
+  test('incomplete range is NEVER success — honest coverage verification (Phase 4 hardening)', async () => {
     mock = mock ?? (await startMockBridge());
-    const { bars } = seedCandles('M5'); // only 100 bars available
+    const { bars } = seedCandles('M5'); // only 100 bars available (mock limitation)
     mock.state.candles.M5 = bars;
     mock.state.failTfs = {};
     const run = await runSync(
@@ -253,10 +253,81 @@ describe('ingestion — bounded historical backfill (case 16)', () => {
         rangeEndUtc: new Date(FIXED_NOW_SEC * 1000),
       },
     );
-    expect(run.status).toBe('success');
-    expect(run.requested).toBe(288);
+    // The bridge filled only 100 of 288 grid bars — a filled `limit` must not
+    // be mistaken for a covered range. Single timeframe, all incomplete → failed.
+    expect(run.status).toBe('failed');
+    expect(run.errorCode).toBe('BACKFILL_INCOMPLETE');
     expect(run.received).toBe(100); // mock had only 100 — recorded honestly
     expect(run.inserted).toBe(100);
+    // Timestamp-based coverage evidence:
+    expect(run.coverage).not.toBeNull();
+    const cov = run.coverage![0];
+    expect(cov.timeframe).toBe('M5');
+    expect(cov.expectedBars).toBe(288); // full due grid for the requested day
+    expect(cov.presentBars).toBe(99); // 100 ingested − 1 forming bar (never closed history)
+    expect(cov.missingBars).toBeGreaterThan(0); // suspicious holes outside closure windows
+    expect(cov.closureGaps).toBeGreaterThan(0); // Tue 20:00–22:00 break ≈ 24 bars → info
+    expect(cov.complete).toBe(false);
+    // SyncRun row is honest too:
+    const row = await db.syncRun.findFirst({ where: { id: run.runId } });
+    expect(row?.status).toBe('failed');
+    expect(row?.errorCode).toBe('BACKFILL_INCOMPLETE');
+  });
+
+  test('fully covered range → success with COMPLETE coverage evidence', async () => {
+    mock = mock ?? (await startMockBridge());
+    // Exactly the requested day, every grid bar present, none forming:
+    mock.state.candles.M5 = makeBars(M5, 288, FIXED_NOW_SEC - M5, { forming: false });
+    mock.state.failTfs = {};
+    const run = await runSync(
+      { bridge: mockClient(), db, now: fixedNow },
+      {
+        mode: 'backfill',
+        symbol: SYMBOL,
+        timeframes: ['M5'],
+        rangeStartUtc: new Date((FIXED_NOW_SEC - 86_400) * 1000),
+        rangeEndUtc: new Date(FIXED_NOW_SEC * 1000),
+      },
+    );
+    expect(run.status).toBe('success');
+    expect(run.errorCode).toBeNull();
+    expect(run.coverage).not.toBeNull();
+    expect(run.coverage![0]).toMatchObject({
+      timeframe: 'M5',
+      expectedBars: 288,
+      presentBars: 288,
+      missingBars: 0,
+      closureGaps: 0,
+      complete: true,
+    });
+  });
+
+  test('partial coverage across timeframes → run downgraded to partial, not success', async () => {
+    mock = mock ?? (await startMockBridge());
+    // M5 fully covered (288/288); H1 has only 10 of its 24 grid bars → one
+    // complete timeframe, one incomplete → the run is partial, never success.
+    mock.state.candles.M5 = makeBars(M5, 288, FIXED_NOW_SEC - M5, { forming: false });
+    mock.state.candles.H1 = makeBars(TIMEFRAME_SECONDS.H1, 10, FIXED_NOW_SEC - TIMEFRAME_SECONDS.H1, {
+      forming: false,
+    });
+    mock.state.failTfs = {};
+    const run = await runSync(
+      { bridge: mockClient(), db, now: fixedNow },
+      {
+        mode: 'backfill',
+        symbol: SYMBOL,
+        timeframes: ['M5', 'H1'],
+        rangeStartUtc: new Date((FIXED_NOW_SEC - 86_400) * 1000),
+        rangeEndUtc: new Date(FIXED_NOW_SEC * 1000),
+      },
+    );
+    expect(run.status).toBe('partial');
+    expect(run.errorCode).toBe('BACKFILL_INCOMPLETE');
+    const byTf = Object.fromEntries(run.coverage!.map((c) => [c.timeframe, c]));
+    expect(byTf.M5.complete).toBe(true);
+    expect(byTf.H1.complete).toBe(false);
+    expect(byTf.H1.expectedBars).toBe(24); // one day of H1 bars
+    expect(byTf.H1.presentBars).toBe(10);
   });
 
   test('backfill without a range is rejected (BAD_REQUEST)', async () => {

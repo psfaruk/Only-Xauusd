@@ -160,7 +160,13 @@ model SyncRun {
 }
 
 // ============================================================================
-// PHASE 4-5 (planned) — deterministic analysis & signals
+// PHASE 4 (ACTIVE) — deterministic analysis runs
+// ----------------------------------------------------------------------------
+// v2 (Phase 4): additive extension only — new nullable columns + indexes.
+// No existing column was renamed, dropped or retyped; no data was touched
+// (verified: AnalysisRun had 0 rows before this migration — see
+// audit/phase4-audit.md). Status values: pending | completed | blocked | failed.
+// An incomplete/failed run is NEVER returned as a valid analysis.
 // ============================================================================
 
 model AnalysisRun {
@@ -170,9 +176,18 @@ model AnalysisRun {
   timeframes    String // JSON: which timeframes were analysed
   input         String // JSON: exact inputs used (reproducibility)
   result        String // JSON: deterministic analysis output
-  status        String    @default("pending") // pending | completed | failed
+  status        String    @default("pending") // pending | completed | blocked | failed
+  reasonCodes   String? // JSON string[] — block/failure reasons (machine-readable)
+  warnings      String? // JSON string[] — non-blocking warnings
+  inputFingerprint String? // sha256 hex over canonical input + config + engineVersion
+  calculationConfig String? // JSON: full calculation configuration snapshot
+  generatedAtUtc DateTime?
+  durationMs    Int?
   startedAt     DateTime  @default(now())
   completedAt   DateTime?
+
+  @@index([symbol, status, startedAt])
+  @@index([startedAt])
 }
 
 model Signal {

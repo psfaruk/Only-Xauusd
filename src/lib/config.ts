@@ -6,7 +6,7 @@
  * for API responses. Never logs or exposes secret values.
  */
 
-const VERSION = '0.1.0-phase3';
+const VERSION = '0.1.0-phase4';
 
 function csv(name: string, fallback: string): string[] {
   const raw = process.env[name];
@@ -66,7 +66,7 @@ export const config = {
       ? 'Execution enabled (phase gate passed).'
       : phaseGatePassed
         ? 'Execution locked: arm switches (EXECUTION_ARMED / ALLOW_EXECUTION) are off.'
-        : 'Execution locked: Phase 1 is read-only by design (Phase 11 gate required).',
+        : `Execution locked: Phase ${phase} is read-only by design (Phase 11 gate required).`,
   },
   symbol: str('TRADING_SYMBOL', 'XAUUSD'),
   glm: {
@@ -113,9 +113,25 @@ export const config = {
     maxIssuesPerRun: Math.min(Math.max(5, num('MARKET_MAX_ISSUES_PER_RUN', 50)), 200),
   },
   dataApi: {
-    /** Optional bearer token — when set, ALL /api/data/* require it. */
+    /** Optional bearer token — when set, ALL /api/data/* and /api/analysis/*
+     * requests require it. WRITE/TRIGGER endpoints (POST) require it ALWAYS. */
     hasToken: Boolean(process.env.DATA_API_TOKEN),
+    /** Explicit, opt-in public reads for GET endpoints when DATA_API_TOKEN is
+     * unset (default: false = fail closed). Intended for preview/dashboards
+     * only — NEVER enable in production (see README §Security). */
+    publicReads: bool('MARKET_API_PUBLIC_READS', false),
     rateLimitPerMin: Math.min(Math.max(10, num('DATA_API_RATE_LIMIT_PER_MIN', 120)), 600),
+  },
+  analysis: {
+    /** Closed candles loaded per timeframe for one analysis run (bounded). */
+    maxBarsPerTf: Math.min(Math.max(60, num('ANALYSIS_MAX_BARS_PER_TF', 300)), 1_000),
+    /** Minimum closed candles per timeframe — must cover the longest warm-up
+     * (EMA200 seed at index 199, ADX first value at index 27, swing windows).
+     * Default 220 = EMA200 warm-up + working room. */
+    minBarsPerTf: Math.min(Math.max(60, num('ANALYSIS_MIN_BARS_PER_TF', 220)), 1_000),
+    /** Swing detection window: bars required left/right of a candidate. */
+    swingLeft: Math.min(Math.max(2, num('ANALYSIS_SWING_LEFT', 3)), 8),
+    swingRight: Math.min(Math.max(2, num('ANALYSIS_SWING_RIGHT', 3)), 8),
   },
   limits: {
     maxEventsReturned: Math.min(Math.max(1, num('MAX_EVENTS_RETURNED', 100)), 500),
@@ -154,7 +170,11 @@ export function configSnapshot() {
       backfillMaxBars: config.market.backfillMaxBars,
       backfillMaxDays: config.market.backfillMaxDays,
     },
-    dataApi: { tokenProtected: config.dataApi.hasToken, rateLimitPerMin: config.dataApi.rateLimitPerMin },
+    dataApi: {
+      tokenProtected: config.dataApi.hasToken,
+      publicReads: config.dataApi.publicReads,
+      rateLimitPerMin: config.dataApi.rateLimitPerMin,
+    },
     limits: { maxEventsReturned: config.limits.maxEventsReturned },
   };
 }

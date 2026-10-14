@@ -8,25 +8,40 @@
 
 ---
 
-## বর্তমান অবস্থা — Phase 3 (Market Data Database & Validation Pipeline) ✅
+## বর্তমান অবস্থা — Phase 4 (Deterministic Market Analysis Engine) ✅
 
-Phase 3 সম্পূর্ণ — ডেটাবেস মাইগ্রেশন, আইডেমপোটেন্ট ইনজেশন, ডিটারমিনিস্টিক ভ্যালিডেশন,
-ডেটা-গুণমান স্টেট, Read-only Data API, ড্যাশবোর্ড “মার্কেট ডেটা” ট্যাব ও ৭৮টি অটোমেটেড টেস্ট।
-বিস্তারিত অডিট: `audit/phase3-audit.md`।
+Phase 4 সম্পূর্ণ — ডিটারমিনিস্টিক সুইং-ডিটেকশন, মার্কেট স্ট্রাকচার (HH/HL/LH/LL), ক্লোজ-নিশ্চিত
+BOS/CHoCH, Wilder-কনভেনশন ইন্ডিকেটর (EMA 20/50/200, RSI 14, ATR 14, ADX 14), শার্ল২৫৬ ইনপুট
+ফিঙ্গারপ্রিন্ট, সৎ AnalysisRun পারসিস্টেন্স (completed/blocked/failed), Analysis API ও ড্যাশবোর্ড
+“বিশ্লেষণ” ট্যাব। Phase 3 থেকে নেওয়া নিরাপত্তা-ঝুঁকিও সমাধান হয়েছে (নিচের টেবিল)।
+বিস্তারিত অডিট: `audit/phase4-audit.md`।
 
 | বিষয় | ফলাফল |
 | --- | --- |
-| DB schema/migrations | ✅ 6টি Phase-3 টেবিল — বিদ্যমান ডেটা অক্ষুণ্ণ রেখে baseline + additive migration |
-| Idempotent ingestion | ✅ `(symbol, timeframe, candleTimeUtc)` upsert — একই ক্যান্ডেল দুবার দিলেও ডুপ্লিকেট হয় না |
-| Deterministic validation | ✅ OHLC invariants, finiteness, timestamps, duplicates, ordering, session-aware gaps |
-| Data-quality states | ✅ VALID / WARNING / INVALID / STALE / MISSING / UNAVAILABLE — সতর্কতা কখনো VALID হয় না |
-| Readiness result | ✅ ready + last_tick + last_closed_candle + data_age + error_codes (কেবল ডেটা-প্রস্তুতি; সিগন্যাল নয়) |
-| Data API | ✅ `/api/data/{status,candles,latest,quality,sync-status}` + POST `/api/data/sync` — typed, allowlisted, bounded |
-| Automated tests | ✅ ৭৮/৭৮ পাস (মক-ব্রিজ + isolated test DB; মক স্পষ্টভাবে লেবেল-করা) |
-| Real MT5 smoke test | ⏸ সম্পাদিত হয়নি — Phase 2 ব্রিজ এখনো ডিপ্লয়েড নয় + ক্রেডেনশিয়াল নেই (`bun run market:smoke` → SKIP) |
-| Order execution | 🔒 এখনো কোড-লেভেলে তালাবন্ধ — কোনো order/trade endpoint নেই (স্ট্যাটিক টেস্টে প্রমাণিত) |
+| Readiness gate (fail-closed) | ✅ টিক/ক্যান্ডেল সতেজতা + ডেমো-নীতি + warm-up + ইন-উইন্ডো গ্যাপ — কোনো একটি ব্যর্থ হলে পুরো রান BLOCKED, কিছুই বানানো হয় না |
+| Swing detection | ✅ দুই-পাশেই ক্যান্ডেল লাগে; সমতা-টাই-রুল নির্ধারিত (আগের ক্যান্ডেল জেতে); কনফার্মেশন-টাইমস্ট্যাম্প সংরক্ষিত; look-ahead শূন্য |
+| Market structure | ✅ HH/HL/LH/LL + structural trend (bullish/bearish/range/unclear) — সমতা মানেই UNCLEAR, কখনো অনুমান নয় |
+| BOS / CHoCH | ✅ কেবল ক্লোজ-নিশ্চিত (উইক কখনো নয়); সমতা-স্তরে ক্লোজ ≠ ব্রেক; একই স্তর দুবার ফায়ার হয় না (consumed); ইভেন্টে trend-at-break সংরক্ষিত |
+| Indicators | ✅ EMA 20/50/200 (SMA-seed), RSI 14 / ATR 14 / ADX 14 (Wilder) — হ্যান্ড-কম্পিউটেড রেফারেন্সে প্রমাণিত; NaN/অসীম কখনো আউটপুট হয় না |
+| Determinism | ✅ একই ইনপুট+কনফিগ+ইঞ্জিনভার্সন → বাইট-অভিন্ন ফলাফল (sha256 ফিঙ্গারপ্রিন্ট টেস্টে প্রমাণিত) |
+| AnalysisRun persistence | ✅ exact input snapshot (decimal-text) + config + result + সৎ status; FAILED রান কখনো completed বলে না |
+| Analysis API | ✅ POST `/api/analysis/run` (সবসময় টোকেন দাবি করে) + GET `/api/analysis/latest` |
+| Dashboard | ✅ “বিশ্লেষণ” ট্যাব — readiness চিপ, per-TF কাঠামো+সূচক, BLOCKED ব্যানার, “কোনো সিগন্যাল নয়” ডিসক্লেইমার |
+| Automated tests | ✅ ১৪৪/১৪৪ পাস (৮ ফাইল — Phase 3: 82 + Phase 4: 62; মক স্পষ্টভাবে লেবেল-করা) |
+| Order execution | 🔒 এখনো কোড-লেভেলে তালাবন্ধ — analysis লেয়ারে কোনো BUY/SELL/order/position/lot টোকেনই নেই (স্ট্যাটিক টেস্টে প্রমাণিত) |
+
+### Phase 3 থেকে নেওয়া নিরাপত্তা-সমাধান (Phase 4-এ)
+
+| ঝুঁকি (Phase 3 রিভিউ) | সমাধান |
+| --- | --- |
+| API auth ডিফল্টে খোলা | POST trigger এখন **সবসময়** টোকেন দাবি করে — টোকেন না থাকলে 503 `MARKET_API_TOKEN_NOT_CONFIGURED` (বাইপাস নেই)। GET ডিফল্টে fail-closed; `MARKET_API_PUBLIC_READS=true` দিলে কেবল তখনই খোলা (preview-এর জন্য, production-এ কখনো নয়) |
+| Backfill coverage যাচাই ছিল না | টাইমস্ট্যাম্প-ভিত্তিক coverage যাচাই — requested range-এর due-grid বনাম DB-তে থাকা closed candle; অসম্পূর্ণ হলে run **কখনো success নয়** (partial/failed + `BACKFILL_INCOMPLETE`) |
+| অডিট-রিপোর্ট অসঙ্গতি | বর্তমান commit-এর জন্য নতুন অডিট `audit/phase4-audit.md` (পুরনোটি ইতিহাস হিসেবে অক্ষুণ্ণ) |
+| Migration-এ পুরনো ডেটা ঝুঁকি | Phase 4 মাইগ্রেশন কেবল additive (ALTER ADD COLUMN + CREATE INDEX) — drop নেই; যাচাই: `prisma/migrations/20261014133225_phase4_analysis_runs/migration.sql` + রো-কাউন্ট প্রমাণ |
 
 ### পূর্ববর্তী ফেজ
+
+**Phase 3 (Market Data Database & Validation Pipeline) ✅** — idempotent ingestion, deterministic validation, quality states, read-only data API, “মার্কেট ডেটা” ট্যাব (`audit/phase3-audit.md`)।
 
 **Phase 1 (Environment Audit & Foundation) ✅** — মূল ফলাফল (সবই প্রকৃত কমান্ড-প্রমাণসহ, `audit/glm-tool-call.ts` ও `/api/audit/environment`):
 
@@ -50,7 +65,7 @@ GLM Orchestrator (glm-4-plus)            ← z-ai-web-dev-sdk, server-side only
         ↓
 Allowlisted Tool Registry                ← 1 active (get_system_health) + 8 planned, schema-validated
         ↓
-Deterministic Engines (Phase 4-7)        ← market structure · indicators · setup · risk gate
+Deterministic Engines — Phase 4 সচল   ← swings · structure · BOS/CHoCH · EMA/RSI/ATR/ADX (LLM-মুক্ত) — Phase 5-7 বাকি
         ↓
 MT5 Bridge — বাহ্যিক সার্ভিস (Phase 2)        ← REST চুক্তি প্রমাণিত (v20 mt5-service) — এখনো ডিপ্লয় হয়নি; Phase 3 fail-closed
         ↓
@@ -67,7 +82,7 @@ SQLite + Prisma (12 models)              ← SystemEvent সচল; বাকি
 ```bash
 bun run dev        # dev server (port 3000)
 bun run lint       # ESLint
-bun run db:push    # Prisma schema → SQLite
+bun test           # সব টেস্ট (144টি — Phase 3: 82 + Phase 4: 62)
 ```
 
 `.env` ফাইল নেই? `.env.example` কপি করুন — প্লেসহোল্ডার ছাড়া কোনো মান নেই। কখনোই `.env`
@@ -83,10 +98,10 @@ commit করবেন না (`.gitignore`-এ সুরক্ষিত, `.env.
 
 ## ১২-Phase রোডম্যাপ
 
-1. ✅ **Project Audit & Foundation** (বর্তমান)
+1. ✅ **Project Audit & Foundation**
 2. ⬜ Linux MT5 Bridge — বাহ্যিক VPS, read-only কন্ট্র্যাক্ট, symbol detection
-3. ⬜ Database ও Market Data Validation
-4. ⬜ Deterministic Market Analysis Engine (structure, BOS/CHoCH, EMA/RSI/ATR/ADX)
+3. ✅ **Database ও Market Data Validation**
+4. ✅ **Deterministic Market Analysis Engine** (বর্তমান — structure, BOS/CHoCH, EMA/RSI/ATR/ADX)
 5. ⬜ Entry Setup ও Signal Engine (BUY/SELL/WAIT + expiry)
 6. ⬜ GLM Multi-Agent Orchestration (analyst/critic/risk reviewer)
 7. ⬜ Risk Manager ও Safety Gate (lot sizing, exposure, duplicate protection)
@@ -233,7 +248,7 @@ curl 'http://localhost:3000/api/data/sync-status?limit=10'
 ## ৬. টেস্ট চালানো
 
 ```bash
-bun test              # package.json → bun test tests/market (৭৮টি টেস্ট, ৪ ফাইল)
+bun test              # 144টি টেস্ট, ৮ ফাইল (Phase 3: tests/market + Phase 4: tests/analysis)
 bun run lint          # ESLint
 ```
 
@@ -285,3 +300,68 @@ health → status (source=mt5 কি না) → symbols (XAUUSDm আছে ক�
 6. **Scheduler ডিফল্টে বন্ধ** — sandbox-এ ২৪/৭ চালানোর কথা নয়; প্রোডাকশনে
    `MARKET_SYNC_INTERVAL_MS` দিয়ে চালু করবেন।
 7. **Tick history রাখা হয় না** (by design) — প্রতি সিম্বলে শুধু latest snapshot।
+
+---
+
+# Phase 4 — Deterministic Market Analysis Engine (অপারেশন গাইড)
+
+## ১. নিয়মাবলী (LOCKED — কোড, টেস্ট ও প্রতিটি রানের calculationConfig-এ লেখা)
+
+**সুইং** (`src/lib/analysis/swings.ts`, ডিফল্ট window 3/3, env 2–8):
+- swing HIGH: বাম `left`-টির হাই থেকে **কঠোরভাবে** বেশি + ডান `right`-টির হাই-এর **সমান বা বেশি**।
+- swing LOW: মিরর। **টাই-রুল:** পাশাপাশি সমান হাই/লো হলে **আগের ক্যান্ডেল** জেতে (কঠোর-বাম শর্তের কারণে পরেরটি বাদ)।
+- দুই পাশেই ক্যান্ডেল লাগে; কনফার্মেশন = ডান উইন্ডোর শেষ ক্যান্ডেল বন্ধ হওয়া —
+  `timeUtcSec` (মূল ক্যান্ডেল) + `confirmedAtUtcSec` দুটোই সংরক্ষিত। ভবিষ্যতের ক্যান্ডেল না থাকলে সুইং "নেই" — বানানো হয় না।
+
+**স্ট্রাকচার ও BOS/CHoCH** (`src/lib/analysis/structure.ts`):
+- HH/HL/LH/LL শেষ দুই সুইং থেকে; সমান স্তর → UNCLEAR (অনুমান নিষেধ)।
+- trend: HH+HL→bullish · LH+LL→bearish · HH+LL/LH+HL→range · বাকি unclear।
+- **ব্রেক কেবল ক্লোজে** (উইক কখনো নয়); স্তরের ঠিক ওপরে/নিচে ক্লোজ = ব্রেক নয় (কঠোর অসমতা)।
+- রেফারেন্স = সর্বশেষ নিশ্চিত swing high/low; নতুন সুইং নিশ্চিত হলে রেফারেন্স বদলায়।
+- লেবেল: CHoCH = bearish-trend-এ bullish ব্রেক (বা উল্টো); বাকি সব BOS।
+- ব্রেকের পর স্তরটি **consumed** — একই স্তরে দ্বিতীয় ইভেন্ট নেই। উইক-ক্রসিং (ক্লোজ-নিশ্চিত হয়নি) `unconfirmedCrossings`-এ সৎভাবে রেকর্ড হয়।
+
+**ইন্ডিকেটর** (`src/lib/analysis/indicators.ts`):
+- EMA 20/50/200: seed = প্রথন `period` ক্লোজের SMA (প্রথম মান ইনডেক্স period−1); k=2/(period+1)।
+- RSI 14 (Wilder): seed = প্রথম 14 ডেল্টার গড় (প্রথম মান ইনডেক্স 14); avgLoss=0→100, avgGain=0→0, দুটোই 0→50 (ফ্ল্যাট, সতর্কতা)।
+- ATR 14: TR=max(h−l, |h−pc|, |l−pc|); seed = প্রথম 14 TR-এর SMA; Wilder।
+- ADX 14: +DM/−DM; smoothed TR/±DM seed = ইনডেক্স 1..14-এর SMA; DI±=100·s±DM/sTR; DX; ADX seed = প্রথম 14 DX-এর SMA (প্রথন মান ইনডেক্স 27)।
+- অ-সসীম ইনপুট/আউটপুট → `INDICATOR_NON_FINITE` — NaN কখনো ফল হয় না।
+
+**মাল্টি-টাইমফ্রেম:** প্রতিটি tf আলাদা বিশ্লেষিত (M5/M15/H1/H4); উচ্চ-tf অনুপস্থিত হলে সেটির অনুপস্থিতি রিপোর্ট হয় এবং পুরো রান BLOCKED — fallback trend বানানো নিষেধ। alignment বর্ণনামূলক মাত্র (`descriptive-only-not-a-signal`)।
+
+## ২. Environment (`.env`)
+
+```bash
+ANALYSIS_MAX_BARS_PER_TF=300   # প্রতি tf-তে লোড হওয়া বন্ধ ক্যান্ডেল (60–1000)
+ANALYSIS_MIN_BARS_PER_TF=220   # warm-up floor (EMA200 + ADX + swing window ঢেকে)
+ANALYSIS_SWING_LEFT=3          # 2–8
+ANALYSIS_SWING_RIGHT=3         # 2–8
+```
+
+## ৩. চালানো
+
+```bash
+# HTTP (টোকেন লাগবেই):
+curl -X POST http://localhost:3000/api/analysis/run \
+  -H 'Authorization: Bearer <DATA_API_TOKEN>' -H 'Content-Type: application/json' \
+  -d '{"timeframes":["M5","M15","H1","H4"]}'
+
+# সর্বশেষ রান (GET; টোকেন সেট থাকলে Bearer):
+curl http://localhost:3000/api/analysis/latest
+```
+
+ডেটা অবিশ্বস্ত (ব্রিজ বন্ধ/পুরোনো/ডেমো/অপ্রতুল) হলে HTTP 200 + `analysis.status:"BLOCKED"` +
+`reasonCodes` — এটাই সৎ ফল। ইঞ্জিন ত্রুটি হলে HTTP 500 `ANALYSIS_ERROR` (নিরাপদ, bounded বার্তা)।
+প্রতিটি রান AnalysisRun সারিতে থাকে: exact input snapshot (decimal-text), calculationConfig,
+ফল, sha256 ফিঙ্গারপ্রিন্ট — একই ইনপুট আবার দিলে বাইট-অভিন্ন ফল আসে (টেস্টে প্রমাণিত)।
+
+## ৪. নিরাপত্তা (Phase 4 hardened)
+
+- **POST trigger সবসময় টোকেন দাবি করে** (`/api/data/sync`, `/api/analysis/run`) —
+  `DATA_API_TOKEN` না থাকলে 503 `MARKET_API_TOKEN_NOT_CONFIGURED`, কোনো বাইপাস নেই।
+- GET ডিফল্টে fail-closed; শুধু `MARKET_API_PUBLIC_READS=true` দিলে খোলা —
+  শুধুমাত্র preview/ড্যাশবোর্ডের জন্য, **production-এ কখনো নয়**।
+- Production/VPS: লম্বা random `DATA_API_TOKEN` দিন, public reads বন্ধ রাখুন।
+- Analysis লেয়ারে কোনো BUY/SELL/order/position/lot টোকেন নেই (স্ট্যাটিক টেস্ট); LLM
+  কখনো ইন্ডিকেটর গণনা করে না — সব বিশ্লেষণ শুদ্ধ TypeScript, LLM-মুক্ত।

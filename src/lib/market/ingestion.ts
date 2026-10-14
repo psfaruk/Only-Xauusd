@@ -31,7 +31,8 @@ import {
   type SyncOutcome,
   type Timeframe,
 } from './types';
-import { toCanonicalPrice, validateCandleBatch, validateQuote, findMissingCandles } from './validation';
+import { toCanonicalPrice, validateCandleBatch, validateQuote, findMissingCandles, expectedCandleTimes } from './validation';
+import { classifyMissingCandle } from './sessions';
 
 export interface SyncDeps {
   bridge: BridgeClient;
@@ -77,7 +78,70 @@ interface SyncAggregates {
   duplicates: number;
   errorCode: string | null;
   errorMessage: string | null;
+  coverage: SyncOutcome['coverage'];
   perTimeframe: TfOutcome[];
+}
+
+/** Severity rank for honest aggregation — a worse status always wins. */
+function statusRank(s: SyncOutcome['status']): number {
+  return s === 'failed' ? 3 : s === 'partial' ? 2 : s === 'skipped' ? 1 : 0;
+}
+
+/**
+ * Phase 4 hardening: timestamp-based verification that a backfill range is
+ * actually covered by persisted CLOSED candles. The bridge API is limit-only,
+ * so “the limit was filled” proves nothing about the requested range — this
+ * check builds the due-bar grid for [rangeStart, rangeEnd) and counts what is
+ * really in the database. Bars missing OUTSIDE approximate closure windows
+ * make the entry incomplete; closure-window gaps are reported as info only.
+ */
+async function computeBackfillCoverage(
+  deps: SyncDeps,
+  opts: SyncOptions,
+  timeframe: Timeframe,
+  nowUtcSec: number,
+): Promise<NonNullable<SyncOutcome['coverage']>[number]> {
+  const fromSec = Math.floor((opts.rangeStartUtc as Date).getTime() / 1000);
+  const toSec = Math.floor((opts.rangeEndUtc as Date).getTime() / 1000);
+  const tfSec = TIMEFRAME_SECONDS[timeframe];
+
+  // Bars that were DUE (already closed) inside the requested range.
+  const grid = expectedCandleTimes(fromSec, toSec, timeframe).filter((t) => t + tfSec <= nowUtcSec);
+
+  const rows = await deps.db.marketCandle
+    .findMany({
+      where: {
+        symbol: opts.symbol,
+        timeframe,
+        isForming: false,
+        candleTimeUtc: { gte: new Date(fromSec * 1000), lt: new Date(toSec * 1000) },
+      },
+      select: { candleTimeUtc: true },
+    })
+    .catch(() => []);
+  const present = new Set(rows.map((r) => Math.floor(r.candleTimeUtc.getTime() / 1000)));
+
+  let missingBars = 0;
+  let closureGaps = 0;
+  let presentBars = 0;
+  for (const t of grid) {
+    if (present.has(t)) {
+      presentBars += 1;
+      continue;
+    }
+    const cls = classifyMissingCandle(t);
+    if (cls.severity === 'warning') missingBars += 1;
+    else closureGaps += 1;
+  }
+
+  return {
+    timeframe,
+    expectedBars: grid.length,
+    presentBars,
+    missingBars,
+    closureGaps,
+    complete: missingBars === 0,
+  };
 }
 
 /** Module-level overlap guard — a second concurrent run is refused, not queued. */
@@ -128,6 +192,7 @@ export async function runSync(deps: SyncDeps, opts: SyncOptions): Promise<SyncOu
     durationMs: nowMs() - startedAtMs,
     errorCode,
     errorMessage: message,
+    coverage: null,
     perTimeframe: [],
   });
 
@@ -209,6 +274,7 @@ export async function runSync(deps: SyncDeps, opts: SyncOptions): Promise<SyncOu
         requested: 0, received: 0, inserted: 0, updated: 0, rejected: 0, duplicates: 0,
         errorCode: health.error.code,
         errorMessage: `Bridge health check failed: ${health.error.message}`,
+        coverage: null,
         perTimeframe: allowedTfs.map<TfOutcome>((tf) => ({
           timeframe: tf, status: 'skipped', requested: 0, received: 0, inserted: 0, updated: 0, rejected: 0, duplicates: 0,
           errorCode: health.error.code,
@@ -229,6 +295,7 @@ export async function runSync(deps: SyncDeps, opts: SyncOptions): Promise<SyncOu
         requested: 0, received: 0, inserted: 0, updated: 0, rejected: 0, duplicates: 0,
         errorCode: ErrorCode.SOURCE_DEMO,
         errorMessage: 'Bridge is serving its clearly-labelled demo feed; demo ingestion is disabled (MARKET_INGEST_DEMO=false).',
+        coverage: null,
         perTimeframe: allowedTfs.map<TfOutcome>((tf) => ({
           timeframe: tf, status: 'skipped', requested: 0, received: 0, inserted: 0, updated: 0, rejected: 0, duplicates: 0,
           errorCode: ErrorCode.SOURCE_DEMO,
@@ -243,6 +310,7 @@ export async function runSync(deps: SyncDeps, opts: SyncOptions): Promise<SyncOu
         requested: 0, received: 0, inserted: 0, updated: 0, rejected: 0, duplicates: 0,
         errorCode: ErrorCode.SOURCE_DISCONNECTED,
         errorMessage: 'Bridge reports the MT5 terminal is disconnected — refusing to ingest (fail closed).',
+        coverage: null,
         perTimeframe: allowedTfs.map<TfOutcome>((tf) => ({
           timeframe: tf, status: 'skipped', requested: 0, received: 0, inserted: 0, updated: 0, rejected: 0, duplicates: 0,
           errorCode: ErrorCode.SOURCE_DISCONNECTED,
@@ -260,6 +328,7 @@ export async function runSync(deps: SyncDeps, opts: SyncOptions): Promise<SyncOu
         requested: 0, received: 0, inserted: 0, updated: 0, rejected: 0, duplicates: 0,
         errorCode: symbols.error.code,
         errorMessage: `Could not verify symbol list: ${symbols.error.message}`,
+        coverage: null,
         perTimeframe: allowedTfs.map<TfOutcome>((tf) => ({
           timeframe: tf, status: 'skipped', requested: 0, received: 0, inserted: 0, updated: 0, rejected: 0, duplicates: 0,
           errorCode: symbols.error.code,
@@ -274,6 +343,7 @@ export async function runSync(deps: SyncDeps, opts: SyncOptions): Promise<SyncOu
         requested: 0, received: 0, inserted: 0, updated: 0, rejected: 0, duplicates: 0,
         errorCode: ErrorCode.SYMBOL_NOT_FOUND,
         errorMessage: `Bridge symbol list does not contain ${opts.symbol} (it serves: ${symbols.data.list.slice(0, 8).join(', ')}${symbols.data.list.length > 8 ? '…' : ''}).`,
+        coverage: null,
         perTimeframe: allowedTfs.map<TfOutcome>((tf) => ({
           timeframe: tf, status: 'skipped', requested: 0, received: 0, inserted: 0, updated: 0, rejected: 0, duplicates: 0,
           errorCode: ErrorCode.SYMBOL_NOT_FOUND,
@@ -533,12 +603,47 @@ export async function runSync(deps: SyncDeps, opts: SyncOptions): Promise<SyncOu
       }).catch(() => undefined);
     }
 
+    // ---- 9.5 Backfill coverage verification (Phase 4 hardening) ----------
+    // Timestamp-based proof that the requested range is actually covered.
+    // Without this, a limit-only bridge response that merely filled the `limit`
+    // could be mistaken for a covered range (user-reported Phase 3 risk #5).
+    let coverage: SyncOutcome['coverage'] = null;
+    if (opts.mode === 'backfill' && opts.rangeStartUtc && opts.rangeEndUtc) {
+      coverage = [];
+      for (const tf of allowedTfs) {
+        coverage.push(await computeBackfillCoverage(deps, opts, tf, nowUtcSec));
+      }
+    }
+
     // ---- 10. Aggregate & finalize (never mark incomplete as success) -------
     const sum = (fn: (o: TfOutcome) => number) => tfOutcomes.reduce((a, o) => a + fn(o), 0);
     const successes = tfOutcomes.filter((o) => o.status === 'success').length;
-    const runStatus: SyncOutcome['status'] =
-      successes === 0 ? 'failed' : successes === tfOutcomes.length ? 'success' : 'partial';
-    const firstError = tfOutcomes.find((o) => o.errorCode)?.errorCode ?? null;
+    let runStatus: SyncOutcome['status'];
+    if (successes === 0) runStatus = 'failed';
+    else if (successes === tfOutcomes.length) runStatus = 'success';
+    else runStatus = 'partial';
+
+    let errorCode: string | null = tfOutcomes.find((o) => o.errorCode)?.errorCode ?? null;
+    const messageParts: string[] = [];
+    if (errorCode) {
+      messageParts.push(`One or more timeframes failed (first error: ${errorCode}).`);
+    }
+
+    // A backfill run whose range is not actually covered is NEVER 'success':
+    // all timeframes incomplete → failed; some → partial. Worse status wins.
+    if (coverage) {
+      const incomplete = coverage.filter((c) => !c.complete);
+      if (incomplete.length > 0) {
+        const covRank = incomplete.length === coverage.length ? 3 : 2;
+        if (covRank > statusRank(runStatus)) {
+          runStatus = covRank === 3 ? 'failed' : 'partial';
+        }
+        if (!errorCode) errorCode = ErrorCode.BACKFILL_INCOMPLETE;
+        messageParts.push(
+          `Backfill range not fully covered (timestamp-based verification): ${incomplete.length}/${coverage.length} timeframes missing bars outside approximate closure windows.`,
+        );
+      }
+    }
 
     const outcome = await finalize({
       status: runStatus,
@@ -550,8 +655,9 @@ export async function runSync(deps: SyncDeps, opts: SyncOptions): Promise<SyncOu
       updated: sum((o) => o.updated),
       rejected: sum((o) => o.rejected),
       duplicates: sum((o) => o.duplicates),
-      errorCode: firstError,
-      errorMessage: firstError ? `One or more timeframes failed (first error: ${firstError}).` : null,
+      errorCode,
+      errorMessage: messageParts.length > 0 ? messageParts.join(' ') : null,
+      coverage,
       perTimeframe: tfOutcomes,
     });
 
@@ -611,6 +717,7 @@ async function recordTerminalRun(
     durationMs: endedMs - startedAtMs,
     errorCode,
     errorMessage,
+    coverage: null,
     perTimeframe: [],
   };
 }

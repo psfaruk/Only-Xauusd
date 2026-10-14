@@ -260,6 +260,92 @@ interface QualityResponse {
   generatedAtUtc: string;
 }
 
+// Phase 4 — analysis API shapes (/api/analysis/*)
+interface AnalysisIndicatorSnapshot {
+  period: number;
+  warmupBars: number;
+  last: { value: number } | null;
+}
+
+interface AnalysisTfView {
+  timeframe: string;
+  candleCount: number;
+  source: string;
+  structure: {
+    trend: string;
+    highLabel: string;
+    lowLabel: string;
+    confirmedSwings: unknown[];
+    events: Array<{
+      type: string;
+      direction: string;
+      level: number;
+      levelText: string;
+      confirmedAtUtcSec: number;
+      basis: string;
+      trendAtBreak: string;
+    }>;
+    unconfirmedCrossings: unknown[];
+  };
+  indicators: {
+    ema20: AnalysisIndicatorSnapshot | null;
+    ema50: AnalysisIndicatorSnapshot | null;
+    ema200: AnalysisIndicatorSnapshot | null;
+    rsi14: AnalysisIndicatorSnapshot | null;
+    atr14: AnalysisIndicatorSnapshot | null;
+    adx14: AnalysisIndicatorSnapshot | null;
+  };
+  indicatorIssues: string[];
+  warnings: string[];
+}
+
+interface AnalysisResultView {
+  status: 'COMPLETED' | 'BLOCKED' | 'FAILED';
+  purpose: string;
+  engineVersion: string;
+  symbol: string;
+  generatedAtUtc: string;
+  inputFingerprint: string | null;
+  reasonCodes: string[];
+  warnings: string[];
+  calculationConfig: { swingLeft: number; swingRight: number; breakBasis: string; emaPeriods: number[] };
+  inputData: {
+    perTimeframe: Record<string, { closedCandles: number; formingExcluded: number; lastCandleTimeUtc: string | null }>;
+    digits: number | null;
+  };
+  readiness: Array<{
+    timeframe: string;
+    state: 'READY' | 'BLOCKED';
+    closedCandles: number;
+    requiredMinBars: number;
+    errorCodes: string[];
+    warnings: string[];
+  }>;
+  perTimeframe?: Record<string, AnalysisTfView>;
+  timeframeContext?: { alignment: string; note: string; disclaimer: string; trendByTimeframe?: Record<string, string> };
+  failureMessage?: string;
+}
+
+interface AnalysisLatestResponse {
+  ok: true;
+  latest: {
+    id: string;
+    symbol: string;
+    engineVersion: string;
+    status: string;
+    timeframes: string[];
+    reasonCodes: string[];
+    warnings: string[];
+    inputFingerprint: string | null;
+    generatedAtUtc: string | null;
+    startedAtUtc: string;
+    completedAtUtc: string | null;
+    durationMs: number | null;
+    analysis: AnalysisResultView | null;
+  } | null;
+  generatedAtUtc: string;
+}
+
 /** Bengali renderings of the stable machine-readable error codes. */
 const bnErrorText: Record<string, string> = {
   BRIDGE_NOT_CONFIGURED: 'MT5 ব্রিজ কনফিগার করা হয়নি — MT5_BRIDGE_URL ফাঁকা আছে।',
@@ -291,6 +377,20 @@ const bnErrorText: Record<string, string> = {
   DB_TX_FAILED: 'ডেটাবেস লেনদেন ব্যর্থ হয়েছে।',
   DB_ERROR: 'ডেটাবেস ত্রুটি।',
   SYNC_IN_PROGRESS: 'একটি সিঙ্ক ইতিমধ্যেই চলছে — নতুনটি বাতিল।',
+  // Phase 4 (analysis + hardened API)
+  MARKET_API_TOKEN_NOT_CONFIGURED: 'DATA_API_TOKEN সেট করা হয়নি — সুরক্ষিত endpoint fail-closedভাবে বন্ধ (এটি ইচ্ছাকৃত, ৫০৩)।',
+  BACKFILL_INCOMPLETE: 'ব্যাকফিলের অনুরোধ-করা পরিসর টাইমস্ট্যাম্প-ভিত্তিক যাচাইতে অসম্পূর্ণ — সফল বলা হবে না।',
+  DATA_NOT_READY: 'বিশ্লেষণের জন্য ডেটা এখনো প্রস্তুত নয়।',
+  DATA_INVALID: 'ডেটা যাচাইয়ে ব্যর্থ — বিশ্লেষণের জন্য অবিশ্বস্ত।',
+  DEMO_DATA_BLOCKED: 'ডেমো/মক ডেটা — বিশ্লেষণের জন্য চিরকাল বাতিল (এটি লাইভ বাজার নয়)।',
+  INSUFFICIENT_DATA: 'পর্যাপ্ত ইতিহাস নেই — ইন্ডিকেটর ওয়ার্ম-আপের জন্য আরও ক্যান্ডেল দরকার।',
+  GAP_IN_ANALYSIS_WINDOW: 'বিশ্লেষণ উইন্ডোর ভেতরে অনুপস্থিত ক্যান্ডেল — অনিরাপদ, তাই বন্ধ।',
+  ANALYSIS_ERROR: 'বিশ্লেষণ ইঞ্জিনে অপ্রত্যাশিত ত্রুটি (FAILED)।',
+  CLOSURE_GAPS_IN_WINDOW: 'বিশ্লেষণ উইন্ডোতে বাজার-বন্ধের সম্ভাব্য ফাঁক (তথ্য, ব্লক নয়)।',
+  STRUCTURE_UNCLEAR: 'কাঠামো অস্পষ্ট — অনুমান করা হয়নি।',
+  RSI_FLAT_MARKET: 'সমতল বাজার — RSI সংজ্ঞায়িত ৫০ (সতর্কতা)।',
+  ADX_FLAT_MARKET: 'সমতল বাজার — DX সংজ্ঞায়িত ০ (সতর্কতা)।',
+  TICK_ZERO_SPREAD: 'টিকের স্প্রেড শূন্য — সতর্কতা সহ রাখা হয়েছে।',
 };
 
 function bnForCode(code: string): string {
@@ -340,6 +440,41 @@ function syncStatusBn(status: string): string {
     case 'running': return 'চলছে';
     default: return status;
   }
+}
+
+// Phase 4 — analysis renderings
+const analysisStatusBn: Record<string, string> = {
+  completed: 'সম্পূর্ণ',
+  blocked: 'বন্ধ',
+  failed: 'ব্যর্থ',
+  pending: 'অপেক্ষমাণ',
+};
+
+const analysisStatusClass: Record<string, string> = {
+  completed: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400',
+  blocked: 'border-amber-500/40 bg-amber-500/10 text-amber-400',
+  failed: 'border-red-500/40 bg-red-500/10 text-red-300',
+  pending: 'border-zinc-600/50 bg-zinc-700/20 text-zinc-400',
+};
+
+const trendBn: Record<string, string> = {
+  bullish: 'বুলিশ (ঊর্ধ্বমুখী)',
+  bearish: 'বিয়ারিশ (নিম্নমুখী)',
+  range: 'রেঞ্জ',
+  unclear: 'অস্পষ্ট',
+};
+
+const directionBn: Record<string, string> = { bullish: 'বুলিশ', bearish: 'বিয়ারিশ' };
+
+const alignmentBn: Record<string, string> = {
+  'aligned-bullish': 'সব টাইমফ্রেম ঊর্ধ্বমুখী',
+  'aligned-bearish': 'সব টাইমফ্রেম নিম্নমুখী',
+  mixed: 'টাইমফ্রেমগুলো একমত নয় (মিশ্র)',
+  unclear: 'অস্পষ্ট',
+};
+
+function fmtInd(v: number | null | undefined, digits = 2): string {
+  return v === null || v === undefined ? '—' : v.toFixed(digits);
 }
 
 // ---------------------------------------------------------------------------
@@ -430,21 +565,40 @@ export default function Phase1Dashboard() {
   const [marketStatus, setMarketStatus] = useState<MarketStatusResponse | null>(null);
   const [marketQuality, setMarketQuality] = useState<QualityResponse | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [analysisLatest, setAnalysisLatest] = useState<AnalysisLatestResponse | null>(null);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [analysisRunning, setAnalysisRunning] = useState(false);
   const clock = useDhakaClock();
 
   const refresh = useCallback(async () => {
     try {
-      const [hRes, aRes, mRes, qRes] = await Promise.all([
+      const [hRes, aRes, mRes, qRes, anRes] = await Promise.all([
         fetch('/api/health', { cache: 'no-store' }),
         fetch('/api/audit/environment', { cache: 'no-store' }),
         fetch('/api/data/status', { cache: 'no-store' }).catch(() => null),
         fetch('/api/data/quality', { cache: 'no-store' }).catch(() => null),
+        fetch('/api/analysis/latest', { cache: 'no-store' }).catch(() => null),
       ]);
       if (!hRes.ok && !aRes.ok) throw new Error('API unreachable');
       if (hRes.ok) setHealth((await hRes.json()) as HealthReport);
       if (aRes.ok) setAudit((await aRes.json()) as AuditResponse);
       if (mRes && mRes.ok) setMarketStatus((await mRes.json()) as MarketStatusResponse);
       if (qRes && qRes.ok) setMarketQuality((await qRes.json()) as QualityResponse);
+      if (anRes && anRes.ok) {
+        setAnalysisLatest((await anRes.json()) as AnalysisLatestResponse);
+        setAnalysisError(null);
+      } else if (anRes) {
+        // honest fail-closed state (e.g. DATA_API_TOKEN posture) — never guessed
+        setAnalysisLatest(null);
+        try {
+          const b = (await anRes.json()) as { error?: { code?: string } };
+          setAnalysisError(b?.error?.code ?? 'UNAVAILABLE');
+        } catch {
+          setAnalysisError('UNAVAILABLE');
+        }
+      } else {
+        setAnalysisError('NETWORK_ERROR');
+      }
       setLoadError(null);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : 'unknown error');
@@ -549,6 +703,54 @@ export default function Phase1Dashboard() {
     }
   }, [marketStatus?.symbol, refresh, toast]);
 
+  const runAnalysisNow = useCallback(async () => {
+    setAnalysisRunning(true);
+    try {
+      const symbol = marketStatus?.symbol ?? 'XAUUSDm';
+      const res = await fetch('/api/analysis/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbol }),
+      });
+      const body = (await res.json()) as {
+        ok: boolean;
+        analysis?: { status: string; reasonCodes: string[] };
+        error?: { code: string; message: string };
+      };
+      if (res.status === 401 || res.status === 503) {
+        // fail-closed security posture — honest, never bypassed from the UI
+        toast({
+          title: 'বিশ্লেষণ চালানো যায়নি',
+          description: body.error ? bnForCode(body.error.code) : 'সংযোগ বন্ধ।',
+          variant: 'destructive',
+        });
+      } else if (res.status === 500) {
+        toast({
+          title: 'বিশ্লেষণ ব্যর্থ (FAILED)',
+          description: body.error?.message ?? 'অজানা ত্রুটি।',
+          variant: 'destructive',
+        });
+      } else if (body.analysis?.status === 'COMPLETED') {
+        toast({ title: 'বিশ্লেষণ সম্পূর্ণ', description: 'কাঠামো ও সূচক হালনাগাদ — বিশ্লেষণ ট্যাবে দেখুন।' });
+      } else if (body.analysis?.status === 'BLOCKED') {
+        toast({
+          title: 'বিশ্লেষণ বন্ধ — সৎ ফলাফল',
+          description: body.analysis.reasonCodes.map((c) => bnForCode(c)).join(' '),
+          variant: 'destructive',
+        });
+      }
+      await refresh();
+    } catch (e) {
+      toast({
+        title: 'বিশ্লেষণ চালানো যায়নি',
+        description: e instanceof Error ? e.message : 'unknown error',
+        variant: 'destructive',
+      });
+    } finally {
+      setAnalysisRunning(false);
+    }
+  }, [marketStatus?.symbol, refresh, toast]);
+
   const checkSummary = useMemo(() => {
     if (!audit) return null;
     const c = { pass: 0, warn: 0, fail: 0 };
@@ -592,7 +794,7 @@ export default function Phase1Dashboard() {
                 ঢাকা {clock ?? '--:--:--'}
               </span>
               <Badge variant="outline" className="hidden border-amber-500/40 bg-amber-500/10 text-amber-400 md:inline-flex">
-                Phase 3 / 12
+                Phase 4 / 12
               </Badge>
             </div>
           </div>
@@ -614,7 +816,7 @@ export default function Phase1Dashboard() {
                   Read-Only Mode সক্রিয় — কোনো অর্ডার পাঠানো হবে না
                 </p>
                 <p className="text-xs leading-relaxed text-zinc-400">
-                  Phase 1 শুধুই অডিট ও ফাউন্ডেশন। Execution কোড-লেভেলে তালাবন্ধ —{' '}
+                  Phase 4 (ডিটারমিনিস্টিক বিশ্লেষণ) পর্যন্ত সবকিছু read-only। Execution কোড-লেভেলে তালাবন্ধ —{' '}
                   {health?.executionReason ?? 'Phase 11 গেটের আগে খোলা যাবে না।'}
                 </p>
               </div>
@@ -685,7 +887,7 @@ export default function Phase1Dashboard() {
                 value: 'Read-Only',
                 state: 'LOCKED',
                 stateClass: 'border-red-500/40 bg-red-500/10 text-red-400',
-                lines: ['TRADING_PHASE=1 · চার-সুইচ গেট (Phase ≥ 11)', 'Live/Demo অর্ডার: Phase 11+ অনুমোদনসাপেক্ষ'],
+                lines: ['TRADING_PHASE=4 · চার-সুইচ গেট (Phase ≥ 11)', 'Live/Demo অর্ডার: Phase 11+ অনুমোদনসাপেক্ষ'],
               },
             ].map((k, i) => (
               <motion.div
@@ -744,6 +946,7 @@ export default function Phase1Dashboard() {
             <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1 bg-zinc-900/60 p-1">
               <TabsTrigger value="audit" className="data-[state=active]:bg-amber-500/15 data-[state=active]:text-amber-300">নিরীক্ষণ</TabsTrigger>
               <TabsTrigger value="market" className="data-[state=active]:bg-amber-500/15 data-[state=active]:text-amber-300">মার্কেট ডেটা</TabsTrigger>
+              <TabsTrigger value="analysis" className="data-[state=active]:bg-amber-500/15 data-[state=active]:text-amber-300">বিশ্লেষণ</TabsTrigger>
               <TabsTrigger value="arch" className="data-[state=active]:bg-amber-500/15 data-[state=active]:text-amber-300">আর্কিটেকচার</TabsTrigger>
               <TabsTrigger value="glm" className="data-[state=active]:bg-amber-500/15 data-[state=active]:text-amber-300">GLM যাচাই</TabsTrigger>
               <TabsTrigger value="mt5" className="data-[state=active]:bg-amber-500/15 data-[state=active]:text-amber-300">MT5 প্রতিবেদন</TabsTrigger>
@@ -1118,6 +1321,258 @@ export default function Phase1Dashboard() {
                   </div>
                 </CardContent>
               </Card>
+            </TabsContent>
+
+            {/* ------------------------------------------------ Tab: analysis (Phase 4) */}
+            <TabsContent value="analysis" className="space-y-4">
+              {/* Fail-closed banner (analysis API unavailable) */}
+              {analysisError && (
+                <div
+                  role="alert"
+                  className="flex flex-col gap-2 rounded-xl border border-red-500/40 bg-red-500/10 p-4 sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-400" aria-hidden />
+                    <div>
+                      <p className="text-sm font-semibold text-red-200">বিশ্লেষণ পরিষেবা এখন অনুপলব্ধ</p>
+                      <p className="mt-0.5 text-xs leading-relaxed text-zinc-400">{bnForCode(analysisError)}</p>
+                    </div>
+                  </div>
+                  <Badge variant="outline" className="w-fit shrink-0 border-zinc-600/50 bg-zinc-700/20 font-mono text-zinc-400">
+                    {analysisError}
+                  </Badge>
+                </div>
+              )}
+
+              {/* Last-run card */}
+              <Card className="border-zinc-800 bg-zinc-900/40">
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex flex-wrap items-center gap-2 text-base">
+                    <Cpu className="h-4 w-4 text-amber-400" aria-hidden /> ডিটারমিনিস্টিক বিশ্লেষণ ইঞ্জিন
+                    {analysisLatest?.latest ? (
+                      <Badge variant="outline" className={analysisStatusClass[analysisLatest.latest.status] ?? ''}>
+                        {analysisStatusBn[analysisLatest.latest.status] ?? analysisLatest.latest.status}
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="border-zinc-600/50 bg-zinc-700/20 font-mono text-[10px] text-zinc-400">
+                        এখনো কোনো রান নেই
+                      </Badge>
+                    )}
+                  </CardTitle>
+                  <p className="text-xs text-zinc-500">
+                    কাঠামো (সুইং, HH/HL/LH/LL, BOS/CHoCH — ক্লোজ-নিশ্চিত) + সূচক (EMA 20/50/200, RSI 14, ATR 14, ADX 14 — Wilder)।
+                    এটি <span className="text-amber-300">কেবল প্রযুক্তিগত বিশ্লেষণ — কোনো ট্রেড সিগন্যাল বা সুপারিশ নয়</span>। সিগন্যাল তৈরি Phase 5-এ হবে, এখানে নয়।
+                  </p>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {analysisLatest?.latest ? (
+                    <>
+                      <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-3 lg:grid-cols-6">
+                        {([
+                          ['ইঞ্জিন', `v${analysisLatest.latest.engineVersion}`],
+                          ['সিম্বল', analysisLatest.latest.symbol],
+                          ['রানের সময় (ঢাকা)', fmtDhaka(analysisLatest.latest.startedAtUtc)],
+                          ['সময়কাল', analysisLatest.latest.durationMs != null ? `${analysisLatest.latest.durationMs}ms` : '—'],
+                          ['ফিঙ্গারপ্রিন্ট', analysisLatest.latest.inputFingerprint ? `${analysisLatest.latest.inputFingerprint.slice(0, 12)}…` : '—'],
+                          ['টাইমফ্রেম', analysisLatest.latest.timeframes.join('/') || '—'],
+                        ] as Array<[string, string]>).map(([k, v]) => (
+                          <div key={k} className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-2">
+                            <p className="text-[10px] uppercase tracking-wide text-zinc-500">{k}</p>
+                            <p className="mt-0.5 truncate font-mono text-zinc-200">{v}</p>
+                          </div>
+                        ))}
+                      </div>
+                      {analysisLatest.latest.reasonCodes.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5">
+                          {analysisLatest.latest.reasonCodes.map((c) => (
+                            <Badge key={c} variant="outline" className="border-red-500/40 bg-red-500/10 font-mono text-[10px] text-red-300">
+                              {c}
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
+                      {analysisLatest.latest.analysis?.status === 'FAILED' && analysisLatest.latest.analysis.failureMessage && (
+                        <p className="rounded-lg border border-red-500/30 bg-red-500/5 p-2 font-mono text-[11px] text-red-300">
+                          {analysisLatest.latest.analysis.failureMessage}
+                        </p>
+                      )}
+                    </>
+                  ) : (
+                    <p className="text-xs text-zinc-500">এখনো কোনো বিশ্লেষণ চালানো হয়নি — নিচের বাটন দিয়ে চালান।</p>
+                  )}
+
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <Button onClick={() => void runAnalysisNow()} disabled={analysisRunning} className="gap-2">
+                      {analysisRunning ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> চলছে…
+                        </>
+                      ) : (
+                        <>
+                          <Cpu className="h-4 w-4" aria-hidden /> বিশ্লেষণ চালান
+                        </>
+                      )}
+                    </Button>
+                    <p className="text-[11px] leading-relaxed text-zinc-600">
+                      POST /api/analysis/run — সবসময় টোকেন দাবি করে (fail-closed)। ডেটা অবিশ্বস্ত হলে ফলাফল BLOCKED হবে, কখনো বানানো হবে না।
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* BLOCKED: honest verdict, nothing fabricated */}
+              {analysisLatest?.latest?.analysis?.status === 'BLOCKED' && (
+                <div role="alert" className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4">
+                  <p className="text-sm font-semibold text-amber-200">বিশ্লেষণ বন্ধ (BLOCKED) — সৎ ফলাফল</p>
+                  <ul className="mt-2 space-y-1 text-xs leading-relaxed text-zinc-300">
+                    {analysisLatest.latest.analysis.reasonCodes.map((c) => (
+                      <li key={c} className="flex gap-2">
+                        <span className="font-mono text-[10px] text-amber-300/80">{c}</span>
+                        <span>{bnForCode(c)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="mt-2 text-xs text-zinc-500">
+                    কোনো কাঠামো বা সূচক বানানো হয়নি — ডেটা গেট fail-closed। ব্রিজ সচল ও ডেটা সতেজ হলে পরবর্তী রান সম্পূর্ণ হবে।
+                  </p>
+                </div>
+              )}
+
+              {/* Readiness chips per timeframe */}
+              {analysisLatest?.latest?.analysis && (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  {analysisLatest.latest.analysis.readiness.map((r) => (
+                    <Card key={r.timeframe} className="border-zinc-800 bg-zinc-900/40">
+                      <CardHeader className="pb-2">
+                        <CardTitle className="flex items-center gap-2 text-sm">
+                          <span className="font-mono">{r.timeframe}</span>
+                          <Badge variant="outline" className={r.state === 'READY' ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400' : 'border-red-500/40 bg-red-500/10 text-red-300'}>
+                            {r.state === 'READY' ? 'প্রস্তুত' : 'বন্ধ'}
+                          </Badge>
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-1.5 text-xs">
+                        <div className="flex justify-between">
+                          <span className="text-zinc-500">বন্ধ ক্যান্ডেল</span>
+                          <span className="font-mono text-zinc-200">{r.closedCandles}/{r.requiredMinBars}</span>
+                        </div>
+                        {r.errorCodes.slice(0, 3).map((c) => (
+                          <p key={c} className="font-mono text-[10px] text-red-300/90">{c}</p>
+                        ))}
+                        {r.warnings.slice(0, 2).map((w) => (
+                          <p key={w} className="font-mono text-[10px] text-amber-300/80">{w}</p>
+                        ))}
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              )}
+
+              {/* COMPLETED: structure + indicators per timeframe */}
+              {analysisLatest?.latest?.analysis?.status === 'COMPLETED' && analysisLatest.latest.analysis.perTimeframe && (
+                <>
+                  {analysisLatest.latest.analysis.timeframeContext && (
+                    <div className="flex flex-col gap-2 rounded-xl border border-zinc-700/60 bg-zinc-900/60 p-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <p className="text-sm font-semibold text-zinc-100">
+                          মাল্টি-টাইমফ্রেম প্রসঙ্গ — {alignmentBn[analysisLatest.latest.analysis.timeframeContext.alignment] ?? analysisLatest.latest.analysis.timeframeContext.alignment}
+                        </p>
+                        <p className="mt-0.5 text-xs text-zinc-400">{analysisLatest.latest.analysis.timeframeContext.note}</p>
+                        <p className="mt-1 text-[11px] text-zinc-600">
+                          বর্ণনামূলক পর্যবেক্ষণ মাত্র — কোনো সিগন্যাল নয় (descriptive-only-not-a-signal)।
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {Object.entries(analysisLatest.latest.analysis.timeframeContext.trendByTimeframe ?? {}).map(([tf, t]) => (
+                          <Badge key={tf} variant="outline" className="font-mono text-[10px] text-zinc-400">
+                            {tf}: {String(t)}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+                    {Object.values(analysisLatest.latest.analysis.perTimeframe).map((a) => (
+                      <Card key={a.timeframe} className="border-zinc-800 bg-zinc-900/40">
+                        <CardHeader className="pb-3">
+                          <CardTitle className="flex flex-wrap items-center gap-2 text-base">
+                            <span className="font-mono">{a.timeframe}</span> কাঠামো
+                            <Badge variant="outline" className={
+                              a.structure.trend === 'bullish'
+                                ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
+                                : a.structure.trend === 'bearish'
+                                  ? 'border-red-500/40 bg-red-500/10 text-red-300'
+                                  : 'border-zinc-600/50 bg-zinc-700/20 text-zinc-400'
+                            }>
+                              {trendBn[a.structure.trend] ?? a.structure.trend}
+                            </Badge>
+                            <Badge variant="outline" className="font-mono text-[10px] text-zinc-400">{a.structure.highLabel}</Badge>
+                            <Badge variant="outline" className="font-mono text-[10px] text-zinc-400">{a.structure.lowLabel}</Badge>
+                          </CardTitle>
+                          <p className="text-xs text-zinc-500">
+                            {a.candleCount}টি বন্ধ ক্যান্ডেল · সোর্স {a.source} · সুইং উইন্ডো {analysisLatest.latest?.analysis?.calculationConfig.swingLeft}/{analysisLatest.latest?.analysis?.calculationConfig.swingRight}
+                          </p>
+                        </CardHeader>
+                        <CardContent className="space-y-3 text-xs">
+                          {/* indicators */}
+                          <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+                            {([
+                              ['EMA20', fmtInd(a.indicators.ema20?.last?.value)],
+                              ['EMA50', fmtInd(a.indicators.ema50?.last?.value)],
+                              ['EMA200', fmtInd(a.indicators.ema200?.last?.value)],
+                              ['RSI14', fmtInd(a.indicators.rsi14?.last?.value, 1)],
+                              ['ATR14', fmtInd(a.indicators.atr14?.last?.value)],
+                              ['ADX14', fmtInd(a.indicators.adx14?.last?.value, 1)],
+                            ] as Array<[string, string]>).map(([k, v]) => (
+                              <div key={k} className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-2 text-center">
+                                <p className="text-[10px] uppercase tracking-wide text-zinc-500">{k}</p>
+                                <p className="mt-0.5 font-mono text-sm text-amber-200">{v}</p>
+                              </div>
+                            ))}
+                          </div>
+
+                          {/* structure facts */}
+                          <div className="space-y-1.5">
+                            <div className="flex justify-between border-b border-zinc-800/60 pb-1.5">
+                              <span className="text-zinc-500">নিশ্চিত সুইং</span>
+                              <span className="font-mono text-zinc-200">{a.structure.confirmedSwings.length}</span>
+                            </div>
+                            <div className="flex justify-between border-b border-zinc-800/60 pb-1.5">
+                              <span className="text-zinc-500">BOS/CHoCH ইভেন্ট</span>
+                              <span className="font-mono text-zinc-200">{a.structure.events.length}</span>
+                            </div>
+                            <div className="flex justify-between border-b border-zinc-800/60 pb-1.5">
+                              <span className="text-zinc-500">অ-নিশ্চিত উইক-ক্রসিং</span>
+                              <span className="font-mono text-zinc-200">{a.structure.unconfirmedCrossings.length}</span>
+                            </div>
+                            {a.structure.events.length > 0 && (
+                              <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-2">
+                                <p className="text-[10px] uppercase tracking-wide text-zinc-500">সর্বশেষ ইভেন্ট</p>
+                                {(() => {
+                                  const e = a.structure.events[a.structure.events.length - 1];
+                                  return (
+                                    <p className="mt-1 font-mono text-[11px] leading-relaxed text-zinc-300">
+                                      {e.type} · {directionBn[e.direction] ?? e.direction} · স্তর {e.levelText} · ক্লোজ-নিশ্চিত ({e.basis}) ·{' '}
+                                      {fmtDhaka(new Date(e.confirmedAtUtcSec * 1000).toISOString())}
+                                    </p>
+                                  );
+                                })()}
+                              </div>
+                            )}
+                            {a.indicatorIssues.length > 0 && (
+                              <p className="font-mono text-[10px] text-red-300/90">{a.indicatorIssues.join(' · ')}</p>
+                            )}
+                            {a.warnings.length > 0 && (
+                              <p className="font-mono text-[10px] text-amber-300/80">{a.warnings.join(' · ')}</p>
+                            )}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                </>
+              )}
             </TabsContent>
 
             {/* ------------------------------------------------ Tab: architecture */}
@@ -1558,7 +2013,7 @@ export default function Phase1Dashboard() {
         <div className="mx-auto flex w-full max-w-7xl flex-col gap-2 px-4 py-4 text-xs text-zinc-500 sm:px-6 md:flex-row md:items-center md:justify-between">
           <p className="flex items-center gap-1.5">
             <LockKeyhole className="h-3.5 w-3.5 text-red-400" aria-hidden />
-            XAUUSD AI Trading Agent · Phase 3/12 · Read-Only — কোনো অর্ডার পাঠানো হবে না
+            XAUUSD AI Trading Agent · Phase 4/12 · Read-Only — কোনো অর্ডার পাঠানো হবে না
           </p>
           <p className="font-mono text-[11px] text-zinc-600">
             Next.js 16 · TypeScript · Prisma/SQLite · z-ai-web-dev-sdk (glm-4-plus)
