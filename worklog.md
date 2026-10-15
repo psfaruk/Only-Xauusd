@@ -203,3 +203,24 @@ Stage Summary:
 - Phase 9 tree published to GitHub (fast-forward, no force-push). Verification at publish time: 243/243 tests, lint clean, tsc clean (app + bridge), browser E2E clean.
 - HONEST current state: live broker feed DOWN since the rebuild (credentials unavailable in-environment); db/custom.db empty (the 3,900+ candles and analysis/signal/backtest history were lost with it — re-syncable once credentials return); every layer fails closed and says so in the UI; four execution locks intact; bridge remains read-only.
 - To fully restore the live feed: re-add MT5_LOGIN / MT5_PASSWORD / MT5_SERVER to .env, restart the bridge (daemon pattern), re-run sync — the tabs then transition from DISCONNECTED/MISSING to live data.
+
+---
+Task ID: 12
+Agent: Z.ai Code (main orchestrator)
+Task: PHASE 9.1 — Sandbox Recovery, Exness Reconnection & Database Rehydration
+
+Work Log:
+- Incident: SECOND sandbox rebuild at ~11:27 UTC wiped .env to DATABASE_URL-only again (bridge URL/token, public-reads flag gone) and recreated db/custom.db empty; local tree had one unpushed junk auto-commit 46ceaf9 (tool-results/*.txt only, secret-scan clean).
+- Step 1 inspection: origin/main = 87a342f (expected base confirmed); .env.example fully documented with placeholders; bridge startup = bun --hot --env-file=../../.env (GET-only, x-trader-key auth); app+bridge read the SAME .env so URL/token pair consistency is by construction and was proven live (bridgeReachable:true from the app's authenticated bridge call); prisma -> db/custom.db, 14 tables, write path proven (CHAT_AGENT_TURN SystemEvent row persisted and rendered in UI).
+- Step 2 credential hunt (presence-only, values never printed): .env, shell env, /proc/*/environ of running processes, all backup paths, ~/.bash_history, git history — MT5_LOGIN/MT5_PASSWORD/MT5_SERVER ABSENT everywhere -> live reconnection reported BLOCKED per instruction; nothing simulated.
+- Environment plumbing restored (NOT live reconnection): MT5_BRIDGE_URL + fresh openssl MT5_BRIDGE_TOKEN + MARKET_API_PUBLIC_READS=true re-added; credential placeholders left commented; sync scheduler left OFF until creds return; bridge restarted daemonized (setsid pattern; plain nohup gets reaped) + dev server via relaunch-dev.py; both left running.
+- Step 4 database: no backups exist anywhere (searched db/*.db*, home, /tmp, .env* variants); documented honest loss — SystemEvent 1 (new), SyncRun/MarketCandle/DataQualityIssue/AnalysisRun/BacktestRun/SignalEvaluation all 0; no synthetic candles; custom.db preserved append-only.
+- Steps 5/6 BLOCKED (no broker session): no live sync, no derived rebuild; fail-closed gates verified live instead (signalPermitted:false, blockedReasons [SOURCE_DISCONNECTED, SOURCE_UNAVAILABLE, TICK_UNAVAILABLE]; trigger POST 503 MARKET_API_TOKEN_NOT_CONFIGURED; analysis/signal/backtest surfaces honest-empty).
+- Step 7 browser E2E (agent-browser, desktop 1280x800 + mobile 390x844): audit v2 tab honest (LIVE_BROKER check explicitly says an HTTP-healthy bridge is NOT a live feed); Data-Health DISCONNECTED + per-TF MISSING; signal tab 0 evaluations; chat E2E grounded Bengali reply with deterministic state block; SystemEvent audit trail visible in UI; ORDER EXECUTION - LOCKED; 0 page/console errors; mobile no horizontal overflow; screenshots audit/phase9.1-{desktop,mobile}.png.
+- Verification actually executed: bun test 243/243 (exit 0), eslint clean, tsc app 0 errors, tsc bridge 0 errors; bun run build NOT RUN (sandbox rule, disclosed).
+- Housekeeping: removed unpushed junk commit 46ceaf9 (git reset --soft to 87a342f, tool-results unstaged + gitignored); wrote audit/phase9.1-recovery-report.md (PASS/BLOCKED/NOT TESTED/NOT APPLICABLE per criterion); commit + push.
+
+Stage Summary:
+- Phase 9.1 COMPLETE as an honest recovery attempt: everything verifiable without broker credentials is verified PASS; everything requiring the broker session is BLOCKED (never faked); DB loss documented; no synthetic data; four execution locks intact; no order/trade/position code anywhere.
+- Recovery NOT complete by design — requires the user to re-provision MT5_LOGIN/MT5_PASSWORD/MT5_SERVER into .env (never chat/git), then: restart bridge+dev, verify connected+authenticated with server identity, resolve XAUUSDm, fresh quote validation, read-only sync, H4 depth re-probe, then analysis/signal/backtest as NEW fingerprinted runs; re-enable MARKET_SYNC_INTERVAL_MS=300000 with the creds.
+- Advisory: sandbox rebuilds wipe .env — prefer platform-level env store for credentials if available; rotate the GitHub PAT shared earlier in chat.
