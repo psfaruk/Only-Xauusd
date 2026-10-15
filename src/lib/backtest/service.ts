@@ -171,3 +171,85 @@ export async function getLatestBacktest(symbol: string): Promise<LatestBacktestR
     rules: JSON.parse(row.rules) as Record<string, unknown>,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Signal-engine backtest (Phase 9, Task C) — validates the REAL signal core
+// ---------------------------------------------------------------------------
+
+import { runSignalBacktest, DEFAULT_SIGNAL_BACKTEST_RULES, type SignalBacktestResult, type SignalBacktestRules } from './signal-engine';
+import { buildStrategyRules } from '@/lib/signal/rules';
+import { SIGNAL_STRATEGY_VERSION } from '@/lib/signal/types';
+
+export interface RunSignalBacktestOptions {
+  symbol: string;
+  maxCandles?: number;
+  rules?: Partial<SignalBacktestRules>;
+}
+
+export interface RunSignalBacktestOutcome {
+  runId: string | null;
+  status: 'completed' | 'insufficient_data' | 'failed';
+  result: SignalBacktestResult | null;
+  error: string | null;
+}
+
+/** Run the signal-engine validation over verified M15/H1/H4 broker candles. */
+export async function runSignalBacktestService(opts: RunSignalBacktestOptions): Promise<RunSignalBacktestOutcome> {
+  const startedAt = Date.now();
+  const rules: SignalBacktestRules = { ...DEFAULT_SIGNAL_BACKTEST_RULES, ...opts.rules };
+  const maxCandles = Math.min(opts.maxCandles ?? 2000, config.market.backfillMaxBars);
+
+  try {
+    const strategy = buildStrategyRules();
+    const load = async (tf: Timeframe) => loadVerifiedCandles(opts.symbol, tf, maxCandles);
+    const [exec, h1, h4] = await Promise.all([load('M15'), load('H1'), load('H4')]);
+    const digits = exec.digits ?? h1.digits ?? h4.digits ?? null;
+    const excludedTotal = exec.excluded + h1.excluded + h4.excluded;
+
+    const result = runSignalBacktest(
+      opts.symbol,
+      exec.candles,
+      h1.candles,
+      h4.candles,
+      digits,
+      rules,
+      strategy,
+    );
+    if (excludedTotal > 0) {
+      result.limitations.push(`${excludedTotal} persisted candles failed read-time OHLC re-validation and were excluded.`);
+    }
+
+    const status: RunSignalBacktestOutcome['status'] =
+      result.dataset.executionCandles < rules.minCandles ? 'insufficient_data' : 'completed';
+
+    const run = await db.backtestRun.create({
+      data: {
+        strategyVersion: SIGNAL_STRATEGY_VERSION, // the CURRENT signal-engine strategy
+        symbol: opts.symbol,
+        timeframe: 'M15+H1+H4',
+        status,
+        datasetFingerprint: result.datasetFingerprint,
+        datasetFromUtc: new Date((result.dataset.fromUtcSec || 0) * 1000),
+        datasetToUtc: new Date((result.dataset.toUtcSec || 0) * 1000),
+        candleCount: result.dataset.executionCandles,
+        source: result.dataset.source,
+        exclusions: JSON.stringify(result.limitations),
+        rules: JSON.stringify({ backtestRules: result.rules, strategyConfig: result.strategyConfig }),
+        devMetrics: JSON.stringify(result.dev),
+        oosMetrics: JSON.stringify(result.oos),
+        trades: JSON.stringify(result.trades.slice(0, 500)), // bounded
+        limitations: JSON.stringify(result.limitations),
+        durationMs: Date.now() - startedAt,
+      },
+    });
+
+    return { runId: run.id, status, result, error: null };
+  } catch (e) {
+    return {
+      runId: null,
+      status: 'failed',
+      result: null,
+      error: e instanceof Error ? e.message : 'unknown error',
+    };
+  }
+}

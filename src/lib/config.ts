@@ -6,7 +6,7 @@
  * for API responses. Never logs or exposes secret values.
  */
 
-const VERSION = '0.1.0-phase4';
+const VERSION = '0.2.0-phase9';
 
 function csv(name: string, fallback: string): string[] {
   const raw = process.env[name];
@@ -35,6 +35,11 @@ function bool(name: string, fallback: boolean): boolean {
   return raw === 'true' || raw === '1' || raw === 'yes';
 }
 
+function clampNum(name: string, fallback: number, min: number, max: number): number {
+  const v = num(name, fallback);
+  return Math.min(Math.max(v, min), max);
+}
+
 // ---------------------------------------------------------------------------
 // Trading safety gate — the single most important rule of Phase 1.
 // Order execution can only ever be enabled when ALL conditions hold:
@@ -61,6 +66,13 @@ export const config = {
   tradingMode,
   execution: {
     enabled: executionEnabled,
+    // Individual switch states (read-only exposure for audit honesty).
+    switches: {
+      phaseGatePassed,
+      executionArmed,
+      allowExecution,
+      tradingMode,
+    },
     // Human-readable reason — surfaced in UI, logs and health checks.
     reason: executionEnabled
       ? 'Execution enabled (phase gate passed).'
@@ -81,6 +93,9 @@ export const config = {
     maxRetries: Math.min(Math.max(0, num('MT5_BRIDGE_MAX_RETRIES', 2)), 5),
     // Token presence flag only — the value never leaves the server.
     hasToken: Boolean(process.env.MT5_BRIDGE_TOKEN),
+    /** Intended broker server identity (used ONLY for identity verification
+     *  in the environment audit — never a secret, never a connection param). */
+    expectedServer: str('MT5_SERVER', 'Exness-MT5Trial6'),
   },
   market: {
     /** Strict symbol allowlist — anything else is rejected (SYMBOL_NOT_ALLOWED). */
@@ -132,6 +147,43 @@ export const config = {
     /** Swing detection window: bars required left/right of a candidate. */
     swingLeft: Math.min(Math.max(2, num('ANALYSIS_SWING_LEFT', 3)), 8),
     swingRight: Math.min(Math.max(2, num('ANALYSIS_SWING_RIGHT', 3)), 8),
+  },
+  signal: {
+    /** Deterministic strategy thresholds — documented in src/lib/signal/rules.ts
+     *  and persisted with every evaluation. The LLM can NEVER change these. */
+    executionTf: 'M15' as const,
+    contextTfs: ['H1', 'H4'] as const,
+    /** Max M15 bars between the confirmed structure break and the decision bar. */
+    maxBarsSinceBreak: Math.min(Math.max(2, num('SIGNAL_MAX_BARS_SINCE_BREAK', 8)), 20),
+    /** Entry zone width above/below the broken level, in ATR multiples. */
+    zoneWidthAtr: clampNum('SIGNAL_ZONE_WIDTH_ATR', 0.5, 0.1, 2),
+    /** Entry-zone proximity tolerance for the live price, in ATR multiples. */
+    entryToleranceAtr: clampNum('SIGNAL_ENTRY_TOLERANCE_ATR', 0.25, 0.05, 1),
+    /** Stop-loss buffer beyond the anchor swing, in ATR multiples. */
+    slAtrBuffer: clampNum('SIGNAL_SL_ATR_BUFFER', 0.5, 0.1, 2),
+    /** Fixed reward/risk multiple defining the target. */
+    rewardRisk: clampNum('SIGNAL_REWARD_RISK', 2.0, 0.5, 5),
+    /** Minimum ADX(14) on the execution TF (trend strength floor). */
+    minAdx: clampNum('SIGNAL_MIN_ADX', 15, 0, 50),
+    /** RSI(14) acceptance band for BUY (mirror band is used for SELL). */
+    rsiBuyMin: clampNum('SIGNAL_RSI_BUY_MIN', 40, 0, 100),
+    rsiBuyMax: clampNum('SIGNAL_RSI_BUY_MAX', 75, 0, 100),
+    /** Maximum accepted spread in PRICE units (observed XAUUSDm ≈ 0.24). */
+    maxSpreadPrice: clampNum('SIGNAL_MAX_SPREAD', 0.6, 0.1, 5),
+    /** Setup expiry, in execution-TF bars after the decision candle. */
+    expiryBars: Math.min(Math.max(2, num('SIGNAL_EXPIRY_BARS', 12)), 48),
+    /** Minimum closed H4 candles required for higher-timeframe context. */
+    minH4Bars: Math.min(Math.max(60, num('SIGNAL_MIN_H4_BARS', 200)), 1_000),
+    /** Minimum closed H1 candles required for higher-timeframe context. */
+    minH1Bars: Math.min(Math.max(60, num('SIGNAL_MIN_H1_BARS', 220)), 1_000),
+  },
+  chat: {
+    /** Bengali Chat Agent bounds (Task D). */
+    maxMessageChars: Math.min(Math.max(50, num('CHAT_MAX_MESSAGE_CHARS', 2_000)), 4_000),
+    maxHistoryTurns: Math.min(Math.max(2, num('CHAT_MAX_HISTORY_TURNS', 10)), 20),
+    maxToolRounds: Math.min(Math.max(1, num('CHAT_MAX_TOOL_ROUNDS', 3)), 5),
+    /** Stricter per-IP rate limit for the (costlier) chat endpoint. */
+    rateLimitPerMin: Math.min(Math.max(3, num('CHAT_RATE_LIMIT_PER_MIN', 12)), 60),
   },
   limits: {
     maxEventsReturned: Math.min(Math.max(1, num('MAX_EVENTS_RETURNED', 100)), 500),

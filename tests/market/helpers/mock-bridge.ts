@@ -17,6 +17,8 @@ export interface MockBridgeState {
   authenticated: boolean;
   gateway: string | null;
   lastError: string | null;
+  /** Phase 9: reported broker-server identity (configurable for identity tests). */
+  server: string;
   symbols: string[];
   quote: { bid: number; ask: number; ts: number } | null;
   /** Phase 8: quote receipt age in ms (fresh vs stale injection). */
@@ -39,6 +41,7 @@ export function defaultMockState(): MockBridgeState {
     authenticated: true,
     gateway: '203.0.113.10',
     lastError: null,
+    server: 'MockServer',
     symbols: ['XAUUSDm', 'XAUUSD', 'GOLD'],
     quote: null,
     quoteAgeMs: 0,
@@ -121,7 +124,7 @@ export async function startMockBridge(initial: MockBridgeState = defaultMockStat
         return Response.json({
           connected: state.connected,
           source: state.source,
-          server: 'MockServer',
+          server: state.server,
           latencyMs: 12,
           serverTime: Math.floor(Date.now() / 1000),
           offsetSec: 0,

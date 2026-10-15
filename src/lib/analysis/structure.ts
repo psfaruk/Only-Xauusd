@@ -47,7 +47,9 @@ import type {
 // Labels & trend from the last two swings of each kind
 // ---------------------------------------------------------------------------
 
-function pairLabel(earlier: SwingPoint | undefined, later: SwingPoint | undefined): SwingPairLabel {
+/** Pair label of two consecutive same-kind swings (exported for the Phase 9
+ *  signal engine's causal HTF trend — same rule, one implementation). */
+export function pairLabel(earlier: SwingPoint | undefined, later: SwingPoint | undefined): SwingPairLabel {
   if (!earlier || !later) return 'UNCLEAR';
   if (later.price > earlier.price) return earlier.kind === 'high' ? 'HH' : 'HL';
   if (later.price < earlier.price) return earlier.kind === 'high' ? 'LH' : 'LL';

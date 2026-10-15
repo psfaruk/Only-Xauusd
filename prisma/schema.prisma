@@ -258,6 +258,40 @@ model BacktestRun {
 }
 
 // ============================================================================
+// PHASE 9 (ACTIVE) — deterministic signal-engine evaluations
+// ----------------------------------------------------------------------------
+// Append-only audit trail of EVERY signal evaluation (BUY_SETUP | SELL_SETUP |
+// WAIT | BLOCKED | NO_SETUP). A new evaluation NEVER overwrites a previous
+// one. Levels (entry zone / SL / target / R:R) exist ONLY on setup outcomes —
+// never on WAIT/BLOCKED/NO_SETUP. No execution-related field exists here.
+// ============================================================================
+
+model SignalEvaluation {
+  id                   String    @id @default(cuid())
+  engineVersion        String // signal engine version (e.g. 9.0.0)
+  strategyVersion      String // e.g. hybrid-structure-retest/9.0.0
+  symbol               String
+  outcome              String // BUY_SETUP | SELL_SETUP | WAIT | BLOCKED | NO_SETUP | FAILED
+  reasonCodes          String // JSON string[] — machine-readable, typed
+  inputFingerprint     String // sha256 over canonical input + rules + engineVersion
+  datasetFingerprint   String? // sha256 over the execution-TF candles in the window
+  inputSnapshot        String // JSON: window ranges, quote, spec (bounded, no secrets)
+  evidence             String // JSON: structure event, anchor swing, indicators, HTF trends
+  levels               String? // JSON: entry zone, SL, target, R:R — setups ONLY
+  decisionCandleTimeUtc DateTime?
+  setupKnownAtUtc      DateTime?
+  expiryUtc            DateTime?
+  quote                String // JSON: bid/ask/spread/age/source at evaluation time
+  executionLocked      Boolean // recorded per evaluation — always true in Phase 9
+  durationMs           Int?
+  createdAt            DateTime  @default(now())
+
+  @@index([symbol, outcome, createdAt])
+  @@index([symbol, createdAt])
+  @@index([createdAt])
+}
+
+// ============================================================================
 // PHASE 7 (planned) — deterministic risk gate
 // ============================================================================
 

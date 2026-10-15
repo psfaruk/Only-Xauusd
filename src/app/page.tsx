@@ -86,9 +86,60 @@ interface EnvCheck {
   note?: string;
 }
 
+/** Phase 9 — Environment Audit v2 check shape. */
+interface AuditCheckV2 {
+  id: string;
+  category: string;
+  description: string;
+  required: boolean;
+  expected: string;
+  actual: string | null;
+  evidenceType: 'STATIC' | 'COMMAND' | 'API_PROBE' | 'LIVE_BROKER' | 'FIXTURE';
+  evidenceCommand: string;
+  startedAtUtc: string | null;
+  completedAtUtc: string | null;
+  runtimeIdentity: string | null;
+  exitCodeOrHttpStatus: number | null;
+  durationMs: number | null;
+  evidence: string;
+  status: 'PASS' | 'WARN' | 'FAIL' | 'BLOCKED' | 'NOT_APPLICABLE' | 'NOT_TESTED';
+  reason: string;
+  freshnessPolicy: string;
+  scope: 'current-required' | 'historical' | 'not-applicable';
+  historical?: { phase: number; performedAtUtc: string };
+}
+
 interface AuditResponse {
-  auditPerformedAt: string;
-  generatedAt: string;
+  ok: boolean;
+  model: string;
+  generatedAtUtc: string;
+  commit: string | null;
+  app: { version: string; phase: number; phaseLabel: string; tradingMode: string };
+  executionLock: {
+    enabled: boolean;
+    reason: string;
+    switches: { phaseGate: boolean; executionArmed: boolean; allowExecution: boolean; readOnlyMode: boolean };
+  };
+  checks: AuditCheckV2[];
+  totals: {
+    currentRequired: { pass: number; warn: number; fail: number; blocked: number; total: number };
+    notApplicable: number;
+    historical: number;
+    notTested: number;
+  };
+  sections: {
+    currentRequired: AuditCheckV2[];
+    notApplicable: AuditCheckV2[];
+    historical: AuditCheckV2[];
+  };
+  persistedFacts: {
+    lastGlmVerification: { code: string; at: string | null; message: string } | null;
+    lastSyncRun: { status: string; at: string | null; source: string | null; inserted: number; updated: number } | null;
+    analysisRuns: number;
+    backtestRuns: number;
+    signalEvaluations: number;
+  };
+  notes: string[];
   config: {
     version: string;
     phase: number;
@@ -116,17 +167,19 @@ interface AuditResponse {
     verifiedAt: string;
     capabilities: { chatCompletion: boolean; bengali: boolean; toolCalling: boolean; toolCallRoundTripMs: number };
     sample: { prompt: string; response: string };
-    liveStatus: { status: string; lastCheckedAt: string | null };
+    liveStatus: { code?: string; at?: string | null; message?: string } | null;
   };
   mt5: {
-    feasibleInSandbox: boolean;
-    findings: string[];
-    bridgeOptions: { id: string; title: string; detail: string }[];
-    phase2Plan: string[];
+    currentArchitecture?: { id: string; title: string; detail: string; status: string };
+    historicalStudy?: { findings: string[]; supersededBy: string };
+    feasibleInSandbox?: boolean;
+    findings?: string[];
+    bridgeOptions?: { id: string; title: string; detail: string }[];
+    phase2Plan?: string[];
   };
   database: {
     provider: string;
-    models: { name: string; purpose: string; phase: number; status: 'active' | 'planned' }[];
+    models: { name: string; purpose: string; phase: number; status: string }[];
   };
   tools: { total: number; active: string[]; planned: { name: string; phase: number }[] };
   security: { measure: string; detail: string }[];
@@ -134,6 +187,102 @@ interface AuditResponse {
   repositoryTree: string;
   acceptanceChecklist: { id: string; label: string; done: boolean }[];
   events: { id: string; level: string; category: string; code: string; message: string; createdAt: string }[];
+}
+
+/** Phase 9 — /api/signal/latest response. */
+interface SignalLevelsView {
+  direction: 'BUY' | 'SELL';
+  entryZoneLowText: string;
+  entryZoneHighText: string;
+  entryReferenceText: string;
+  stopLossText: string;
+  targetText: string;
+  riskPrice: number;
+  rewardPrice: number;
+  rewardRiskRatio: number;
+}
+
+interface SignalEvidenceView {
+  structureEvent: {
+    type: string;
+    direction: string;
+    levelText: string;
+    breakCandleTimeUtc: string;
+    barsSinceBreak: number;
+  } | null;
+  anchorSwing: { kind: string; priceText: string; swingTimeUtc: string } | null;
+  indicators: { ema50: number | null; rsi14: number | null; atr14: number | null; adx14: number | null };
+  htfContext: { h1Trend: string | null; h4Trend: string | null };
+  decisionClose: number | null;
+  retestBarTimeUtc: string | null;
+  executionWindow: { fromUtc: string; toUtc: string; bars: number };
+  h1Window: { fromUtc: string; toUtc: string; bars: number };
+  h4Window: { fromUtc: string; toUtc: string; bars: number };
+}
+
+interface SignalLatestResponse {
+  ok: boolean;
+  symbol: string;
+  signal: {
+    id: string;
+    createdAt: string;
+    outcome: 'BUY_SETUP' | 'SELL_SETUP' | 'WAIT' | 'BLOCKED' | 'NO_SETUP' | 'FAILED';
+    reasonCodes: string[];
+    engineVersion: string;
+    strategyVersion: string;
+    decisionCandleTimeUtc: string | null;
+    setupKnownAtUtc: string | null;
+    expiryUtc: string | null;
+    levels: SignalLevelsView | null;
+    evidence: SignalEvidenceView | null;
+    inputFingerprint: string;
+    datasetFingerprint: string | null;
+    executionLocked: boolean;
+    quote: Record<string, unknown> | null;
+  } | null;
+  backtestComparison: {
+    runId: string;
+    createdAt: string;
+    strategyVersion: string;
+    timeframe: string;
+    status: string;
+    datasetFingerprint: string;
+    datasetFromUtc: string;
+    datasetToUtc: string;
+    candleCount: number;
+    dev: Record<string, unknown>;
+    oos: Record<string, unknown>;
+    limitations: string[];
+  } | null;
+  notes: string[];
+}
+
+/** Phase 9 — /api/chat response. */
+interface ChatToolCallView {
+  name: string;
+  ok: boolean;
+  error?: string;
+  durationMs: number;
+}
+
+interface ChatResponse {
+  ok: boolean;
+  reply: string;
+  toolCalls: ChatToolCallView[];
+  evidence: { tool: string; facts: Record<string, unknown> }[];
+  dataState: {
+    quoteFreshness: string | null;
+    quoteSourceClass: string | null;
+    bid: string | null;
+    ask: string | null;
+    quoteTimeUtc: string | null;
+    latestSignalOutcome: string | null;
+    latestSignalReasonCodes: string[];
+  };
+  limitations: string[];
+  model: string;
+  totalDurationMs: number;
+  error?: { code: string; detail?: string };
 }
 
 interface VerifyTest {
@@ -619,6 +768,68 @@ function StatusIcon({ status }: { status: 'pass' | 'warn' | 'fail' | 'active' | 
   return <AlertTriangle className="h-4 w-4 text-amber-400" aria-hidden />;
 }
 
+/** Phase 9 — audit v2 status icon (six-state model). */
+function AuditStatusIcon({ status }: { status: string }) {
+  switch (status) {
+    case 'PASS':
+      return <CheckCircle2 className="h-4 w-4 text-emerald-400" aria-hidden />;
+    case 'WARN':
+      return <AlertTriangle className="h-4 w-4 text-amber-400" aria-hidden />;
+    case 'FAIL':
+      return <XCircle className="h-4 w-4 text-red-400" aria-hidden />;
+    case 'BLOCKED':
+      return <AlertTriangle className="h-4 w-4 text-orange-400" aria-hidden />;
+    case 'NOT_APPLICABLE':
+      return <Circle className="h-4 w-4 text-zinc-500" aria-hidden />;
+    default:
+      return <Circle className="h-4 w-4 text-zinc-400" aria-hidden />; // NOT_TESTED
+  }
+}
+
+function auditStatusBadgeClass(status: string): string {
+  switch (status) {
+    case 'PASS':
+      return 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400';
+    case 'WARN':
+      return 'border-amber-500/40 bg-amber-500/10 text-amber-400';
+    case 'FAIL':
+      return 'border-red-500/40 bg-red-500/10 text-red-400';
+    case 'BLOCKED':
+      return 'border-orange-500/40 bg-orange-500/10 text-orange-400';
+    case 'NOT_APPLICABLE':
+      return 'border-zinc-600/50 bg-zinc-700/20 text-zinc-500';
+    default:
+      return 'border-zinc-600/50 bg-zinc-700/20 text-zinc-400'; // NOT_TESTED
+  }
+}
+
+/** Phase 9 — signal outcome renderings. */
+const signalOutcomeBn: Record<string, string> = {
+  BUY_SETUP: 'BUY সেটআপ (গবেষণা)',
+  SELL_SETUP: 'SELL সেটআপ (গবেষণা)',
+  WAIT: 'অপেক্ষা (WAIT)',
+  NO_SETUP: 'সেটআপ নেই (NO_SETUP)',
+  BLOCKED: 'বন্ধ (BLOCKED)',
+  FAILED: 'ব্যর্থ (FAILED)',
+};
+
+function signalOutcomeBadgeClass(outcome: string): string {
+  switch (outcome) {
+    case 'BUY_SETUP':
+      return 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400';
+    case 'SELL_SETUP':
+      return 'border-red-500/40 bg-red-500/10 text-red-400';
+    case 'WAIT':
+      return 'border-amber-500/40 bg-amber-500/10 text-amber-400';
+    case 'NO_SETUP':
+      return 'border-zinc-600/50 bg-zinc-700/20 text-zinc-400';
+    case 'BLOCKED':
+      return 'border-orange-500/40 bg-orange-500/10 text-orange-400';
+    default:
+      return 'border-red-600/50 bg-red-600/15 text-red-300';
+  }
+}
+
 function levelBadgeClass(level: string): string {
   switch (level) {
     case 'error':
@@ -652,11 +863,17 @@ export default function Phase1Dashboard() {
   const [analysisRunning, setAnalysisRunning] = useState(false);
   const [dataHealth, setDataHealth] = useState<DataHealthResponse | null>(null);
   const [backtestLatest, setBacktestLatest] = useState<BacktestLatestResponse | null>(null);
+  const [signalLatest, setSignalLatest] = useState<SignalLatestResponse | null>(null);
+  const [signalRunning, setSignalRunning] = useState(false);
+  // Chat state — Phase 9 Task D/E
+  const [chatMessages, setChatMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string; meta?: ChatResponse | null }>>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [chatSending, setChatSending] = useState(false);
   const clock = useDhakaClock();
 
   const refresh = useCallback(async () => {
     try {
-      const [hRes, aRes, mRes, qRes, anRes, dhRes, btRes] = await Promise.all([
+      const [hRes, aRes, mRes, qRes, anRes, dhRes, btRes, sgRes] = await Promise.all([
         fetch('/api/health', { cache: 'no-store' }),
         fetch('/api/audit/environment', { cache: 'no-store' }),
         fetch('/api/data/status', { cache: 'no-store' }).catch(() => null),
@@ -664,6 +881,7 @@ export default function Phase1Dashboard() {
         fetch('/api/analysis/latest', { cache: 'no-store' }).catch(() => null),
         fetch('/api/data/health?symbol=XAUUSDm', { cache: 'no-store' }).catch(() => null),
         fetch('/api/backtest/latest?symbol=XAUUSDm', { cache: 'no-store' }).catch(() => null),
+        fetch('/api/signal/latest?symbol=XAUUSDm', { cache: 'no-store' }).catch(() => null),
       ]);
       if (!hRes.ok && !aRes.ok) throw new Error('API unreachable');
       if (hRes.ok) setHealth((await hRes.json()) as HealthReport);
@@ -689,6 +907,8 @@ export default function Phase1Dashboard() {
       else setDataHealth(null);
       if (btRes && btRes.ok) setBacktestLatest((await btRes.json()) as BacktestLatestResponse);
       else setBacktestLatest(null);
+      if (sgRes && sgRes.ok) setSignalLatest((await sgRes.json()) as SignalLatestResponse);
+      else setSignalLatest(null);
       setLoadError(null);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : 'unknown error');
@@ -841,12 +1061,96 @@ export default function Phase1Dashboard() {
     }
   }, [marketStatus?.symbol, refresh, toast]);
 
-  const checkSummary = useMemo(() => {
-    if (!audit) return null;
-    const c = { pass: 0, warn: 0, fail: 0 };
-    for (const e of audit.environmentChecks) c[e.status] += 1;
-    return c;
-  }, [audit]);
+  // Phase 9 — trigger a deterministic signal evaluation (token-guarded trigger).
+  const runSignalNow = useCallback(async () => {
+    setSignalRunning(true);
+    try {
+      const symbol = marketStatus?.symbol ?? 'XAUUSDm';
+      const res = await fetch('/api/signal/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbol }),
+      });
+      const body = (await res.json()) as {
+        ok: boolean;
+        evaluation?: { outcome: string; reasonCodes: string[] };
+        error?: { code: string; message: string };
+      };
+      if (res.status === 401 || res.status === 503) {
+        toast({
+          title: 'সিগন্যাল মূল্যায়ন চালানো যায়নি',
+          description: body.error ? bnForCode(body.error.code) : 'সংযোগ বন্ধ (fail-closed)।',
+          variant: 'destructive',
+        });
+      } else if (res.status === 500) {
+        toast({
+          title: 'সিগন্যাল মূল্যায়ন ব্যর্থ (FAILED)',
+          description: body.error?.message ?? 'অজানা ত্রুটি।',
+          variant: 'destructive',
+        });
+      } else if (body.evaluation) {
+        const outcome = body.evaluation.outcome;
+        if (outcome === 'BUY_SETUP' || outcome === 'SELL_SETUP') {
+          toast({ title: `সেটআপ পাওয়া গেছে: ${outcome === 'BUY_SETUP' ? 'BUY' : 'SELL'} (গবেষণা সিগন্যাল)`, description: 'সিগন্যাল ট্যাবে সম্পূর্ণ লেভেল দেখুন — কোনো ট্রেড কার্যকর হয়নি।' });
+        } else {
+          toast({
+            title: `ফলাফল: ${outcome}`,
+            description: body.evaluation.reasonCodes.map((c) => bnForCode(c)).join(' ') || 'কোনো কারণ-কোড নেই।',
+          });
+        }
+      }
+      await refresh();
+    } catch (e) {
+      toast({
+        title: 'সিগন্যাল মূল্যায়ন চালানো যায়নি',
+        description: e instanceof Error ? e.message : 'unknown error',
+        variant: 'destructive',
+      });
+    } finally {
+      setSignalRunning(false);
+    }
+  }, [marketStatus?.symbol, refresh, toast]);
+
+  // Phase 9 — send a chat message to the Bengali agent (allowlisted tools only).
+  const sendChatMessage = useCallback(async () => {
+    const message = chatInput.trim();
+    if (!message || chatSending) return;
+    setChatInput('');
+    setChatMessages((prev) => [...prev, { role: 'user', content: message }]);
+    setChatSending(true);
+    try {
+      const history = chatMessages
+        .slice(-10)
+        .map((m) => ({ role: m.role, content: m.content }));
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message, history }),
+      });
+      const body = (await res.json()) as ChatResponse;
+      if (res.ok && body.ok) {
+        setChatMessages((prev) => [...prev, { role: 'assistant', content: body.reply, meta: body }]);
+      } else {
+        const errText = body.error
+          ? `${body.error.code}${body.error.detail ? `: ${body.error.detail}` : ''}`
+          : 'অজানা ত্রুটি';
+        setChatMessages((prev) => [
+          ...prev,
+          { role: 'assistant', content: `দুঃখিত — উত্তর আনা যায়নি (${errText})। আবার চেষ্টা করুন।`, meta: null },
+        ]);
+      }
+    } catch (e) {
+      setChatMessages((prev) => [
+        ...prev,
+        { role: 'assistant', content: `দুঃখিত — সংযোগ ত্রুটি (${e instanceof Error ? e.message : 'unknown'})।`, meta: null },
+      ]);
+    } finally {
+      setChatSending(false);
+    }
+  }, [chatInput, chatMessages, chatSending]);
+
+  // Phase 9: audit totals come from the v2 model (audit.totals) — the old
+  // environmentChecks aggregation is gone (current vs historical are separate).
 
   const glmLiveStatus = health?.glm.status ?? 'unverified';
 
@@ -884,7 +1188,7 @@ export default function Phase1Dashboard() {
                 ঢাকা {clock ?? '--:--:--'}
               </span>
               <Badge variant="outline" className="hidden border-amber-500/40 bg-amber-500/10 text-amber-400 md:inline-flex">
-                Phase 4 / 12
+                Phase 9 / 12
               </Badge>
             </div>
           </div>
@@ -906,7 +1210,7 @@ export default function Phase1Dashboard() {
                   Read-Only Mode সক্রিয় — কোনো অর্ডার পাঠানো হবে না
                 </p>
                 <p className="text-xs leading-relaxed text-zinc-400">
-                  Phase 4 (ডিটারমিনিস্টিক বিশ্লেষণ) পর্যন্ত সবকিছু read-only। Execution কোড-লেভেলে তালাবন্ধ —{' '}
+                  Phase 9 (সিগন্যাল ইঞ্জিন + বাংলা চ্যাট) পর্যন্ত সবকিছু read-only। Execution কোড-লেভেলে তালাবন্ধ —{' '}
                   {health?.executionReason ?? 'Phase 11 গেটের আগে খোলা যাবে না।'}
                 </p>
               </div>
@@ -1034,9 +1338,11 @@ export default function Phase1Dashboard() {
           {/* Report tabs */}
           <Tabs defaultValue="audit" className="space-y-4">
             <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1 bg-zinc-900/60 p-1">
-              <TabsTrigger value="audit" className="data-[state=active]:bg-amber-500/15 data-[state=active]:text-amber-300">নিরীক্ষণ</TabsTrigger>
+              <TabsTrigger value="audit" className="data-[state=active]:bg-amber-500/15 data-[state=active]:text-amber-300">নিরীক্ষণ v2</TabsTrigger>
               <TabsTrigger value="market" className="data-[state=active]:bg-amber-500/15 data-[state=active]:text-amber-300">মার্কেট ডেটা</TabsTrigger>
               <TabsTrigger value="analysis" className="data-[state=active]:bg-amber-500/15 data-[state=active]:text-amber-300">বিশ্লেষণ</TabsTrigger>
+              <TabsTrigger value="signal" className="data-[state=active]:bg-amber-500/15 data-[state=active]:text-amber-300">সিগন্যাল</TabsTrigger>
+              <TabsTrigger value="chat" className="data-[state=active]:bg-amber-500/15 data-[state=active]:text-amber-300">চ্যাট</TabsTrigger>
               <TabsTrigger value="dhealth" className="data-[state=active]:bg-amber-500/15 data-[state=active]:text-amber-300">ডেটা স্বাস্থ্য</TabsTrigger>
               <TabsTrigger value="arch" className="data-[state=active]:bg-amber-500/15 data-[state=active]:text-amber-300">আর্কিটেকচার</TabsTrigger>
               <TabsTrigger value="glm" className="data-[state=active]:bg-amber-500/15 data-[state=active]:text-amber-300">GLM যাচাই</TabsTrigger>
@@ -1045,59 +1351,136 @@ export default function Phase1Dashboard() {
               <TabsTrigger value="sec" className="data-[state=active]:bg-amber-500/15 data-[state=active]:text-amber-300">নিরাপত্তা ও চেকলিস্ট</TabsTrigger>
             </TabsList>
 
-            {/* ------------------------------------------------ Tab: audit */}
+            {/* ------------------------------------------------ Tab: audit (v2) */}
             <TabsContent value="audit" className="space-y-4">
+              {/* v2 summary — current vs historical vs not-applicable, separately */}
               <Card className="border-zinc-800 bg-zinc-900/40">
                 <CardHeader className="pb-3">
                   <CardTitle className="flex flex-wrap items-center gap-2 text-base">
-                    পরিবেশ নিরীক্ষণ — প্রকৃত কমান্ড প্রমাণ
-                    {checkSummary && (
-                      <span className="flex gap-1.5">
-                        <Badge variant="outline" className="border-emerald-500/40 bg-emerald-500/10 text-emerald-400">{checkSummary.pass} pass</Badge>
-                        <Badge variant="outline" className="border-amber-500/40 bg-amber-500/10 text-amber-400">{checkSummary.warn} warn</Badge>
-                        <Badge variant="outline" className="border-red-500/40 bg-red-500/10 text-red-400">{checkSummary.fail} fail</Badge>
+                    পরিবেশ নিরীক্ষণ v2 — বর্তমান বনাম ঐতিহাসিক প্রমাণ আলাদা
+                    {audit && (
+                      <span className="flex flex-wrap gap-1.5">
+                        <Badge variant="outline" className="border-emerald-500/40 bg-emerald-500/10 text-emerald-400">বর্তমান: {audit.totals.currentRequired.pass} pass</Badge>
+                        <Badge variant="outline" className="border-amber-500/40 bg-amber-500/10 text-amber-400">{audit.totals.currentRequired.warn} warn</Badge>
+                        <Badge variant="outline" className="border-red-500/40 bg-red-500/10 text-red-400">{audit.totals.currentRequired.fail} fail</Badge>
+                        <Badge variant="outline" className="border-orange-500/40 bg-orange-500/10 text-orange-400">{audit.totals.currentRequired.blocked} blocked</Badge>
+                        <Badge variant="outline" className="border-zinc-600/50 bg-zinc-700/20 text-zinc-400">{audit.totals.notApplicable} অপ্রযোজ্য</Badge>
+                        <Badge variant="outline" className="border-zinc-600/50 bg-zinc-700/20 text-zinc-400">{audit.totals.historical} ঐতিহাসিক</Badge>
                       </span>
                     )}
                   </CardTitle>
-                  <p className="text-xs text-zinc-500">
-                    প্রতিটি ফলাফল সরাসরি কমান্ড এক্সিকিউশন থেকে — {audit ? fmtDhaka(audit.auditPerformedAt) : ''} (UTC অডিট সময়)। কিছুই আন্দাজ নয়।
+                  <p className="text-xs leading-relaxed text-zinc-500">
+                    বর্তমান চেকগুলো এই মুহূর্তে চালানো হয়েছে (রিফ্রেশ করলে আবার চলবে){audit ? ` — ${fmtDhaka(audit.generatedAtUtc)}` : ''}
+                    {audit?.commit ? ` · commit ${audit.commit}` : ''}। ঐতিহাসিক এন্ট্রিগুলো Phase 1-এর কমান্ড প্রমাণ — মূল টাইমস্ট্যাম্প সহ সংরক্ষিত, রিফ্রেশে পুনরায় চালানো হয় না। NOT_APPLICABLE মানে বর্তমান আর্কিটেকচারে অনাবশ্যক (কোড-পরিদর্শন ভিত্তিক) — পুরনো ব্যর্থতা লুকানোর উপায় নয়।
                   </p>
                 </CardHeader>
-                <CardContent className="p-0">
-                  <div className="overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow className="border-zinc-800 hover:bg-transparent">
-                          <TableHead className="pl-4 sm:pl-6">অবস্থা</TableHead>
-                          <TableHead>বিষয়</TableHead>
-                          <TableHead className="min-w-[280px]">প্রমাণ (কমান্ড আউটপুট)</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {(audit?.environmentChecks ?? []).map((c) => (
-                          <TableRow key={c.id} className="border-zinc-800/70">
-                            <TableCell className="pl-4 sm:pl-6">
-                              <span className="flex items-center gap-1.5">
-                                <StatusIcon status={c.status} />
-                                <Badge variant="outline" className="text-zinc-400">{groupLabel[c.group]}</Badge>
-                              </span>
-                            </TableCell>
-                            <TableCell>
-                              <p className="text-sm font-medium text-zinc-200">{c.label}</p>
-                              {c.note && <p className="mt-0.5 max-w-md text-xs leading-relaxed text-zinc-500">{c.note}</p>}
-                            </TableCell>
-                            <TableCell className="max-w-[440px] break-words font-mono text-xs text-zinc-400">{c.evidence}</TableCell>
+                <CardContent className="space-y-5 p-4 sm:p-6">
+                  {/* Current required checks */}
+                  <div>
+                    <div className="mb-2 flex items-center gap-2">
+                      <h3 className="text-sm font-semibold text-zinc-200">বর্তমান প্রয়োজনীয় চেক ({audit?.sections.currentRequired.length ?? 0})</h3>
+                      <Badge variant="outline" className="border-zinc-700 bg-zinc-800/50 text-zinc-500">freshness: per-request</Badge>
+                    </div>
+                    <div className="overflow-x-auto rounded-lg border border-zinc-800">
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="border-zinc-800 hover:bg-transparent">
+                            <TableHead className="pl-4">অবস্থা</TableHead>
+                            <TableHead>চেক</TableHead>
+                            <TableHead className="min-w-[240px]">প্রমাণ</TableHead>
+                            <TableHead className="min-w-[160px]">সময় / সময়কাল</TableHead>
                           </TableRow>
-                        ))}
-                        {loading && !audit && (
-                          <TableRow>
-                            <TableCell colSpan={3} className="p-6">
-                              <Skeleton className="h-5 w-full" />
-                            </TableCell>
+                        </TableHeader>
+                        <TableBody>
+                          {(audit?.sections.currentRequired ?? []).map((c) => (
+                            <TableRow key={c.id} className="border-zinc-800/70">
+                              <TableCell className="pl-4">
+                                <span className="flex items-center gap-1.5 whitespace-nowrap">
+                                  <AuditStatusIcon status={c.status} />
+                                  <Badge variant="outline" className="text-zinc-500">{c.evidenceType}</Badge>
+                                </span>
+                              </TableCell>
+                              <TableCell className="max-w-[320px]">
+                                <p className="text-sm font-medium text-zinc-200">{c.description}</p>
+                                <p className="mt-0.5 text-xs leading-relaxed text-zinc-500">{c.reason}</p>
+                              </TableCell>
+                              <TableCell className="max-w-[380px] break-words font-mono text-xs text-zinc-400">{c.evidence || '—'}</TableCell>
+                              <TableCell className="whitespace-nowrap text-xs text-zinc-500">
+                                {c.completedAtUtc ? fmtDhaka(c.completedAtUtc) : '—'}
+                                {c.durationMs !== null ? <span className="block text-zinc-600">{c.durationMs}ms</span> : null}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                          {loading && !audit && (
+                            <TableRow>
+                              <TableCell colSpan={4} className="p-6">
+                                <Skeleton className="h-5 w-full" />
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </div>
+
+                  {/* Not-applicable checks */}
+                  <div>
+                    <div className="mb-2 flex items-center gap-2">
+                      <h3 className="text-sm font-semibold text-zinc-200">অপ্রযোজ্য লিগ্যাসি ডিপেন্ডেন্সি ({audit?.sections.notApplicable.length ?? 0})</h3>
+                      <Badge variant="outline" className="border-zinc-700 bg-zinc-800/50 text-zinc-500">NOT_APPLICABLE ≠ PASS</Badge>
+                    </div>
+                    <div className="space-y-2">
+                      {(audit?.sections.notApplicable ?? []).map((c) => (
+                        <div key={c.id} className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
+                          <p className="text-sm font-medium text-zinc-300">
+                            <span className="mr-2 text-zinc-500">∅</span>
+                            {c.description}
+                          </p>
+                          <p className="mt-1 text-xs leading-relaxed text-zinc-500">{c.reason}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Historical (Phase 1) checks — original timestamps, never re-run */}
+                  <div>
+                    <div className="mb-2 flex items-center gap-2">
+                      <h3 className="text-sm font-semibold text-zinc-200">ঐতিহাসিক প্রমাণ — Phase 1 ({audit?.sections.historical.length ?? 0})</h3>
+                      <Badge variant="outline" className="border-zinc-700 bg-zinc-800/50 text-zinc-500">freshness: historical-phase1</Badge>
+                    </div>
+                    <div className="overflow-x-auto rounded-lg border border-zinc-800">
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="border-zinc-800 hover:bg-transparent">
+                            <TableHead className="pl-4">ফলাফল (তখন)</TableHead>
+                            <TableHead>বিষয়</TableHead>
+                            <TableHead className="min-w-[240px]">প্রমাণ (মূল কমান্ড আউটপুট)</TableHead>
+                            <TableHead>মূল সময়</TableHead>
                           </TableRow>
-                        )}
-                      </TableBody>
-                    </Table>
+                        </TableHeader>
+                        <TableBody>
+                          {(audit?.sections.historical ?? []).map((c) => (
+                            <TableRow key={c.id} className="border-zinc-800/70 opacity-80">
+                              <TableCell className="pl-4">
+                                <span className="flex items-center gap-1.5">
+                                  <StatusIcon status={c.status === 'PASS' ? 'pass' : c.status === 'FAIL' ? 'fail' : 'warn'} />
+                                  <span className="font-mono text-xs text-zinc-500">{c.status}</span>
+                                </span>
+                              </TableCell>
+                              <TableCell className="max-w-[260px]">
+                                <p className="text-sm font-medium text-zinc-300">{c.description}</p>
+                                <p className="mt-0.5 text-xs leading-relaxed text-zinc-600">{c.reason}</p>
+                              </TableCell>
+                              <TableCell className="max-w-[380px] break-words font-mono text-xs text-zinc-500">{c.evidence}</TableCell>
+                              <TableCell className="whitespace-nowrap text-xs text-zinc-600">{c.historical ? fmtDhaka(c.historical.performedAtUtc) : '—'}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                    <p className="mt-2 text-xs leading-relaxed text-zinc-600">
+                      Wine ও MetaTrader5 Python প্যাকেজের Phase 1 ব্যর্থতা ঐতিহাসিক সত্য — বর্তমান TypeScript ব্রিজ আর্কিটেকচার এগুলোর উপর নির্ভরশীল নয়, তাই বর্তমান চেকে সেগুলো NOT_APPLICABLE (উপরের সেকশনে কোড-পরিদর্শন প্রমাণ সহ)। কোনো ব্যর্থতা লুকানো হয়নি।
+                    </p>
                   </div>
                 </CardContent>
               </Card>
@@ -1666,6 +2049,330 @@ export default function Phase1Dashboard() {
               )}
             </TabsContent>
 
+            {/* ------------------------------------------------ Tab: signal (Phase 9) */}
+            <TabsContent value="signal" className="space-y-4">
+              {/* Research-signal disclaimer */}
+              <div role="note" className="flex items-start gap-3 rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
+                <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" aria-hidden />
+                <p className="text-xs leading-relaxed text-zinc-400">
+                  সিগন্যাল ইঞ্জিন <span className="font-semibold text-amber-300">নির্ধারিত (deterministic)</span> — LLM এটি বদলাতে পারে না। ফলাফল শুধুমাত্র{' '}
+                  <span className="font-semibold text-amber-300">গবেষণা/সিদ্ধান্ত-সহায়তা</span>, কোনো ট্রেড কার্যকর হয়নি এবং এই সিস্টেমে সেই ক্ষমতাই নেই (চার-সুইচ লক সক্রিয়)।
+                  BUY_SETUP/SELL_SETUP হলেই লাভের প্রমাণ নয়।
+                </p>
+              </div>
+
+              {/* Latest evaluation */}
+              <Card className="border-zinc-800 bg-zinc-900/40">
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex flex-wrap items-center gap-2 text-base">
+                    সর্বশেষ সিগন্যাল মূল্যায়ন
+                    {signalLatest?.signal && (
+                      <Badge variant="outline" className={signalOutcomeBadgeClass(signalLatest.signal.outcome)}>
+                        {signalOutcomeBn[signalLatest.signal.outcome] ?? signalLatest.signal.outcome}
+                      </Badge>
+                    )}
+                    <Button size="sm" variant="outline" className="ml-auto gap-1.5" onClick={() => void runSignalNow()} disabled={signalRunning}>
+                      {signalRunning ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <Zap className="h-3.5 w-3.5" aria-hidden />}
+                      মূল্যায়ন চালান
+                    </Button>
+                  </CardTitle>
+                  <p className="text-xs text-zinc-500">
+                    POST /api/signal/run — টোকেন-সুরক্ষিত ট্রিগার (fail-closed)। মূল্যায়ন ইতিহাস append-only — আগের ফলাফল কখনো মুছে বা আপডেট হয় না।
+                  </p>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {!signalLatest?.signal && (
+                    <p className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4 text-sm text-zinc-400">
+                      এখনো কোনো মূল্যায়ন সংরক্ষিত হয়নি — উপরের বাটন দিয়ে চালান (DATA_API_TOKEN সেট থাকলে টোকেন লাগবে)।
+                    </p>
+                  )}
+                  {signalLatest?.signal && (() => {
+                    const s = signalLatest.signal;
+                    return (
+                      <>
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                          <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
+                            <p className="text-xs text-zinc-500">ইঞ্জিন / কৌশল</p>
+                            <p className="mt-1 font-mono text-sm text-zinc-200">{s.engineVersion}</p>
+                            <p className="font-mono text-xs text-zinc-500">{s.strategyVersion}</p>
+                          </div>
+                          <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
+                            <p className="text-xs text-zinc-500">সিদ্ধান্ত ক্যান্ডেল (M15)</p>
+                            <p className="mt-1 text-sm text-zinc-200">{s.decisionCandleTimeUtc ? fmtDhaka(s.decisionCandleTimeUtc) : '—'}</p>
+                            <p className="text-xs text-zinc-500">জানা গেছে: {s.setupKnownAtUtc ? fmtDhaka(s.setupKnownAtUtc) : '—'}</p>
+                          </div>
+                          <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
+                            <p className="text-xs text-zinc-500">ডেটাসেট ফিঙ্গারপ্রিন্ট</p>
+                            <p className="mt-1 break-all font-mono text-xs text-zinc-300">{s.inputFingerprint ? s.inputFingerprint.slice(0, 16) : '—'}</p>
+                            <p className="text-xs text-zinc-600">dataset: {s.datasetFingerprint ? s.datasetFingerprint.slice(0, 12) : '—'}</p>
+                          </div>
+                          <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
+                            <p className="text-xs text-zinc-500">এক্সিকিউশন লক</p>
+                            <p className="mt-1 text-sm text-zinc-200">{s.executionLocked ? 'সক্রিয় (read-only)' : '—'}</p>
+                            <p className="text-xs text-zinc-600">মেয়াদ: {s.expiryUtc ? fmtDhaka(s.expiryUtc) : '—'}</p>
+                          </div>
+                        </div>
+
+                        {/* Reason codes */}
+                        {s.reasonCodes.length > 0 && (
+                          <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
+                            <p className="text-xs font-semibold text-amber-300">
+                              {s.outcome === 'BLOCKED' ? 'ব্লকের কারণ (সৎ, সংকেত নয়):' : 'কারণ-কোড:'}
+                            </p>
+                            <ul className="mt-1.5 space-y-1">
+                              {s.reasonCodes.map((c) => (
+                                <li key={c} className="text-xs leading-relaxed text-zinc-400">
+                                  <span className="font-mono text-amber-400">{c}</span> — {bnForCode(c)}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+
+                        {/* Levels — ONLY for setups */}
+                        {s.levels ? (
+                          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                            <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3">
+                              <p className="text-xs text-zinc-500">দিক</p>
+                              <p className={`mt-1 text-sm font-semibold ${s.levels.direction === 'BUY' ? 'text-emerald-400' : 'text-red-400'}`}>
+                                {s.levels.direction === 'BUY' ? 'BUY (লং)' : 'SELL (শর্ট)'}
+                              </p>
+                            </div>
+                            <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
+                              <p className="text-xs text-zinc-500">এন্ট্রি জোন</p>
+                              <p className="mt-1 font-mono text-sm text-zinc-200">{s.levels.entryZoneLowText} – {s.levels.entryZoneHighText}</p>
+                            </div>
+                            <div className="rounded-lg border border-red-500/30 bg-red-500/5 p-3">
+                              <p className="text-xs text-zinc-500">স্টপ-লস</p>
+                              <p className="mt-1 font-mono text-sm text-red-300">{s.levels.stopLossText}</p>
+                            </div>
+                            <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3">
+                              <p className="text-xs text-zinc-500">টার্গেট</p>
+                              <p className="mt-1 font-mono text-sm text-emerald-300">{s.levels.targetText}</p>
+                            </div>
+                            <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
+                              <p className="text-xs text-zinc-500">Reward / Risk</p>
+                              <p className="mt-1 font-mono text-sm text-zinc-200">1 : {s.levels.rewardRiskRatio.toFixed(2)}</p>
+                              <p className="text-xs text-zinc-600">রেফারেন্স এন্ট্রি {s.levels.entryReferenceText} (স্প্রেড-সমন্বিত)</p>
+                            </div>
+                          </div>
+                        ) : (
+                          <p className="text-xs leading-relaxed text-zinc-500">
+                            এই ফলাফলে কোনো লেভেল নেই — শুধুমাত্র BUY_SETUP/SELL_SETUP হলে সম্পূর্ণ, যাচাইকৃত লেভেল দেওয়া হয়।
+                          </p>
+                        )}
+
+                        {/* Evidence */}
+                        {s.evidence && (
+                          <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
+                            <p className="text-xs font-semibold text-zinc-400">প্রমাণ (deterministic)</p>
+                            <div className="mt-2 grid grid-cols-1 gap-2 text-xs text-zinc-400 sm:grid-cols-2">
+                              {s.evidence.structureEvent ? (
+                                <p>
+                                  স্ট্রাকচার: <span className="font-mono text-zinc-300">{s.evidence.structureEvent.type} {directionBn[s.evidence.structureEvent.direction] ?? s.evidence.structureEvent.direction}</span>{' '}
+                                  @ {s.evidence.structureEvent.levelText} ({s.evidence.structureEvent.barsSinceBreak} বার আগে, {fmtDhaka(s.evidence.structureEvent.breakCandleTimeUtc)})
+                                </p>
+                              ) : (
+                                <p>স্ট্রাকচার ব্রেক: সাম্প্রতিক কোনো ব্রেক নেই</p>
+                              )}
+                              {s.evidence.anchorSwing ? (
+                                <p>
+                                  অ্যাঙ্কর সুইং: <span className="font-mono text-zinc-300">{s.evidence.anchorSwing.priceText}</span> ({s.evidence.anchorSwing.kind === 'low' ? 'সুইং লো' : 'সুইং হাই'}, {fmtDhaka(s.evidence.anchorSwing.swingTimeUtc)})
+                                </p>
+                              ) : (
+                                <p>অ্যাঙ্কর সুইং: প্রযোজ্য নয়</p>
+                              )}
+                              <p>
+                                ইন্ডিকেটর (M15): EMA50 <span className="font-mono text-zinc-300">{fmtInd(s.evidence.indicators.ema50)}</span> · RSI{' '}
+                                <span className="font-mono text-zinc-300">{fmtInd(s.evidence.indicators.rsi14, 1)}</span> · ATR{' '}
+                                <span className="font-mono text-zinc-300">{fmtInd(s.evidence.indicators.atr14)}</span> · ADX{' '}
+                                <span className="font-mono text-zinc-300">{fmtInd(s.evidence.indicators.adx14, 1)}</span>
+                              </p>
+                              <p>
+                                HTF প্রসঙ্গ: H1 <span className="font-mono text-zinc-300">{s.evidence.htfContext.h1Trend ? (trendBn[s.evidence.htfContext.h1Trend] ?? s.evidence.htfContext.h1Trend) : '—'}</span> · H4{' '}
+                                <span className="font-mono text-zinc-300">{s.evidence.htfContext.h4Trend ? (trendBn[s.evidence.htfContext.h4Trend] ?? s.evidence.htfContext.h4Trend) : '—'}</span>
+                              </p>
+                              <p>রিটেস্ট বার: {s.evidence.retestBarTimeUtc ? fmtDhaka(s.evidence.retestBarTimeUtc) : 'এখনো হয়নি'}</p>
+                              <p>
+                                উইন্ডো: M15 {s.evidence.executionWindow.bars} · H1 {s.evidence.h1Window.bars} · H4 {s.evidence.h4Window.bars} ক্যান্ডেল
+                              </p>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Data freshness at evaluation */}
+                        {s.quote && (
+                          <p className="text-xs text-zinc-500">
+                            মূল্যায়নের সময় কোট: {String((s.quote as { freshness?: string }).freshness ?? '—')} · উৎস {String((s.quote as { sourceClass?: string }).sourceClass ?? '—')} ·{' '}
+                            {String((s.quote as { bid?: string }).bid ?? '—')} / {String((s.quote as { ask?: string }).ask ?? '—')} ({String((s.quote as { ageSeconds?: number }).ageSeconds ?? '—')}s আগে)
+                          </p>
+                        )}
+                      </>
+                    );
+                  })()}
+
+                  {/* Backtest comparison (signal-engine strategy only) */}
+                  {signalLatest?.backtestComparison && (() => {
+                    const bt = signalLatest.backtestComparison;
+                    const dev = bt.dev as { status?: string; executedTrades?: number; winRate?: number | null; profitFactor?: number | null; netPnlPrice?: number | null; reason?: string };
+                    const oos = bt.oos as { status?: string; executedTrades?: number; winRate?: number | null; profitFactor?: number | null; netPnlPrice?: number | null; reason?: string };
+                    return (
+                      <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
+                        <p className="text-xs font-semibold text-zinc-400">
+                          সিগন্যাল-ইঞ্জিন backtest তুলনা ({bt.timeframe} · {bt.candleCount} ক্যান্ডেল · {new Date(bt.datasetFromUtc).toISOString().slice(0, 10)} → {new Date(bt.datasetToUtc).toISOString().slice(0, 10)})
+                        </p>
+                        <div className="mt-2 grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
+                          <p className="text-zinc-400">
+                            Dev: {dev.status === 'COMPUTED' ? `${dev.executedTrades} ট্রেড · উইনরেট ${(dev.winRate ?? 0) * 100}% · PF ${dev.profitFactor ?? '—'} · নিট ${dev.netPnlPrice ?? '—'}` : `INSUFFICIENT_DATA (${dev.reason ?? ''})`}
+                          </p>
+                          <p className="text-zinc-400">
+                            OOS: {oos.status === 'COMPUTED' ? `${oos.executedTrades} ট্রেড · উইনরেট ${(oos.winRate ?? 0) * 100}% · PF ${oos.profitFactor ?? '—'} · নিট ${oos.netPnlPrice ?? '—'}` : `INSUFFICIENT_DATA (${oos.reason ?? ''})`}
+                          </p>
+                        </div>
+                        <p className="mt-2 text-xs leading-relaxed text-zinc-600">
+                          সিমুলেশন — লাভের প্রমাণ নয়। ছোট নমুনা সৎভাবে INSUFFICIENT_DATA। OOS সেগমেন্ট কখনো অপ্টিমাইজের জন্য ব্যবহার হয়নি।
+                        </p>
+                      </div>
+                    );
+                  })()}
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            {/* ------------------------------------------------ Tab: chat (Phase 9) */}
+            <TabsContent value="chat" className="space-y-4">
+              <Card className="border-zinc-800 bg-zinc-900/40">
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex flex-wrap items-center gap-2 text-base">
+                    <Languages className="h-4 w-4 text-amber-400" aria-hidden />
+                    বাংলা চ্যাট এজেন্ট — নিরাপদ টুল-ব্যবহার
+                  </CardTitle>
+                  <p className="text-xs leading-relaxed text-zinc-500">
+                    এজেন্ট শুধুমাত্র অনুমোদিত (allowlisted) read-only টুল ব্যবহার করতে পারে — get_market_health, get_latest_quote, get_candle_coverage, get_latest_analysis, get_latest_signal, get_backtest_summary, explain_signal_evidence।
+                    LLM সিগন্যাল/লেভেল/ব্লক-স্ট্যাটাস বদলাতে পারে না — deterministic অবস্থা উত্তরের সাথে আলাদাভাবে দেখানো হয়।
+                  </p>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {/* Messages */}
+                  <div className="max-h-[26rem] space-y-3 overflow-y-auto custom-scrollbar rounded-lg border border-zinc-800 bg-zinc-950/60 p-4" aria-live="polite">
+                    {chatMessages.length === 0 && (
+                      <div className="space-y-3 py-6 text-center">
+                        <Bot className="mx-auto h-8 w-8 text-zinc-700" aria-hidden />
+                        <p className="text-sm text-zinc-500">প্রশ্ন করুন — যেমন:</p>
+                        <div className="flex flex-wrap justify-center gap-2">
+                          {[
+                            'এখন XAUUSDm-এর বাজারের অবস্থা কী?',
+                            'M15 ও H1 ট্রেন্ড কী?',
+                            'সর্বশেষ সিগন্যাল কেন BLOCKED?',
+                            'H4 ইতিহাস কত দিনের?',
+                            'সর্বশেষ backtest কী বলছে?',
+                          ].map((q) => (
+                            <button
+                              key={q}
+                              type="button"
+                              onClick={() => setChatInput(q)}
+                              className="rounded-full border border-zinc-700 bg-zinc-900/60 px-3 py-1.5 text-xs text-zinc-400 transition-colors hover:border-amber-500/40 hover:text-amber-300"
+                            >
+                              {q}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {chatMessages.map((m, i) => (
+                      <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                        <div
+                          className={`max-w-[85%] rounded-xl border px-3.5 py-2.5 text-sm leading-relaxed ${
+                            m.role === 'user'
+                              ? 'border-amber-500/30 bg-amber-500/10 text-amber-100'
+                              : 'border-zinc-800 bg-zinc-900/70 text-zinc-200'
+                          }`}
+                        >
+                          <p className="whitespace-pre-wrap">{m.content}</p>
+                          {/* Deterministic state block — always separate from LLM text */}
+                          {m.role === 'assistant' && m.meta && (
+                            <div className="mt-2.5 space-y-1.5 border-t border-zinc-800 pt-2">
+                              <p className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
+                                নির্ধারিত ডেটা অবস্থা (LLM টেক্সট থেকে আলাদা, সর্বোচ্চ কর্তৃত্ব)
+                              </p>
+                              <div className="flex flex-wrap gap-1.5">
+                                {m.meta.dataState.quoteFreshness && (
+                                  <Badge variant="outline" className={m.meta.dataState.quoteFreshness === 'LIVE' ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400' : 'border-amber-500/40 bg-amber-500/10 text-amber-400'}>
+                                    কোট: {m.meta.dataState.quoteFreshness}
+                                  </Badge>
+                                )}
+                                {m.meta.dataState.quoteSourceClass && (
+                                  <Badge variant="outline" className="border-zinc-700 bg-zinc-800/50 text-zinc-400">
+                                    উৎস: {m.meta.dataState.quoteSourceClass}
+                                  </Badge>
+                                )}
+                                {m.meta.dataState.bid && (
+                                  <Badge variant="outline" className="border-zinc-700 bg-zinc-800/50 font-mono text-zinc-300">
+                                    {m.meta.dataState.bid} / {m.meta.dataState.ask}
+                                  </Badge>
+                                )}
+                                {m.meta.dataState.latestSignalOutcome && (
+                                  <Badge variant="outline" className={signalOutcomeBadgeClass(m.meta.dataState.latestSignalOutcome)}>
+                                    সিগন্যাল: {m.meta.dataState.latestSignalOutcome}
+                                    {m.meta.dataState.latestSignalReasonCodes.length > 0 ? ` (${m.meta.dataState.latestSignalReasonCodes.join(', ')})` : ''}
+                                  </Badge>
+                                )}
+                                {m.meta.toolCalls.length > 0 && (
+                                  <Badge variant="outline" className="border-zinc-700 bg-zinc-800/50 text-zinc-500">
+                                    টুল: {m.meta.toolCalls.map((t) => `${t.name}${t.ok ? '✓' : '✗'}`).join(' · ')}
+                                  </Badge>
+                                )}
+                                {m.meta.dataState.quoteTimeUtc && (
+                                  <span className="text-[10px] text-zinc-600">কোট-সময়: {fmtDhaka(m.meta.dataState.quoteTimeUtc)}</span>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                    {chatSending && (
+                      <div className="flex justify-start">
+                        <div className="flex items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-900/70 px-3.5 py-2.5 text-sm text-zinc-400">
+                          <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                          টুল থেকে যাচাইকৃত ডেটা আনা হচ্ছে…
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Input */}
+                  <form
+                    className="flex gap-2"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      void sendChatMessage();
+                    }}
+                  >
+                    <label htmlFor="chat-input" className="sr-only">
+                      আপনার প্রশ্ন লিখুন
+                    </label>
+                    <input
+                      id="chat-input"
+                      value={chatInput}
+                      onChange={(e) => setChatInput(e.target.value)}
+                      placeholder="যেমন: এখন XAUUSDm-এর বাজারের অবস্থা কী?"
+                      maxLength={2000}
+                      className="flex-1 rounded-lg border border-zinc-800 bg-zinc-950/70 px-3.5 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-amber-500/50 focus:outline-none"
+                    />
+                    <Button type="submit" size="sm" disabled={chatSending || chatInput.trim().length === 0} className="gap-1.5">
+                      {chatSending ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <Bot className="h-3.5 w-3.5" aria-hidden />}
+                      পাঠান
+                    </Button>
+                  </form>
+                  <p className="text-[11px] leading-relaxed text-zinc-600">
+                    এজেন্ট কখনো দাম বানিয়ে বলবে না — কোট অনুপলব্ধ থাকলে সেটাই জানাবে। ডেটা STALE/DISCONNECTED হলে ভুয়া "লাইভ" ব্যাজ দেখানো হয় না।
+                    প্রতি উত্তরের সাথে টুল-প্রমাণ ও টাইমস্ট্যাম্প থাকে। এই চ্যাট কোনো ট্রেড চালাতে পারে না — সেই ক্ষমতা সিস্টেমে নেই।
+                  </p>
+                </CardContent>
+              </Card>
+            </TabsContent>
+
             {/* ------------------------------------------ Tab: data & signal health (Phase 8) */}
             <TabsContent value="dhealth" className="space-y-4">
               {!dataHealth ? (
@@ -2098,43 +2805,37 @@ export default function Phase1Dashboard() {
             <TabsContent value="mt5" className="space-y-4">
               <Card className="border-zinc-800 bg-zinc-900/40">
                 <CardHeader className="pb-3">
-                  <CardTitle className="flex items-center gap-2 text-base">
-                    MT5 সম্ভাব্যতা প্রতিবেদন
-                    <Badge variant="outline" className="border-red-500/40 bg-red-500/10 text-red-400">Sandbox-এ অসম্ভব</Badge>
+                  <CardTitle className="flex flex-wrap items-center gap-2 text-base">
+                    MT5 আর্কিটেকচার প্রতিবেদন
+                    {audit?.mt5.currentArchitecture && (
+                      <Badge variant="outline" className="border-emerald-500/40 bg-emerald-500/10 text-emerald-400">
+                        {audit.mt5.currentArchitecture.status === 'deployed-and-verified' ? 'বর্তমান ব্রিজ: স্থাপিত ও যাচাইকৃত' : audit.mt5.currentArchitecture.status}
+                      </Badge>
+                    )}
                   </CardTitle>
-                  <p className="text-xs text-zinc-500">সত্যি প্রমাণসহ — সংযোগ দাবি করা হয়নি, কারণ পরীক্ষা করে ব্যর্থ প্রমাণিত।</p>
+                  <p className="text-xs text-zinc-500">
+                    Phase 1-এর সম্ভাব্যতা গবেষণা ঐতিহাসিক সত্য হিসেবে সংরক্ষিত; Phase 8 থেকে বাস্তব সমাধান — সরাসরি TypeScript ওয়েব-টার্মিনাল ব্রিজ — চালু ও লাইভ-যাচাইকৃত।
+                  </p>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                  {audit?.mt5.currentArchitecture && (
+                    <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-4">
+                      <p className="text-sm font-semibold text-emerald-300">{audit.mt5.currentArchitecture.title}</p>
+                      <p className="mt-1.5 text-xs leading-relaxed text-zinc-300">{audit.mt5.currentArchitecture.detail}</p>
+                    </div>
+                  )}
+                  <Separator className="bg-zinc-800" />
+                  <p className="text-sm font-semibold text-zinc-100">ঐতিহাসিক গবেষণা — Phase 1 ({audit?.mt5.historicalStudy ? `সমাধান: ${audit.mt5.historicalStudy.supersededBy}` : ''})</p>
                   <ul className="space-y-2">
-                    {(audit?.mt5.findings ?? []).map((f) => (
-                      <li key={f} className="flex items-start gap-2 text-sm leading-relaxed text-zinc-300">
-                        <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-400" aria-hidden />
+                    {(audit?.mt5.historicalStudy?.findings ?? audit?.mt5.findings ?? []).map((f) => (
+                      <li key={f} className="flex items-start gap-2 text-sm leading-relaxed text-zinc-400">
+                        <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-zinc-600" aria-hidden />
                         {f}
                       </li>
                     ))}
                   </ul>
-                  <Separator className="bg-zinc-800" />
-                  <p className="text-sm font-semibold text-zinc-100">ব্রিজ অপশন (Phase 2 সিদ্ধান্তের জন্য)</p>
-                  <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-                    {(audit?.mt5.bridgeOptions ?? []).map((o, i) => (
-                      <div key={o.id} className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
-                        <div className="flex items-center gap-2">
-                          <span className="flex h-6 w-6 items-center justify-center rounded-md border border-amber-500/30 bg-amber-500/10 font-mono text-xs text-amber-400">
-                            {i + 1}
-                          </span>
-                          <p className="text-xs font-semibold text-zinc-100">{o.title}</p>
-                        </div>
-                        <p className="mt-1.5 text-xs leading-relaxed text-zinc-400">{o.detail}</p>
-                      </div>
-                    ))}
-                  </div>
-                  <Separator className="bg-zinc-800" />
-                  <p className="text-sm font-semibold text-zinc-100">Phase 2 পরিকল্পনা (Bridge Contract)</p>
-                  <ol className="list-decimal space-y-1.5 pl-5 text-xs leading-relaxed text-zinc-400">
-                    {(audit?.mt5.phase2Plan ?? []).map((p) => <li key={p}>{p}</li>)}
-                  </ol>
-                  <p className="rounded-lg border border-red-500/30 bg-red-500/5 p-3 text-xs leading-relaxed text-red-300">
-                    Phase 2-এর ব্রিজ কন্ট্র্যাক্টে কোনো অর্ডার-পাঠানোর endpoint থাকবে না — শুধুই মার্কেট ডেটা (read-only)।
+                  <p className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3 text-xs leading-relaxed text-emerald-200/80">
+                    ব্রিজটি GET-only REST (x-trader-key auth) এবং ওয়েব-টার্মিনাল প্রোটোকলের শুধু মার্কেট-ডেটা কমান্ড নিয়ে কাজ করে — কোনো ট্রেডিং কমান্ড কোডেই নেই (স্ট্যাটিক স্ক্যান-যাচাইকৃত)।
                   </p>
                 </CardContent>
               </Card>
@@ -2146,7 +2847,7 @@ export default function Phase1Dashboard() {
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base">ডেটা মডেল (SQLite · Prisma)</CardTitle>
                   <p className="text-xs text-zinc-500">
-                    ১২টি মডেল এখনই ডিফাইন করা — Phase 1-এ শুধু SystemEvent সচল; বাকিগুলো নিজ নিজ Phase-এ সক্রিয় হয়।
+                    ১৪টি মডেল — ৯টি সচল (Phase 1–9), ১টি অবচিত (Signal → SignalEvaluation), ২টি পরিকল্পিত, ২টি Phase 11 পর্যন্ত তালাবদ্ধ।
                   </p>
                 </CardHeader>
                 <CardContent className="p-0">
@@ -2172,10 +2873,14 @@ export default function Phase1Dashboard() {
                                 className={
                                   m.status === 'active'
                                     ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
-                                    : 'border-zinc-700 bg-zinc-800/60 text-zinc-400'
+                                    : m.status === 'locked'
+                                      ? 'border-red-500/40 bg-red-500/10 text-red-400'
+                                      : m.status === 'superseded'
+                                        ? 'border-zinc-700 bg-zinc-800/60 text-zinc-600 line-through'
+                                        : 'border-zinc-700 bg-zinc-800/60 text-zinc-400'
                                 }
                               >
-                                {m.status === 'active' ? 'সচল' : 'পরিকল্পিত'}
+                                {m.status === 'active' ? 'সচল' : m.status === 'locked' ? 'তালাবদ্ধ (Phase 11)' : m.status === 'superseded' ? 'অবচিত' : 'পরিকল্পিত'}
                               </Badge>
                             </TableCell>
                           </TableRow>
@@ -2331,7 +3036,7 @@ export default function Phase1Dashboard() {
         <div className="mx-auto flex w-full max-w-7xl flex-col gap-2 px-4 py-4 text-xs text-zinc-500 sm:px-6 md:flex-row md:items-center md:justify-between">
           <p className="flex items-center gap-1.5">
             <LockKeyhole className="h-3.5 w-3.5 text-red-400" aria-hidden />
-            XAUUSD AI Trading Agent · Phase 4/12 · Read-Only — কোনো অর্ডার পাঠানো হবে না
+            XAUUSD AI Trading Agent · Phase 9/12 · Read-Only — কোনো অর্ডার পাঠানো হবে না
           </p>
           <p className="font-mono text-[11px] text-zinc-600">
             Next.js 16 · TypeScript · Prisma/SQLite · z-ai-web-dev-sdk (glm-4-plus)

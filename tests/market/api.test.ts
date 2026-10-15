@@ -340,9 +340,22 @@ describe('case 18 — NO trading/order endpoints exist (static guarantee)', () =
     expect(methods.sort()).toEqual(['getCandles', 'getHealth', 'getQuote', 'getStatus', 'getSymbols']);
   });
 
-  test('the tools registry still has only the read-only health tool active', async () => {
+  test('the tools registry contains ONLY read-only tools (no execution capability)', async () => {
     const { toolSpecs } = await import('@/lib/tools/registry');
     const active = toolSpecs(false).map((t) => t.function.name);
-    expect(active).toEqual(['get_system_health']);
+    // Phase 9: the Bengali Chat Agent's 7 market/signal tools joined the
+    // original health tool. NONE of them can execute anything.
+    expect(active).toEqual([
+      'get_system_health',
+      'get_market_health',
+      'get_latest_quote',
+      'get_candle_coverage',
+      'get_latest_analysis',
+      'get_latest_signal',
+      'get_backtest_summary',
+      'explain_signal_evidence',
+    ]);
+    // No tool name may even suggest execution.
+    expect(active.find((n) => /order|execute|position|deal|close|modify/i.test(n))).toBeUndefined();
   });
 });

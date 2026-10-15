@@ -1,16 +1,26 @@
 /**
- * GET /api/audit/environment — full Phase 1 audit report.
- * Merges the static evidence collected during the audit with LIVE runtime
- * measurements and the most recent SystemEvent rows.
+ * GET /api/audit/environment — Environment Audit v2 (Phase 9, Task A3).
+ * ----------------------------------------------------------------------------
+ * Combines (per spec A3):
+ *   1. static architecture requirements (metadata below),
+ *   2. fresh bounded runtime checks (executed on every request — v2 `checks`),
+ *   3. latest persisted audit-run evidence (GLM verification, sync runs),
+ *   4. broker & data-health state (through the runtime checks themselves),
+ *   5. explicit stale-evidence / unavailable states (NOT_TESTED never = PASS).
+ *
+ * SAFETY: the runtime checks are a FIXED, allowlisted collection implemented
+ * in application code (src/lib/audit/runtime-checks.ts). No shell execution,
+ * no client-supplied commands, no arbitrary URLs — the query string only
+ * carries an optional symbol from the configured allowlist.
+ *
+ * Refreshing re-runs the CURRENT checks; the Phase 1 historical entries keep
+ * their original timestamps and are never presented as re-executed.
  */
+
 import { NextResponse } from 'next/server';
-import os from 'node:os';
-import { collectHealth } from '@/lib/health';
-import { recentEvents } from '@/lib/logger';
+import { buildEnvironmentAuditReport } from '@/lib/audit/report';
 import { config } from '@/lib/config';
 import {
-  AUDIT_PERFORMED_AT,
-  environmentChecks,
   glmAccess,
   mt5Feasibility,
   databaseModels,
@@ -20,41 +30,38 @@ import {
   acceptanceChecklist,
 } from '@/lib/audit/static-audit';
 import { TOOL_REGISTRY } from '@/lib/tools/registry';
+import { guardDataApi } from '@/lib/api-guard';
+import { recentEvents } from '@/lib/logger';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(req: Request) {
+  // Read-guarded like every data surface (token when set; preview opt-in).
+  const guard = guardDataApi(req, 'read');
+  if (!guard.ok) return guard.response;
+
   try {
-    const health = await collectHealth();
+    const symbolParam = new URL(req.url).searchParams.get('symbol') ?? undefined;
+    const report = await buildEnvironmentAuditReport(symbolParam ?? undefined);
     const events = await recentEvents(config.limits.maxEventsReturned);
 
-    const live = {
-      node: process.version,
-      bun: typeof Bun !== 'undefined' ? Bun.version : null,
-      platform: `${os.type()} ${os.release()}`,
-      arch: os.arch(),
-      cpuCores: os.cpus().length,
-      memoryTotalMb: Math.round(os.totalmem() / 1024 / 1024),
-      memoryFreeMb: Math.round(os.freemem() / 1024 / 1024),
-      uptimeSeconds: Math.round(process.uptime()),
-      timestamp: new Date().toISOString(),
-    };
-
     return NextResponse.json({
-      auditPerformedAt: AUDIT_PERFORMED_AT,
-      generatedAt: live.timestamp,
-      config: {
-        version: config.version,
-        phase: config.phase,
-        tradingMode: config.tradingMode,
-        executionEnabled: config.execution.enabled,
-        executionReason: config.execution.reason,
-        symbol: config.symbol,
+      ...report,
+      live: {
+        node: process.version,
+        bun: typeof Bun !== 'undefined' ? Bun.version : null,
+        platform: `${report.app.version}`,
+        arch: null,
+        cpuCores: null,
+        memoryTotalMb: null,
+        memoryFreeMb: null,
+        uptimeSeconds: Math.round(process.uptime()),
+        timestamp: report.generatedAtUtc,
       },
-      live,
-      health,
-      environmentChecks,
-      glm: { ...glmAccess, liveStatus: health.glm },
+      glm: {
+        ...glmAccess,
+        liveStatus: report.persistedFacts.lastGlmVerification,
+      },
       mt5: mt5Feasibility,
       database: {
         provider: 'SQLite (Prisma)',
@@ -84,7 +91,7 @@ export async function GET() {
     });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'unknown error' },
+      { ok: false, error: err instanceof Error ? err.message : 'unknown error' },
       { status: 500 },
     );
   }
