@@ -49,6 +49,13 @@ import {
 } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
+// Phase 10.3-C — display-only price precision formatter (verified symbol metadata).
+import {
+  formatPriceLevel,
+  formatPriceQuantity,
+  priceDisplaySpecFromSymbolSpec,
+  type PriceDisplaySpec,
+} from '@/lib/market/price-display';
 
 // ---------------------------------------------------------------------------
 // API shapes
@@ -192,25 +199,33 @@ interface AuditResponse {
 /** Phase 9 — /api/signal/latest response. */
 interface SignalLevelsView {
   direction: 'BUY' | 'SELL';
+  // Numeric calculation values (frozen geometry — display formats a SEPARATE string)
+  entryZoneLow: number;
+  entryZoneHigh: number;
+  entryReference: number;
+  stopLoss: number;
+  target: number;
+  riskPrice: number;
+  rewardPrice: number;
+  rewardRiskRatio: number;
+  // Stored canonical decimal text (evidence — raw trace for the display layer)
   entryZoneLowText: string;
   entryZoneHighText: string;
   entryReferenceText: string;
   stopLossText: string;
   targetText: string;
-  riskPrice: number;
-  rewardPrice: number;
-  rewardRiskRatio: number;
 }
 
 interface SignalEvidenceView {
   structureEvent: {
     type: string;
     direction: string;
+    level: number;
     levelText: string;
     breakCandleTimeUtc: string;
     barsSinceBreak: number;
   } | null;
-  anchorSwing: { kind: string; priceText: string; swingTimeUtc: string } | null;
+  anchorSwing: { kind: string; price: number; priceText: string; swingTimeUtc: string } | null;
   indicators: { ema50: number | null; rsi14: number | null; atr14: number | null; adx14: number | null };
   htfContext: { h1Trend: string | null; h4Trend: string | null };
   decisionClose: number | null;
@@ -534,6 +549,20 @@ interface DataHealthResponse {
     errorCode: string | null;
   } | null;
   executionLock: { enabled: boolean; reason: string; tradingMode: string };
+}
+
+/** Phase 10.3-C — /api/data/latest response (verified symbol spec for display precision). */
+interface DataLatestResponse {
+  ok: boolean;
+  symbol: string;
+  spec: {
+    digits: number | null;
+    point: string | null;
+    tickSize: string | null;
+    source: string;
+    verifiedFields: string[];
+    lastVerifiedAtUtc: string;
+  } | null;
 }
 
 /** Phase 8 — /api/backtest/latest response. */
@@ -905,6 +934,64 @@ function fmtInd(v: number | null | undefined, digits = 2): string {
 }
 
 // ---------------------------------------------------------------------------
+// Phase 10.3-C — price precision display helpers (PRESENTATION ONLY)
+// ---------------------------------------------------------------------------
+// Precision comes exclusively from verified symbol metadata (SymbolSpec with
+// verifiedFields including "digits"). Missing/stale metadata → the RAW stored
+// value is shown and flagged — no default precision is ever assumed. An
+// off-grid raw value (derived level, Phase 10.2 F1) displays at the verified
+// digits with a visible ≈ marker; the raw value stays traceable via tooltip.
+
+/** Price LEVEL (entry/SL/target/quotes/swing prices) at verified digits. */
+function PriceLevelText({
+  value,
+  spec,
+  className,
+}: {
+  value: number | string | null | undefined;
+  spec: PriceDisplaySpec;
+  className?: string;
+}) {
+  const r = formatPriceLevel(value, spec);
+  return (
+    <span
+      className={className}
+      title={r.text === '—' ? undefined : `raw: ${r.rawText}`}
+    >
+      {r.text}
+      {r.anomaly && r.text !== '—' && (
+        <sup
+          className="ml-0.5 text-amber-400"
+          title="প্রেসিশন-অ্যানোমালি — raw মান broker grid-এ নেই / মেটাডেটা যাচাইকৃত নয়"
+          aria-label="precision anomaly"
+        >
+          ≈
+        </sup>
+      )}
+    </span>
+  );
+}
+
+/** Price-UNIT quantity (P&L, costs, spread assumptions) at verified digits. */
+function PriceQtyText({
+  value,
+  spec,
+  className,
+}: {
+  value: number | null | undefined;
+  spec: PriceDisplaySpec;
+  className?: string;
+}) {
+  const text = formatPriceQuantity(value, spec);
+  const raw = value === null || value === undefined || !Number.isFinite(value) ? null : String(value);
+  return (
+    <span className={className} title={raw !== null && raw !== text ? `raw: ${raw}` : undefined}>
+      {text}
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -1062,6 +1149,8 @@ export default function Phase1Dashboard() {
   const [signalLatest, setSignalLatest] = useState<SignalLatestResponse | null>(null);
   const [signalRunning, setSignalRunning] = useState(false);
   const [validationLatest, setValidationLatest] = useState<ValidationLatestResponse | null>(null);
+  // Phase 10.3-C — verified symbol metadata (digits) for price display precision
+  const [dataLatest, setDataLatest] = useState<DataLatestResponse | null>(null);
   // Chat state — Phase 9 Task D/E
   const [chatMessages, setChatMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string; meta?: ChatResponse | null }>>([]);
   const [chatInput, setChatInput] = useState('');
@@ -1070,7 +1159,7 @@ export default function Phase1Dashboard() {
 
   const refresh = useCallback(async () => {
     try {
-      const [hRes, aRes, mRes, qRes, anRes, dhRes, btRes, sgRes, vlRes] = await Promise.all([
+      const [hRes, aRes, mRes, qRes, anRes, dhRes, btRes, sgRes, vlRes, dlRes] = await Promise.all([
         fetch('/api/health', { cache: 'no-store' }),
         fetch('/api/audit/environment', { cache: 'no-store' }),
         fetch('/api/data/status', { cache: 'no-store' }).catch(() => null),
@@ -1080,6 +1169,8 @@ export default function Phase1Dashboard() {
         fetch('/api/backtest/latest?symbol=XAUUSDm', { cache: 'no-store' }).catch(() => null),
         fetch('/api/signal/latest?symbol=XAUUSDm', { cache: 'no-store' }).catch(() => null),
         fetch('/api/validation/latest?symbol=XAUUSDm', { cache: 'no-store' }).catch(() => null),
+        // Phase 10.3-C — verified SymbolSpec (digits/verifiedFields) for display precision
+        fetch('/api/data/latest?symbol=XAUUSDm', { cache: 'no-store' }).catch(() => null),
       ]);
       if (!hRes.ok && !aRes.ok) throw new Error('API unreachable');
       if (hRes.ok) setHealth((await hRes.json()) as HealthReport);
@@ -1109,6 +1200,8 @@ export default function Phase1Dashboard() {
       else setSignalLatest(null);
       if (vlRes && vlRes.ok) setValidationLatest((await vlRes.json()) as ValidationLatestResponse);
       else setValidationLatest(null);
+      if (dlRes && dlRes.ok) setDataLatest((await dlRes.json()) as DataLatestResponse);
+      else setDataLatest(null);
       setLoadError(null);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : 'unknown error');
@@ -1122,6 +1215,17 @@ export default function Phase1Dashboard() {
     const id = setInterval(() => void refresh(), 30_000);
     return () => clearInterval(id);
   }, [refresh]);
+
+  // ---------------------------------------------------------------------------
+  // Phase 10.3-C — verified price-precision spec (fail-closed when unverified)
+  // ---------------------------------------------------------------------------
+  const priceSpec = useMemo(
+    () => priceDisplaySpecFromSymbolSpec(dataLatest?.spec ?? null),
+    [dataLatest],
+  );
+  /** Live bridge quote digits vs persisted verified spec — visible if inconsistent. */
+  const quoteDigitsMismatch =
+    dataHealth?.quote.digits != null && priceSpec.verified && dataHealth.quote.digits !== priceSpec.digits;
 
   const runVerify = useCallback(async () => {
     setVerifying(true);
@@ -1779,7 +1883,9 @@ export default function Phase1Dashboard() {
                           ] as Array<[string, string | null]>).map(([k, v]) => (
                             <div key={k} className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-2 text-center">
                               <p className="text-[10px] uppercase tracking-wide text-zinc-500">{k}</p>
-                              <p className="mt-0.5 font-mono text-sm text-amber-200">{v ?? '—'}</p>
+                              <p className="mt-0.5 font-mono text-sm text-amber-200">
+                                <PriceLevelText value={v} spec={priceSpec} />
+                              </p>
                             </div>
                           ))}
                         </div>
@@ -2228,7 +2334,7 @@ export default function Phase1Dashboard() {
                                   const e = a.structure.events[a.structure.events.length - 1];
                                   return (
                                     <p className="mt-1 font-mono text-[11px] leading-relaxed text-zinc-300">
-                                      {e.type} · {directionBn[e.direction] ?? e.direction} · স্তর {e.levelText} · ক্লোজ-নিশ্চিত ({e.basis}) ·{' '}
+                                      {e.type} · {directionBn[e.direction] ?? e.direction} · স্তর <PriceLevelText value={e.level ?? e.levelText} spec={priceSpec} /> · ক্লোজ-নিশ্চিত ({e.basis}) ·{' '}
                                       {fmtDhaka(new Date(e.confirmedAtUtcSec * 1000).toISOString())}
                                     </p>
                                   );
@@ -2330,34 +2436,64 @@ export default function Phase1Dashboard() {
                           </div>
                         )}
 
-                        {/* Levels — ONLY for setups */}
-                        {s.levels ? (
+                        {/* Levels — ONLY for setups (Phase 10.3-C: verified-digits display, raw in tooltip) */}
+                        {s.levels ? (() => {
+                          const lv = s.levels;
+                          const lvlZoneLow = formatPriceLevel(lv.entryZoneLow ?? lv.entryZoneLowText, priceSpec);
+                          const lvlZoneHigh = formatPriceLevel(lv.entryZoneHigh ?? lv.entryZoneHighText, priceSpec);
+                          const lvlSl = formatPriceLevel(lv.stopLoss ?? lv.stopLossText, priceSpec);
+                          const lvlTp = formatPriceLevel(lv.target ?? lv.targetText, priceSpec);
+                          const lvlRef = formatPriceLevel(lv.entryReference ?? lv.entryReferenceText, priceSpec);
+                          const anyLevelAnomaly = [lvlZoneLow, lvlZoneHigh, lvlSl, lvlTp, lvlRef].some((r) => r.anomaly);
+                          return (
+                          <>
                           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
                             <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3">
                               <p className="text-xs text-zinc-500">দিক</p>
-                              <p className={`mt-1 text-sm font-semibold ${s.levels.direction === 'BUY' ? 'text-emerald-400' : 'text-red-400'}`}>
-                                {s.levels.direction === 'BUY' ? 'BUY (লং)' : 'SELL (শর্ট)'}
+                              <p className={`mt-1 text-sm font-semibold ${lv.direction === 'BUY' ? 'text-emerald-400' : 'text-red-400'}`}>
+                                {lv.direction === 'BUY' ? 'BUY (লং)' : 'SELL (শর্ট)'}
                               </p>
                             </div>
                             <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
                               <p className="text-xs text-zinc-500">এন্ট্রি জোন</p>
-                              <p className="mt-1 font-mono text-sm text-zinc-200">{s.levels.entryZoneLowText} – {s.levels.entryZoneHighText}</p>
+                              <p className="mt-1 font-mono text-sm text-zinc-200" title={`raw: ${lvlZoneLow.rawText} / ${lvlZoneHigh.rawText}`}>
+                                {lvlZoneLow.text}{lvlZoneLow.anomaly && <sup className="ml-0.5 text-amber-400" aria-label="precision anomaly">≈</sup>} – {lvlZoneHigh.text}{lvlZoneHigh.anomaly && <sup className="ml-0.5 text-amber-400" aria-label="precision anomaly">≈</sup>}
+                              </p>
                             </div>
                             <div className="rounded-lg border border-red-500/30 bg-red-500/5 p-3">
                               <p className="text-xs text-zinc-500">স্টপ-লস</p>
-                              <p className="mt-1 font-mono text-sm text-red-300">{s.levels.stopLossText}</p>
+                              <p className="mt-1 font-mono text-sm text-red-300" title={`raw: ${lvlSl.rawText}`}>
+                                {lvlSl.text}{lvlSl.anomaly && <sup className="ml-0.5 text-amber-400" aria-label="precision anomaly">≈</sup>}
+                              </p>
                             </div>
                             <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3">
                               <p className="text-xs text-zinc-500">টার্গেট</p>
-                              <p className="mt-1 font-mono text-sm text-emerald-300">{s.levels.targetText}</p>
+                              <p className="mt-1 font-mono text-sm text-emerald-300" title={`raw: ${lvlTp.rawText}`}>
+                                {lvlTp.text}{lvlTp.anomaly && <sup className="ml-0.5 text-amber-400" aria-label="precision anomaly">≈</sup>}
+                              </p>
                             </div>
                             <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
                               <p className="text-xs text-zinc-500">Reward / Risk</p>
-                              <p className="mt-1 font-mono text-sm text-zinc-200">1 : {s.levels.rewardRiskRatio.toFixed(2)}</p>
-                              <p className="text-xs text-zinc-600">রেফারেন্স এন্ট্রি {s.levels.entryReferenceText} (স্প্রেড-সমন্বিত)</p>
+                              <p className="mt-1 font-mono text-sm text-zinc-200">1 : {lv.rewardRiskRatio.toFixed(2)}</p>
+                              <p className="text-xs text-zinc-600">
+                                রেফারেন্স এন্ট্রি{' '}
+                                <span className="font-mono" title={`raw: ${lvlRef.rawText}`}>
+                                  {lvlRef.text}{lvlRef.anomaly && <sup className="ml-0.5 text-amber-400" aria-label="precision anomaly">≈</sup>}
+                                </span>{' '}
+                                (স্প্রেড-সমন্বিত)
+                              </p>
                             </div>
                           </div>
-                        ) : (
+                          {(anyLevelAnomaly || !priceSpec.verified) && (
+                            <p className="text-[11px] leading-relaxed text-amber-300/80">
+                              {priceSpec.verified
+                                ? '≈ চিহ্ন: raw গণনা-মান broker grid-এ নেই (derived) — verified digits-এ দেখানো হচ্ছে, raw মান tooltip-এ। সংরক্ষিত মান অপরিবর্তিত।'
+                                : 'সিম্বল মেটাডেটা (digits) যাচাইকৃত নয় — কোনো default precision অনুমান না করে raw মান দেখানো হচ্ছে (≈ চিহ্নিত)।'}
+                            </p>
+                          )}
+                          </>
+                          );
+                        })() : (
                           <p className="text-xs leading-relaxed text-zinc-500">
                             এই ফলাফলে কোনো লেভেল নেই — শুধুমাত্র BUY_SETUP/SELL_SETUP হলে সম্পূর্ণ, যাচাইকৃত লেভেল দেওয়া হয়।
                           </p>
@@ -2371,14 +2507,14 @@ export default function Phase1Dashboard() {
                               {s.evidence.structureEvent ? (
                                 <p>
                                   স্ট্রাকচার: <span className="font-mono text-zinc-300">{s.evidence.structureEvent.type} {directionBn[s.evidence.structureEvent.direction] ?? s.evidence.structureEvent.direction}</span>{' '}
-                                  @ {s.evidence.structureEvent.levelText} ({s.evidence.structureEvent.barsSinceBreak} বার আগে, {fmtDhaka(s.evidence.structureEvent.breakCandleTimeUtc)})
+                                  @ <PriceLevelText value={s.evidence.structureEvent.level ?? s.evidence.structureEvent.levelText} spec={priceSpec} className="font-mono text-zinc-300" /> ({s.evidence.structureEvent.barsSinceBreak} বার আগে, {fmtDhaka(s.evidence.structureEvent.breakCandleTimeUtc)})
                                 </p>
                               ) : (
                                 <p>স্ট্রাকচার ব্রেক: সাম্প্রতিক কোনো ব্রেক নেই</p>
                               )}
                               {s.evidence.anchorSwing ? (
                                 <p>
-                                  অ্যাঙ্কর সুইং: <span className="font-mono text-zinc-300">{s.evidence.anchorSwing.priceText}</span> ({s.evidence.anchorSwing.kind === 'low' ? 'সুইং লো' : 'সুইং হাই'}, {fmtDhaka(s.evidence.anchorSwing.swingTimeUtc)})
+                                  অ্যাঙ্কর সুইং: <PriceLevelText value={s.evidence.anchorSwing.price ?? s.evidence.anchorSwing.priceText} spec={priceSpec} className="font-mono text-zinc-300" /> ({s.evidence.anchorSwing.kind === 'low' ? 'সুইং লো' : 'সুইং হাই'}, {fmtDhaka(s.evidence.anchorSwing.swingTimeUtc)})
                                 </p>
                               ) : (
                                 <p>অ্যাঙ্কর সুইং: প্রযোজ্য নয়</p>
@@ -2405,7 +2541,7 @@ export default function Phase1Dashboard() {
                         {s.quote && (
                           <p className="text-xs text-zinc-500">
                             মূল্যায়নের সময় কোট: {String((s.quote as { freshness?: string }).freshness ?? '—')} · উৎস {String((s.quote as { sourceClass?: string }).sourceClass ?? '—')} ·{' '}
-                            {String((s.quote as { bid?: string }).bid ?? '—')} / {String((s.quote as { ask?: string }).ask ?? '—')} ({String((s.quote as { ageSeconds?: number }).ageSeconds ?? '—')}s আগে)
+                            <PriceLevelText value={(s.quote as { bid?: string }).bid} spec={priceSpec} className="font-mono" /> / <PriceLevelText value={(s.quote as { ask?: string }).ask} spec={priceSpec} className="font-mono" /> ({String((s.quote as { ageSeconds?: number }).ageSeconds ?? '—')}s আগে)
                           </p>
                         )}
                       </>
@@ -2424,10 +2560,10 @@ export default function Phase1Dashboard() {
                         </p>
                         <div className="mt-2 grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
                           <p className="text-zinc-400">
-                            Dev: {dev.status === 'COMPUTED' ? `${dev.executedTrades} ট্রেড · উইনরেট ${(dev.winRate ?? 0) * 100}% · PF ${dev.profitFactor ?? '—'} · নিট ${dev.netPnlPrice ?? '—'}` : `INSUFFICIENT_DATA (${dev.reason ?? ''})`}
+                            Dev: {dev.status === 'COMPUTED' ? `${dev.executedTrades} ট্রেড · উইনরেট ${(dev.winRate ?? 0) * 100}% · PF ${dev.profitFactor ?? '—'} · নিট <PriceQtyText value={dev.netPnlPrice} spec={priceSpec} className="font-mono" />` : `INSUFFICIENT_DATA (${dev.reason ?? ''})`}
                           </p>
                           <p className="text-zinc-400">
-                            OOS: {oos.status === 'COMPUTED' ? `${oos.executedTrades} ট্রেড · উইনরেট ${(oos.winRate ?? 0) * 100}% · PF ${oos.profitFactor ?? '—'} · নিট ${oos.netPnlPrice ?? '—'}` : `INSUFFICIENT_DATA (${oos.reason ?? ''})`}
+                            OOS: {oos.status === 'COMPUTED' ? `${oos.executedTrades} ট্রেড · উইনরেট ${(oos.winRate ?? 0) * 100}% · PF ${oos.profitFactor ?? '—'} · নিট <PriceQtyText value={oos.netPnlPrice} spec={priceSpec} className="font-mono" />` : `INSUFFICIENT_DATA (${oos.reason ?? ''})`}
                           </p>
                         </div>
                         <p className="mt-2 text-xs leading-relaxed text-zinc-600">
@@ -2511,7 +2647,9 @@ export default function Phase1Dashboard() {
                           </div>
                           <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
                             <p className="text-xs text-zinc-500">স্প্রেড অনুমান</p>
-                            <p className="mt-1 font-mono text-sm text-amber-300">{r.dataset.observedSpreadPrice}</p>
+                            <p className="mt-1 font-mono text-sm text-amber-300">
+                              <PriceQtyText value={r.dataset.observedSpreadPrice} spec={priceSpec} />
+                            </p>
                             <p className="text-xs text-zinc-600">বর্তমান পর্যবেক্ষণ — ঐতিহাসিক নয়</p>
                           </div>
                         </div>
@@ -2545,13 +2683,13 @@ export default function Phase1Dashboard() {
                                 <dl className="space-y-1.5 text-xs">
                                   <div className="flex justify-between gap-2"><dt className="text-zinc-500">কভারেজ</dt><dd className="text-zinc-300">{m.candles} বার</dd></div>
                                   <div className="flex justify-between gap-2"><dt className="text-zinc-500">উইন-রেট</dt><dd className="text-zinc-200">{fmtInd(m.winRate !== null ? m.winRate * 100 : null, 1)}%</dd></div>
-                                  <div className="flex justify-between gap-2"><dt className="text-zinc-500">গ্রস (খরচ-পূর্ব)</dt><dd className={pnlClass(m.grossPnlPrice)}>{fmtInd(m.grossPnlPrice, 2)}</dd></div>
-                                  <div className="flex justify-between gap-2"><dt className="text-zinc-500">মডেলড খরচ</dt><dd className="text-zinc-400">−{fmtInd(m.costsPrice, 2)}</dd></div>
-                                  <div className="flex justify-between gap-2"><dt className="text-zinc-500">নেট (খরচ-পর)</dt><dd className={pnlClass(m.netPnlPrice)}>{fmtInd(m.netPnlPrice, 2)}</dd></div>
+                                  <div className="flex justify-between gap-2"><dt className="text-zinc-500">গ্রস (খরচ-পূর্ব)</dt><dd className={pnlClass(m.grossPnlPrice)}><PriceQtyText value={m.grossPnlPrice} spec={priceSpec} /></dd></div>
+                                  <div className="flex justify-between gap-2"><dt className="text-zinc-500">মডেলড খরচ</dt><dd className="text-zinc-400">−<PriceQtyText value={m.costsPrice} spec={priceSpec} /></dd></div>
+                                  <div className="flex justify-between gap-2"><dt className="text-zinc-500">নেট (খরচ-পর)</dt><dd className={pnlClass(m.netPnlPrice)}><PriceQtyText value={m.netPnlPrice} spec={priceSpec} /></dd></div>
                                   <div className="flex justify-between gap-2"><dt className="text-zinc-500">প্রফিট ফ্যাক্টর</dt><dd className="text-zinc-200">{fmtInd(m.profitFactor, 2)}</dd></div>
-                                  <div className="flex justify-between gap-2"><dt className="text-zinc-500">এক্সপেক্ট্যান্সি / ট্রেড</dt><dd className={pnlClass(m.expectancyPrice)}>{fmtInd(m.expectancyPrice, 2)}</dd></div>
+                                  <div className="flex justify-between gap-2"><dt className="text-zinc-500">এক্সপেক্ট্যান্সি / ট্রেড</dt><dd className={pnlClass(m.expectancyPrice)}><PriceQtyText value={m.expectancyPrice} spec={priceSpec} /></dd></div>
                                   <div className="flex justify-between gap-2"><dt className="text-zinc-500">গড় R</dt><dd className={pnlClass(m.expectancyR)}>{fmtInd(m.expectancyR, 3)}</dd></div>
-                                  <div className="flex justify-between gap-2"><dt className="text-zinc-500">সর্বোচ্চ ড্রডাউন</dt><dd className="text-red-400">{fmtInd(m.maxDrawdownPrice, 2)}</dd></div>
+                                  <div className="flex justify-between gap-2"><dt className="text-zinc-500">সর্বোচ্চ ড্রডাউন</dt><dd className="text-red-400"><PriceQtyText value={m.maxDrawdownPrice} spec={priceSpec} /></dd></div>
                                   <div className="flex justify-between gap-2"><dt className="text-zinc-500">সর্বোচ্চ পরপর লস</dt><dd className="text-red-400">{m.maxConsecutiveLosses}</dd></div>
                                   <div className="flex justify-between gap-2"><dt className="text-zinc-500">এক্সপোজার</dt><dd className="text-zinc-200">{fmtInd(m.exposurePct, 1)}%</dd></div>
                                   <div className="flex justify-between gap-2"><dt className="text-zinc-500">ট্রেড / সপ্তাহ</dt><dd className="text-zinc-200">{fmtInd(m.tradesPerWeek, 2)}</dd></div>
@@ -2580,7 +2718,7 @@ export default function Phase1Dashboard() {
                               {w.metrics.status === 'COMPUTED' ? (
                                 <span className="ml-auto flex flex-wrap items-center gap-2">
                                   <span className="text-zinc-300">{w.metrics.trades} ট্রেড</span>
-                                  <span className={pnlClass(w.metrics.netPnlPrice)}>নেট {fmtInd(w.metrics.netPnlPrice, 2)}</span>
+                                  <span className={pnlClass(w.metrics.netPnlPrice)}>নেট <PriceQtyText value={w.metrics.netPnlPrice} spec={priceSpec} /></span>
                                   <span className="text-zinc-400">PF {fmtInd(w.metrics.profitFactor, 2)}</span>
                                 </span>
                               ) : (
@@ -2594,7 +2732,7 @@ export default function Phase1Dashboard() {
                           {r.walkForward.aggregate.status === 'COMPUTED' ? (
                             <span className="flex flex-wrap items-center gap-2">
                               <span className="text-zinc-300">{r.walkForward.aggregate.trades} ট্রেড</span>
-                              <span className={pnlClass(r.walkForward.aggregate.netPnlPrice)}>নেট {fmtInd(r.walkForward.aggregate.netPnlPrice, 2)}</span>
+                              <span className={pnlClass(r.walkForward.aggregate.netPnlPrice)}>নেট <PriceQtyText value={r.walkForward.aggregate.netPnlPrice} spec={priceSpec} /></span>
                               <span className="text-zinc-400">PF {fmtInd(r.walkForward.aggregate.profitFactor, 2)}</span>
                             </span>
                           ) : (
@@ -2616,9 +2754,9 @@ export default function Phase1Dashboard() {
                             {r.sensitivity.map((s) => (
                               <div key={s.scenario} className="flex flex-wrap items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2 text-xs">
                                 <span className="font-mono text-zinc-400">{s.scenario}</span>
-                                <span className="text-zinc-600">spr {s.spreadPrice} / slip {s.slippagePrice} / comm {s.commissionPrice}</span>
+                                <span className="text-zinc-600">spr <PriceQtyText value={s.spreadPrice} spec={priceSpec} /> / slip <PriceQtyText value={s.slippagePrice} spec={priceSpec} /> / comm <PriceQtyText value={s.commissionPrice} spec={priceSpec} /></span>
                                 <span className="ml-auto flex items-center gap-2">
-                                  <span className={pnlClass(s.netPnlPrice)}>নেট {fmtInd(s.netPnlPrice, 2)}</span>
+                                  <span className={pnlClass(s.netPnlPrice)}>নেট <PriceQtyText value={s.netPnlPrice} spec={priceSpec} /></span>
                                   <span className="text-zinc-400">PF {fmtInd(s.profitFactor, 2)}</span>
                                   {!s.netPositive && <Badge variant="outline" className="border-red-500/40 bg-red-500/10 text-red-300">ঋণাত্মক</Badge>}
                                 </span>
@@ -2641,7 +2779,7 @@ export default function Phase1Dashboard() {
                                 {p.param !== '(baseline)' && <span className="font-mono text-zinc-500">= {p.value}</span>}
                                 <span className="ml-auto flex items-center gap-2">
                                   <span className="text-zinc-300">{p.trades} ট্রেড</span>
-                                  <span className={pnlClass(p.netPnlPrice)}>নেট {fmtInd(p.netPnlPrice, 2)}</span>
+                                  <span className={pnlClass(p.netPnlPrice)}>নেট <PriceQtyText value={p.netPnlPrice} spec={priceSpec} /></span>
                                 </span>
                               </div>
                             ))}
@@ -2686,7 +2824,7 @@ export default function Phase1Dashboard() {
                               <div key={o.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2 text-xs">
                                 <Badge variant="outline" className={o.direction === 'BUY' ? 'border-emerald-500/40 text-emerald-300' : 'border-red-500/40 text-red-300'}>{o.direction}</Badge>
                                 <span className="text-zinc-400">{fmtDhaka(o.signalCreatedAtUtc)}</span>
-                                <span className="font-mono text-zinc-500">এন্ট্রি {o.entryReference}</span>
+                                <span className="font-mono text-zinc-500">এন্ট্রি <PriceLevelText value={o.entryReference} spec={priceSpec} /></span>
                                 {o.outcome && <Badge variant="outline" className="border-zinc-700 text-zinc-300">{o.outcome}</Badge>}
                                 {o.rMultiple !== null && <span className={pnlClass(o.rMultiple)}>R {fmtInd(o.rMultiple, 2)}</span>}
                                 <span className="ml-auto text-zinc-600">{o.observations} বার দেখা</span>
@@ -2791,7 +2929,7 @@ export default function Phase1Dashboard() {
                           {[
                             { label: 'n', value: String(fp.metrics.trades) },
                             { label: 'উইন রেট', value: fmtInd(fp.metrics.winRate !== null ? fp.metrics.winRate * 100 : null, 1) + '%' },
-                            { label: 'নেট', value: fmtInd(fp.metrics.netPnlPrice, 2), cls: fpPnl(fp.metrics.netPnlPrice) },
+                            { label: 'নেট', value: <PriceQtyText key="net" value={fp.metrics.netPnlPrice} spec={priceSpec} />, cls: fpPnl(fp.metrics.netPnlPrice) },
                             { label: 'PF', value: fmtInd(fp.metrics.profitFactor, 2) },
                             { label: 'গড় R', value: fmtInd(fp.metrics.avgR, 3), cls: fpPnl(fp.metrics.avgR) },
                             { label: 'সর্বোচ্চ ড্রডাউন', value: `${fmtInd(fp.metrics.maxDrawdownR, 2)}R` },
@@ -2822,7 +2960,7 @@ export default function Phase1Dashboard() {
                             <div key={t.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2 text-xs">
                               <Badge variant="outline" className={t.direction === 'BUY' ? 'border-emerald-500/40 text-emerald-300' : 'border-red-500/40 text-red-300'}>{t.direction}</Badge>
                               <span className="text-zinc-400">{fmtDhaka(t.signalCreatedAtUtc)}</span>
-                              <span className="font-mono text-zinc-500">এন্ট্রি {t.entryReference}</span>
+                              <span className="font-mono text-zinc-500">এন্ট্রি <PriceLevelText value={t.entryReference} spec={priceSpec} /></span>
                               {t.status === 'open' ? (
                                 <Badge variant="outline" className="border-amber-500/40 text-amber-300">খোলা</Badge>
                               ) : (
@@ -2913,7 +3051,7 @@ export default function Phase1Dashboard() {
                                 )}
                                 {m.meta.dataState.bid && (
                                   <Badge variant="outline" className="border-zinc-700 bg-zinc-800/50 font-mono text-zinc-300">
-                                    {m.meta.dataState.bid} / {m.meta.dataState.ask}
+                                    <PriceLevelText value={m.meta.dataState.bid} spec={priceSpec} /> / <PriceLevelText value={m.meta.dataState.ask} spec={priceSpec} />
                                   </Badge>
                                 )}
                                 {m.meta.dataState.latestSignalOutcome && (
@@ -3031,15 +3169,25 @@ export default function Phase1Dashboard() {
                         {dataHealth.quote.bid !== null ? (
                           <>
                             <p className="mt-1 font-mono text-sm text-zinc-100">
-                              bid {dataHealth.quote.bid} / ask {dataHealth.quote.ask}
+                              bid <PriceLevelText value={dataHealth.quote.bid} spec={priceSpec} /> / ask <PriceLevelText value={dataHealth.quote.ask} spec={priceSpec} />
                             </p>
                             <p className="mt-1 text-[10px] text-zinc-500">
-                              spread {dataHealth.quote.spread} · কোট-বয়স {dataHealth.quote.ageSeconds ?? '—'}s
+                              spread <PriceLevelText value={dataHealth.quote.spread} spec={priceSpec} /> · কোট-বয়স {dataHealth.quote.ageSeconds ?? '—'}s · digits {dataHealth.quote.digits ?? '—'}
                             </p>
                           </>
                         ) : (
                           <p className="mt-1 text-sm text-zinc-400">বৈধ কোট নেই (কিছু বানানো হয়নি)</p>
                         )}
+                        {quoteDigitsMismatch && (
+                          <p className="mt-1 text-[10px] leading-relaxed text-amber-300">
+                            ⚠ মেটাডেটা-অসঙ্গতি: লাইভ কোট digits ({dataHealth?.quote.digits}) ≠ যাচাইকৃত SymbolSpec digits ({priceSpec.digits}) — দেখানো হচ্ছে, স্বয়ংক্রিয়ভাবে সংশোধন করা হয়নি।
+                          </p>
+                        )}
+                        <p className="mt-1 text-[10px] leading-relaxed text-zinc-600">
+                          {priceSpec.verified
+                            ? `প্রদর্শন-নির্ভুলতা: যাচাইকৃত digits=${priceSpec.digits} (${dataLatest?.spec?.source ?? 'bridge'}${dataLatest?.spec?.lastVerifiedAtUtc ? `, যাচাই ${fmtDhaka(dataLatest.spec.lastVerifiedAtUtc)}` : ''})`
+                            : 'প্রদর্শন-নির্ভুলতা: সিম্বল মেটাডেটা যাচাইকৃত নয় — raw মান দেখানো হচ্ছে (fail-closed)।'}
+                        </p>
                       </div>
                       <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3">
                         <p className="text-[10px] uppercase tracking-wide text-zinc-500">সংযোগ সত্যতা</p>
