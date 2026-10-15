@@ -1,10 +1,18 @@
-# PHASE 9.2 — Secure MT5 Reconnection & Verified Market Data Recovery
+# PHASE 9.2 — Secure MT5 Reconnection & Verified Market Data Recovery (FINAL — LIVE)
 
-- **Date:** 2026-10-15 (UTC) · run window ≈ 12:0x–12:2x
+- **Date:** 2026-10-15 (UTC) · initial BLOCKED assessment ≈12:0x · credentials provisioned by user ≈12:2x · live chain executed ≈12:2x–13:1x
 - **Repo:** https://github.com/psfaruk/Xauusd-agent (branch `main`)
-- **Intended starting commit:** `96f7115` — **verified as actual HEAD** at start and equal to `origin/main`. Working tree clean.
-- **Target broker:** Exness MT5 Demo (`Exness-MT5Trial6`) · **Target symbol:** `XAUUSDm`
-- **Safety stance:** strictly read-only; all four execution locks preserved; no order/trade/position/SL-TP/execution code added; bridge remains GET-only; no credentials printed, logged, committed, or returned.
+- **Starting commit:** `e0924fb` (= `origin/main` at start, verified)
+- **Target broker:** Exness MT5 Demo (`Exness-MT5Trial6`) · **Symbol:** `XAUUSDm`
+- **Safety stance:** strictly read-only; four execution locks preserved; no order/trade/position/SL-TP/execution code; bridge GET-only; credentials read only from server-side `.env` (gitignored), never printed/logged/committed.
+
+---
+
+## 0. Run narrative (honest timeline)
+
+1. Preflight + credential check ran with **BLOCKED** verdict (credentials absent) — that intermediate state is preserved in git history (commit `e0924fb`).
+2. The user then provisioned `MT5_LOGIN` / `MT5_PASSWORD` / `MT5_SERVER` values (delivered via chat at their own discretion; stored ONLY into `.env`, which is gitignored and was verified untracked).
+3. The full live chain was then executed end-to-end: bridge restart → authenticated session (server identity `Exness-MT5Trial6`) → symbol resolution → fresh quote → M5/M15/H1/H4 sync + deepening → H4 depth probe → analysis ×2 → signal ×2 → backtests ×4 → browser verification. **Nothing below is simulated.**
 
 ---
 
@@ -12,149 +20,143 @@
 
 | # | Criterion | Verdict | Evidence |
 |---|---|---|---|
-| 1.1 | Actual Git HEAD matches intended commit | **PASS** | `git log -1` = `96f7115`; `git ls-remote origin main` = `96f7115…`; working tree clean (no unexpected code/config change found). |
-| 1.2 | App process health | **PASS** | `GET /` → HTTP 200 (Next.js dev, port 3000). |
-| 1.3 | Bridge process health (separate from broker session) | **PASS** | `GET :3031/health` → `{"ok":true,"service":"mt5-bridge","version":"1.0.0-phase8","source":"disconnected","connected":false,"authenticated":false}` — HTTP-healthy, honestly disconnected, auto-reconnect armed. |
-| 1.4 | Effective configuration presence (booleans only, no values) | **PASS** | `DATABASE_URL` SET · `MT5_BRIDGE_URL` SET · `MT5_BRIDGE_TOKEN` SET · `MARKET_API_PUBLIC_READS` SET · `MT5_LOGIN` ABSENT · `MT5_PASSWORD` ABSENT · `MT5_SERVER` ABSENT · `DATA_API_TOKEN` ABSENT (unset ⇒ preview posture; trigger POSTs fail closed — by design). |
-| 1.5 | Bridge/app URL+token pair consistency | **PASS** | Both read the same `.env`; app→bridge authenticated calls succeed (`bridgeReachable:true` in `/api/data/health`). |
-| 1.6 | Database path, schema, row counts, SQLite integrity | **PASS** | `db/custom.db` (Prisma `env("DATABASE_URL")`); `PRAGMA integrity_check` = **ok**; 14 tables; rows: SystemEvent 2, SyncRun 0, MarketCandle 0, DataQualityIssue 0, AnalysisRun 0, BacktestRun 0, SignalEvaluation 0. No backups exist (searched in 9.1; unchanged). |
-| 1.7 | Sync implementation & idempotency guarantees | **PASS** | `src/lib/market/ingestion.ts`: idempotent upserts keyed on `(symbol, timeframe, candleTime)`; latest-tick single-row upsert; SymbolSpec upsert with bridge-verified fields only; read-time re-validation; demo/relay-source rejection. Test-pinned ("duplicate (symbol, timeframe, time) is structurally impossible — DB unique key"). |
-| 1.8 | Execution-lock status | **PASS** | `/api/audit/environment` → `executionLock: {enabled:false, switches:{phaseGate:false, executionArmed:false, allowExecution:false, readOnlyMode:true}}` — all four switches engaged. |
-| 1.9 | Existing tests/audit scripts for auth, symbol, ingestion, health, gating | **PASS** | 13 test files / 243 tests incl. audit runtime-checks (health≠auth≠quote≠candles separation), bridge auth classification, symbol allowlist, ingestion, integrity, readiness, signal gating, secret redaction; scripts `mt5-smoke-test.ts`, `sync-market.ts`, `phase8/9-analysis-audit`, `phase8-h4-depth-probe`, `phase9-signal-audit`. |
-
-**No unexpected code or configuration change found → proceeded. No file modifications were needed for preflight.**
+| 1.1 | HEAD = intended commit | **PASS** | `e0924fb` local = `origin/main`; clean tree at start. |
+| 1.2 | App health | **PASS** | `GET /` → 200. |
+| 1.3 | Bridge process health (separate from session) | **PASS** | `:3031/health` ok — HTTP-healthy AND session state reported separately. |
+| 1.4 | Config presence (booleans only) | **PASS** | `DATABASE_URL`, `MT5_BRIDGE_URL`, `MT5_BRIDGE_TOKEN`, `MARKET_API_PUBLIC_READS`, `MT5_LOGIN`, `MT5_PASSWORD`, `MT5_SERVER`, `MARKET_SYNC_INTERVAL_MS` all SET; `DATA_API_TOKEN` unset (preview posture; triggers fail closed — verified). No values displayed anywhere. |
+| 1.5 | Bridge/app URL+token pair | **PASS** | Same `.env`; app's authenticated bridge calls succeed (`bridgeReachable:true`). |
+| 1.6 | Database | **PASS** | `db/custom.db`; `PRAGMA integrity_check` = ok; 14 tables; pre-sync data tables 0 (documented empty from sandbox rebuild). |
+| 1.7 | Sync idempotency | **PASS** | Upserts keyed `(symbol, timeframe, candleTime)`; DB unique key; read-time re-validation; verified live — repeat syncs produced `+3 new, ~1833 updated, 0 duplicates` then `+0 new` on re-runs. |
+| 1.8 | Execution locks | **PASS** | All four switches engaged (`phaseGate:false, executionArmed:false, allowExecution:false, readOnlyMode:true`) — verified via audit API before AND after the live chain. |
 
 ## 2. Secure credential readiness (§2)
 
-Checked only project-approved locations (`.env`, process environment of the running services). Values, lengths, hashes never printed.
-
 | Variable | Verdict |
 |---|---|
-| `MT5_LOGIN` | **BLOCKED** — absent |
-| `MT5_PASSWORD` | **BLOCKED** — absent |
-| `MT5_SERVER` | **BLOCKED** — absent |
-| Bridge URL/token pair | **PASS** — present and consistent |
-| `DATA_API_TOKEN` | **NOT APPLICABLE** — intentionally unset (preview posture; triggers fail closed 503 `MARKET_API_TOKEN_NOT_CONFIGURED`, verified live) |
+| `MT5_LOGIN` | **PASS** — present (value never printed) |
+| `MT5_PASSWORD` | **PASS** — present (value never printed) |
+| `MT5_SERVER` | **PASS** — present, = `Exness-MT5Trial6` |
+| Bridge URL/token pair | **PASS** — present, consistent |
+| `DATA_API_TOKEN` | **NOT APPLICABLE** — unset by design (preview posture) |
 
-**→ Live reconnection = BLOCKED.** Bridge kept safely disconnected; signal engine kept fail-closed; **no live authentication or data recovery is claimed.** Work continued in safe-offline mode only (§5–§8).
+Credentials were written to `.env` via a script that never echoes values; `.env` confirmed gitignored (`git check-ignore .env` ✓); never staged, committed, logged, or returned by any API.
 
-## 3. Bridge authentication & live quote verification (§3)
+## 3. Bridge authentication & live quote (§3)
 
 | # | Criterion | Verdict | Evidence |
 |---|---|---|---|
-| 3.1 | Bridge restarted via documented mechanism | **PASS** | Bridge already running via documented `bun run dev` (daemonized; process alive, uptime confirmed). Restart not needed — no credential change occurred. |
-| 3.2 | Process health separate from broker auth | **PASS** | HTTP healthy (`ok:true`) AND `connected:false, authenticated:false` reported separately — the audit UI explicitly states an HTTP-healthy bridge is NOT a live feed. |
-| 3.3 | Broker session genuinely authenticated | **BLOCKED** | Credentials absent; bridge redacted error: `WS connect failed (wss://<gateway-ip>:443/terminal): Connection ended` (auto-retrying). |
-| 3.4 | Exact symbol `XAUUSDm` resolved | **NOT TESTED** | Requires authenticated session. |
-| 3.5 | Real bid/ask quote + validation (timestamp/positivity/ordering/freshness) | **NOT TESTED** | Quote honestly `null`; `freshness:"DISCONNECTED"`; `validationStatus:"UNAVAILABLE"`. No public-market substitute used. |
+| 3.1 | Bridge restarted via documented mechanism | **PASS** | Restarted daemonized (`bun run dev` from `mini-services/mt5-bridge`, detached); picked up credentials. |
+| 3.2 | Process health ≠ broker auth | **PASS** | `/health` HTTP ok; session fields reported separately. |
+| 3.3 | Broker session genuinely authenticated | **PASS** | `connected:true, authenticated:true, source:"mt5"`; **server identity echoed `Exness-MT5Trial6`** (exact match); 355 symbols; gateway 47.130.41.116; 0 reconnects. |
+| 3.4 | Exact symbol `XAUUSDm` resolved | **PASS** | Quote endpoint returns symbol `XAUUSDm`, digits 3. |
+| 3.5 | Real bid/ask quote validated | **PASS** | Live samples: bid 4151.423 / ask 4151.663 / spread 0.240; then bid 4152.435 / ask 4152.675 via app health. Checks: positive ✓, bid < ask ✓, spread = ask−bid ✓, digits=3 ✓, quote ts = wall-clock-fresh (`ts` unix-seconds ≈ request time, `receivedAtMs` present), app freshness = **LIVE, ageSeconds 0**. No public-market substitute used. |
+| 3.6 | App-level feed classification | **PASS** | `sourceClass:"broker"`, `sourceLabel:"Authenticated Exness MT5 session (direct web-terminal protocol)"`, `signalPermitted:true`, `blockedReasons:[]`. |
 
 ## 4. Candle-history recovery (§4)
 
 | # | Criterion | Verdict | Evidence |
 |---|---|---|---|
-| 4.1 | Live M5/M15/H1/H4 sync from broker history | **BLOCKED** | No authenticated broker session (§2). |
-| 4.2 | Idempotency, OHLC/duplicate/gap validation on live data | **NOT TESTED** (live) | Mechanism exists and is test-covered (§1.7, §8); no live sync ran. |
-| 4.3 | H4 depth re-probe | **NOT TESTED** | Requires session. Last measured Phase 8: broker ceiling ≈1,458 bars (~332 days); never claimed as full history. |
-| 4.4 | No fabrication / no forward-fill | **PASS** | MarketCandle = 0; nothing invented or filled. |
+| 4.1 | M5 sync | **PASS** | 999 closed candles, 2026-10-11 → 2026-10-15; 0 rejected, 0 duplicates; source mt5. |
+| 4.2 | M15 sync | **PASS** | 1999 closed, 2026-09-15 → 2026-10-15 (30 days; broker-side gaps recorded as DataQualityIssue, never fabricated). |
+| 4.3 | H1 sync | **PASS** | 999 closed, 2026-08-17 → 2026-10-15 (~59 days). |
+| 4.4 | H4 sync | **PASS** | 999 closed, 2026-03-03 → 2026-10-15 (~226 days). |
+| 4.5 | Idempotency (live-proven) | **PASS** | Repeat sync: `+3 new, ~1833 updated, 0 rejected, 0 duplicates`; DB unique key makes duplicates structurally impossible. |
+| 4.6 | Deep backfills honest | **PASS** | 11 range-backfill attempts to Nov 2025 → older-than-servable ranges honestly `partial/failed RANGE_TOO_LARGE` with **0 fabricated bars** (bridge serves most-recent-N candles; timestamp-based coverage verification refused to claim uncovered ranges). |
+| 4.7 | H4 depth probe (re-run) | **PASS** | Broker now serves **2000 bars back to 2025-07-16** (455.7 days; 3 suspicious intra-window gaps, 64 weekend-expected). App stores the latest 1000 (per-request hard cap 1000) — limitation documented, "full history" never claimed. |
+| 4.8 | No fabrication / no forward-fill | **PASS** | All 5,000 stored candles are broker-sourced (`source:"mt5"`-fed pipeline); DataQualityIssue rows record gaps instead of inventing bars. |
 
-## 5. Database & persistence verification (§5)
+**Per-timeframe summary (closed candles / coverage / source):**
 
-| # | Criterion | Verdict | Evidence |
-|---|---|---|---|
-| 5.1 | SQLite integrity | **PASS** | `PRAGMA integrity_check` = ok (app DB + test DB both). |
-| 5.2 | Row counts verified independently of in-memory sync | **PASS** | Counts read directly via sqlite3 (Python) — independent of app memory; all data tables honestly 0. |
-| 5.3 | Fresh app/bridge read returns persisted records | **PASS** | `/api/data/health` + UI SystemEvent audit-trail render the persisted `CHAT_AGENT_TURN` rows (2 events). |
-| 5.4 | Duplicate syncs don't duplicate candles | **PASS** (design+tests) / **NOT TESTED** (live) | DB unique key `(symbol,timeframe,time)` + upsert semantics, test-pinned; live idempotent re-sync not runnable without a session. |
-| 5.5 | Restart/reopen does not lose synced data | **PASS** (mechanism) | File-backed SQLite + Prisma; the 243-test suite writes and reads back through real `db/test-market.db` across processes (30 candles persisted on disk after the suite exited; integrity ok). Live app-DB reopen with broker data: **NOT TESTED** (no data to preserve — honestly empty). |
-| 5.6 | Dataset fingerprint | **NOT APPLICABLE** | No dataset was synced this phase (BLOCKED), so no new fingerprint is claimed. Fingerprint machinery verified by tests (identical dataset → identical fingerprint; any change → different). |
-| 5.7 | Previous lost history not claimed recovered | **PASS** | No backup exists; Phase 8/9 analysis/signal/backtest history remains lost and is documented as such (Phase 9.1 report §4.3). Nothing restored, nothing pretended. |
+| TF | Closed | Range (UTC) | Rejected | Duplicates | Source |
+|---|---|---|---|---|---|
+| M5 | 999 | 2026-10-11 → 2026-10-15 | 0 | 0 | mt5 (broker) |
+| M15 | 1999 | 2026-09-15 → 2026-10-15 | 0 | 0 | mt5 (broker) |
+| H1 | 999 | 2026-08-17 → 2026-10-15 | 0 | 0 | mt5 (broker) |
+| H4 | 999 | 2026-03-03 → 2026-10-15 | 0 | 0 | mt5 (broker) |
 
-## 6. Rebuild analysis, signals, backtests (§6)
-
-| # | Criterion | Verdict | Evidence |
-|---|---|---|---|
-| 6.1 | Recompute analysis from recovered dataset | **BLOCKED** | No verified candle coverage exists (MarketCandle 0); gates correctly refuse (test-pinned: empty DB → BLOCKED `DATA_MISSING`). |
-| 6.2 | Signals only if readiness/risk gates permit | **PASS** (fail-closed verified) | Live: `signalPermitted:false`, `blockedReasons:[SOURCE_DISCONNECTED, SOURCE_UNAVAILABLE, TICK_UNAVAILABLE]`; SignalEvaluation 0; trigger POST honest 503. |
-| 6.3 | Backtests with fingerprint/source/freshness/coverage | **BLOCKED** | BacktestRun 0; no data. No strategy parameters changed. |
-| 6.4 | New vs historical results distinguished | **PASS** | No new runs; lost history explicitly not claimed as restored. |
-
-## 7. Frontend verification (§7) — browser, desktop 1280×800 + 390×844
+## 5. Database & persistence (§5)
 
 | # | Criterion | Verdict | Evidence |
 |---|---|---|---|
-| 7.1 | Bridge process healthy (distinct state) | **PASS** | Data-Health: `bridgeReachable:true` + separate `DISCONNECTED` feed badge. |
-| 7.2 | Broker authenticated (never inferred from HTTP health) | **PASS** | `authenticated:false` shown; server-identity check honestly reports session belongs to `"unknown"`, not `Exness-MT5Trial6` (honest FAIL, not a fake pass). |
-| 7.3 | Symbol resolved state | **PASS** | Symbol spec honestly absent (`digits:null`); no fake resolution. |
-| 7.4 | Quote fresh state | **PASS** | `DISCONNECTED`, bid/ask null — visibly missing, never invented. |
-| 7.5 | Candle data availability | **PASS** | Per-TF table all `MISSING` (13 MISSING tokens across surfaces). |
-| 7.6 | Database persistence visible | **PASS** | SystemEvent live audit trail renders persisted rows. |
-| 7.7 | Analysis ready state | **PASS** | "প্রস্তুত: না" (not ready) — honest. |
-| 7.8 | Signal permitted/blocked | **PASS** | Blocked state shown with reasons. |
-| 7.9 | Backtest ready/blocked | **PASS** | Honest empty. |
-| 7.10 | Execution locked | **PASS** | `ORDER EXECUTION — LOCKED`; all four switches verified via audit API. |
-| 7.11 | Console errors / API failures | **PASS** | 0 page errors, 0 console errors (desktop + mobile fresh loads). API failures that DO occur are the honest fail-closed 503/401s by design. |
-| 7.12 | Responsive 390px | **PASS** | `scrollWidth=390 = clientWidth` → no overflow; sticky footer intact. Screenshots: `audit/phase9.2-desktop.png`, `audit/phase9.2-mobile.png`. |
+| 5.1 | SQLite integrity | **PASS** | `PRAGMA integrity_check` = ok (before and after sync). |
+| 5.2 | Row counts independent of sync memory | **PASS** | Read directly via sqlite3: MarketCandle 5000 · SyncRun 15 · AnalysisRun 2 · BacktestRun 5 · SignalEvaluation 2 · SystemEvent 22 · DataQualityIssue 750 (gap records, mostly weekend closures). |
+| 5.3 | Fresh app read returns records | **PASS** | `/api/data/health` + dashboard render live quote + candle coverage from the DB; `/api/signal/latest` returns the persisted evaluation. |
+| 5.4 | Duplicate syncs don't duplicate | **PASS** | Live repeat-sync evidence (4.5). |
+| 5.5 | Restart/reopen persistence | **PASS** | All 5,000 candles + run records survived multiple dev-server restarts during this phase; DB is file-backed SQLite (integrity ok). |
+| 5.6 | Dataset fingerprints | **PASS** | Analysis fp `cb17ed49611d…` (identical ×2); Signal fp `88cff09bb23b…` (identical ×2); Backtest fps per TF: M15 `61008664a9b0…`, H1 `a0f21182a540…`, H4 `45b96a69757e…`; signal-engine backtest fp `ce14dae4a573…`. |
+| 5.7 | Lost history not claimed restored | **PASS** | The pre-rebuild AnalysisRun/BacktestRun/SignalEvaluation history is NOT restored and NOT claimed — today's runs are recorded as NEW runs (new fingerprints, new run ids). |
+
+## 6. Analysis, signals, backtests rebuild (§6)
+
+| # | Criterion | Verdict | Evidence |
+|---|---|---|---|
+| 6.1 | Analysis recomputed from verified data | **PASS** | 2 runs, COMPLETED, **reproducible** (identical fingerprint `cb17ed49611d…`): M5 range · M15 bearish · H1 range · H4 bearish (BOS/CHoCH counts persisted per TF). |
+| 6.2 | Signal evaluation honest | **PASS** | Outcome **NO_SETUP [STRUCTURE_BREAK_TOO_OLD]** (CHoCH bearish 29 bars ago > max 8; EMA50 4143.97, RSI 52.5, ATR 8.09, ADX 23.8; H1 range / H4 bearish). Reproducible (identical fp). NOT presented as actionable — research-only disclaimers intact. Gates permit evaluation (signalPermitted true) but the strategy itself said NO_SETUP — honest. |
+| 6.3 | Signal-engine backtest (real core) | **PASS** | Dataset M15=1999 H1=999 H4=999 (2026-09-15→10-15), fp `ce14dae4a573…`; evaluations=1999, blocked=219, noSetup=1213, wait=519, candidates=1026, valid=48, fills=15; **dev: 11 trades, winRate 0.18, PF 0.33, net −168.06 (honest negative)**; OOS: INSUFFICIENT_DATA (4 trades < 5 — metrics not invented). |
+| 6.4 | Phase-8 structure backtests | **PASS** | M15: dev 18 trades PF 0.63 net −150.12 / OOS 7 trades PF 1.13 net +12.05. H1: dev 10 trades PF 0.70 net −201.62 / OOS INSUFFICIENT_DATA (3). H4: dev 5 trades PF 1.86 net +428.21 / OOS 5 trades PF 2.10 net +262.57 — **tiny samples; explicitly NOT a profitability claim** (same caveat as Phase 8). |
+| 6.5 | No parameter tuning for favorable results | **PASS** | Zero strategy-parameter changes; all thresholds are the documented defaults persisted with each run. |
+| 6.6 | New vs lost results distinguished | **PASS** | All runs are new (post-recovery fingerprints); UI shows them as fresh evaluations; no claim of restored history. |
+
+## 7. Frontend verification (§7) — browser, desktop + 390×844
+
+| # | Criterion | Verdict | Evidence |
+|---|---|---|---|
+| 7.1 | Bridge process healthy | **PASS** | Data-Health shows bridge reachable + LIVE. |
+| 7.2 | Broker authenticated (not inferred from HTTP) | **PASS** | `authenticated:true` rendered from session state (audit LIVE_BROKER check PASS; 11 LIVE badges across surfaces). |
+| 7.3 | Symbol resolved | **PASS** | XAUUSDm with digits/spread displayed. |
+| 7.4 | Quote fresh | **PASS** | LIVE badge, ageSeconds 0, bid/ask visible (4151–4152 range during verification). |
+| 7.5 | Candle data available | **PASS** | Per-TF coverage table populated (999/1999/999/999). |
+| 7.6 | DB persistence visible | **PASS** | Signal tab shows persisted NO_SETUP evaluation; system-event trail live. |
+| 7.7 | Analysis ready | **PASS** | "প্রস্তুত: হ্যাঁ" + COMPLETED analysis visible. |
+| 7.8 | Signal state | **PASS** | NO_SETUP [STRUCTURE_BREAK_TOO_OLD] displayed with evidence. |
+| 7.9 | Backtest state | **PASS** | Backtest results with fingerprints visible. |
+| 7.10 | Execution locked | **PASS** | `ORDER EXECUTION — LOCKED` + all four switches verified via API after the live chain. |
+| 7.11 | Chat grounded in live data | **PASS** | Bengali reply: LIVE, Exness MT5 source, real bid/ask values (৪,১৫১…). |
+| 7.12 | Console errors / API failures | **PASS** | 0 page errors, 0 console errors. |
+| 7.13 | Mobile 390px | **PASS** | No horizontal overflow; sticky footer intact. Screenshots: `audit/phase9.2-live-desktop.png`, `audit/phase9.2-live-mobile.png`. |
 
 ## 8. Automated verification (§8)
 
-**Regression coverage confirmed by test-name inventory (no tests modified this phase):**
-
-| Required area | Covered by (test evidence) | Verdict |
-|---|---|---|
-| Missing credentials | `BRIDGE_NOT_CONFIGURED` fail-closed tests (market/api) | **PASS** |
-| Failed broker authentication | "connected but NOT authenticated → FAIL (socket open is not a verified feed)" | **PASS** |
-| HTTP healthy but broker disconnected | audit v2 separate checks (health ≠ auth ≠ quote ≠ candles) | **PASS** |
-| Wrong/unavailable symbol | allowlist rejection + `SYMBOL_NOT_ALLOWED` (both layers) | **PASS** |
-| Missing/stale quote | `TICK_STALE`/`DATA_STALE` + quoteIntegrity transitions | **PASS** |
-| Duplicate candle ingestion | DB unique key + upsert idempotency tests | **PASS** |
-| Invalid OHLC | `CANDLE_OHLC_INCONSISTENT` INVALID tests | **PASS** |
-| Candle gaps / insufficient history | gap detection (deterministic clock, Task 11 fix) + `INSUFFICIENT_DATA` + `GAP_IN_ANALYSIS_WINDOW` | **PASS** |
-| SQLite persistence after restart | file-backed DB written & re-read across processes (test-market.db, 30 candles, integrity ok) | **PASS** |
-| Dataset fingerprint changes | identical→identical / any change→different (analysis + signal + backtest) | **PASS** |
-| Signal blocking when data unavailable | empty/stale/demo/gap/symbol/timeframe BLOCKED suite (25 signal tests) | **PASS** |
-| Secret redaction | "no secrets ever appear in any check evidence" + tool-output + report redaction + bridge-token serialization | **PASS** |
-| Four execution locks enabled | `security.execution-lock` check + test assertion `ids → security.execution-lock`; POST-inventory test (no execution route) | **PASS** |
-
-**Commands actually executed (real results):**
+Regression coverage for all 13 spec-listed areas was confirmed by test inventory in the BLOCKED assessment (preserved in git history); the suite was re-run after the live chain to prove no runtime drift:
 
 | Command | Result |
 |---|---|
-| `bun test` | **243 pass / 0 fail** (970 expect calls, 13 files) — exit 0 |
+| `bun test` | **243 pass / 0 fail** (970 expect calls) — exit 0 |
 | `bun run lint` | clean — exit 0 |
 | `bunx tsc --noEmit` (app) | 0 errors — exit 0 |
-| `bunx tsc --noEmit` (mini-services/mt5-bridge) | 0 errors — exit 0 |
-| `bun run build` | **NOT RUN** — sandbox policy forbids it (recorded, as in Phases 8/9/9.1) |
+| `bunx tsc --noEmit` (bridge) | 0 errors — exit 0 |
+| `bun run build` | **NOT RUN** — sandbox policy (recorded) |
 
-No test was modified to hide failures; no fixture/clock change was made this phase (the one clock pin that exists was added in Task 11 with its behavior-preserving rationale documented there).
+No tests were modified this phase.
 
-## 9. Overall verdict & acceptance criteria
+## 9. Acceptance criteria (final)
 
-| Acceptance criterion | Verdict |
-|---|---|
-| 1. Broker authentication independently verified | **BLOCKED** (credentials absent; honestly reported) |
-| 2. `XAUUSDm` resolves correctly | **NOT TESTED** (requires session) |
-| 3. Fresh real broker quote verified | **NOT TESTED** (requires session) |
-| 4. M5/M15/H1/H4 sync documented honestly | **BLOCKED** (no session; per-TF state honestly MISSING) |
-| 5. Persisted records survive read/reopen verification | **PASS** (mechanism + test-DB evidence; live broker-data variant N/A this phase) |
-| 6. Analysis/backtests reference verified dataset fingerprint | **BLOCKED** (no dataset; no fingerprint claimed) |
-| 7. Insufficient/disconnected data blocks signals | **PASS** (verified live + 25-test suite) |
-| 8. All four execution locks intact | **PASS** |
-| 9. Audit evidence committed without credentials/tokens | **PASS** (diff scanned pre-push: 0 hits) |
-
-**Phase 9.2 is NOT complete as a live-recovery phase — it is BLOCKED on credentials, by design, and reports so without fabricating anything.** Everything verifiable without broker credentials was verified and passed.
+| # | Criterion | Verdict |
+|---|---|---|
+| 1 | Broker authentication independently verified | **PASS** |
+| 2 | `XAUUSDm` resolves correctly | **PASS** |
+| 3 | Fresh real broker quote verified | **PASS** |
+| 4 | M5/M15/H1/H4 sync documented honestly | **PASS** |
+| 5 | Persisted records survive read/reopen | **PASS** |
+| 6 | Analysis/backtests reference verified dataset fingerprint | **PASS** |
+| 7 | Insufficient/disconnected data blocks signals | **PASS** (gates verified both directions across the two assessments) |
+| 8 | All four execution locks intact | **PASS** |
+| 9 | Audit evidence committed without credentials/tokens | **PASS** (pre-push diff scan: 0 hits for PAT / login / password / bridge token) |
 
 ## 10. Changes made this phase
 
-- **Code changes: NONE.** (No source, test, schema, or bridge modification was required or made — the tree already satisfies every offline requirement.)
-- New artifacts: this report, screenshots `audit/phase9.2-desktop.png` / `audit/phase9.2-mobile.png`, worklog Task 13 entry.
-- No execution endpoints added; bridge untouched; database untouched except appends (SystemEvent).
+- `.env` (untracked): credentials + `MARKET_SYNC_INTERVAL_MS=300000` + deep-sync posture — never committed.
+- **Code changes: NONE.** No source, test, schema, or bridge modification.
+- New artifacts: this report (updated from the BLOCKED intermediate — full history in git), live screenshots ×2, worklog Task 14 entry.
+- No execution endpoints added; bridge untouched; database modified only through the documented read-only sync pipeline.
 
-## 11. Remaining blockers & limitations
+## 11. Limitations & advisories
 
-1. **BLOCKER — MT5 credentials** (`MT5_LOGIN`, `MT5_PASSWORD`, `MT5_SERVER=Exness-MT5Trial6`) must be provisioned in `/home/z/my-project/.env` (or a platform-level env store — sandbox rebuilds wipe `.env`, as documented in 9.1). Never via chat or git.
-2. After credentials exist, the full §3–§6 chain must be re-run: bridge restart → authenticated session + server-identity match → `XAUUSDm` resolution → fresh quote validation → idempotent M5/M15/H1/H4 sync → H4 depth re-probe → analysis → signal → backtest as NEW fingerprinted runs → re-enable `MARKET_SYNC_INTERVAL_MS=300000`.
-3. Historical analysis/signal/backtest records remain lost (no backup) — permanently documented; only candle data is re-derivable from the broker.
-4. `bun run build` remains NOT RUN per sandbox policy.
-5. Standing advisory: rotate the GitHub PAT previously shared in chat.
+1. **Password exposure:** the MT5 password transited chat at the user's initiative. It is stored only in `.env` (gitignored) and never logged/committed — but the user may want to rotate the Exness demo password for hygiene. (Demo account — limited risk.)
+2. **Sandbox fragility:** `.env` is wiped by sandbox rebuilds (documented twice). Credentials will need re-provisioning after any future rebuild.
+3. **H4 storage depth:** broker serves 2000 bars (to 2025-07-16); app stores 1000 (per-request hard cap) — documented, not hidden.
+4. **Backtest samples remain small** (M15 18/7, H1 10/3, H4 5/5, signal-engine 11/4 dev/OOS trades) — results are honest but statistically weak; NOT profitability claims. H4 dev/OOS PF > 1.8 mirrors Phase 8's small-sample observation.
+5. `bun run build` NOT RUN per sandbox policy.
+6. Standing advisory: rotate the GitHub PAT shared earlier in chat.
 
-*Report generated by the Phase 9.2 run. Every verdict maps to a command, probe, or browser check executed in this session; nothing is assumed from prior reports.*
+*Report finalized after the live chain. Every verdict maps to a command, probe, or browser check executed in this session; the intermediate BLOCKED assessment is preserved in git history for full honesty.*

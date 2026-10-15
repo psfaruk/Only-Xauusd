@@ -243,3 +243,27 @@ Stage Summary:
 - Phase 9.2 reported honestly as BLOCKED on credentials: everything verifiable without broker credentials PASSES (offline suite 243/243, lint/tsc clean, integrity ok, fail-closed gates verified live and by tests, four execution locks intact, frontend honest at desktop+mobile).
 - Acceptance criteria 1-4,6 BLOCKED/NOT TESTED (need authenticated session); 5,7,8,9 PASS.
 - Next action when credentials are provisioned in .env (never chat/git): re-run the full chain — bridge restart, authenticated session + server-identity match, XAUUSDm resolution, fresh quote validation, idempotent M5/M15/H1/H4 sync, H4 depth re-probe, then analysis/signal/backtest as NEW fingerprinted runs, re-enable MARKET_SYNC_INTERVAL_MS=300000.
+
+---
+Task ID: 14
+Agent: Z.ai Code (main orchestrator)
+Task: PHASE 9.2 completion — credentials provisioned by user; full live recovery chain executed (secure reconnection, verified market data, DB rehydration, analysis/signal/backtest rebuild)
+
+Work Log:
+- User provisioned MT5 credentials (login/server public knowledge; password handled securely). Written ONLY into .env via value-silent script; .env verified gitignored (git check-ignore); never printed, logged, staged, or committed. MARKET_SYNC_INTERVAL_MS=300000 enabled.
+- Bridge restarted (daemonized): connected:true, authenticated:true, source mt5, server identity = Exness-MT5Trial6 (exact match), 355 symbols, gateway 47.130.41.116, 0 reconnects.
+- Live quote verified: XAUUSDm bid 4151.423 / ask 4151.663 / spread 0.240 / digits 3, ts wall-clock fresh; app health: sourceClass broker, freshness LIVE, ageSeconds 0, signalPermitted true, blockedReasons [].
+- Sync chain: manual sync (M5 500/M15 337/H1 499/H4 500, 0 rejected 0 duplicates, +3/~1833 idempotent on re-run) -> 11 range-backfills to Nov 2025 (older ranges honestly RANGE_TOO_LARGE, 0 fabricated) -> deep sync with MARKET_MAX_CANDLES_PER_REQUEST=1000. Final coverage: M5 999 (10-11->10-15), M15 1999 (09-15->10-15), H1 999 (08-17->10-15), H4 999 (03-03->10-15); total 5000 broker candles; integrity ok.
+- H4 depth probe re-run: broker serves 2000 bars back to 2025-07-16 (455.7d; 3 suspicious gaps, 64 weekend); app stores 1000 (per-request cap) — documented.
+- Analysis 2x: COMPLETED, reproducible, fp cb17ed49611d (M5 range / M15 bearish / H1 range / H4 bearish).
+- Signal 2x: NO_SETUP [STRUCTURE_BREAK_TOO_OLD] (CHoCH 29 bars ago > 8 max; EMA50 4143.97 RSI 52.5 ATR 8.09 ADX 23.8), reproducible fp 88cff09bb23b; signal-engine backtest auto-run: dev 11 trades PF 0.33 net -168.06 (honest negative), OOS INSUFFICIENT_DATA (4 trades).
+- Phase-8 backtests x3: M15 dev 18t PF 0.63 -150.12 / OOS 7t PF 1.13 +12.05; H1 dev 10t PF 0.70 -201.62 / OOS INSUFFICIENT (3); H4 dev 5t PF 1.86 +428.21 / OOS 5t PF 2.10 +262.57 (tiny samples — NOT profitability claims). No strategy parameters changed.
+- Persistence: sqlite3-verified MarketCandle 5000, SyncRun 15, AnalysisRun 2, BacktestRun 5, SignalEvaluation 2, SystemEvent 22, DataQualityIssue 750; scheduled sync firing (MARKET_SYNC_SUCCESS in dev.log); all rows survive restarts (file-backed DB).
+- Browser E2E: 11 LIVE badges, authenticated:true, প্রস্তুত: হ্যাঁ, NO_SETUP signal displayed, chat grounded in live prices (Bid ৪,১৫১...), ORDER EXECUTION LOCKED, 0 console/page errors, mobile 390px no overflow; screenshots audit/phase9.2-live-{desktop,mobile}.png.
+- Automated verification re-run after live chain: bun test 243/243 exit 0, eslint clean, tsc app 0 errors, tsc bridge 0 errors; build NOT RUN (sandbox rule). No tests modified.
+- Report audit/phase9.2-live-data-recovery-report.md updated to the live-recovery final (BLOCKED intermediate preserved in git history); all 9 acceptance criteria PASS. Pre-push secret scan: 0 PAT/login/password/bridge-token hits in diff. Commit + push.
+
+Stage Summary:
+- LIVE RECOVERY COMPLETE AND VERIFIED: authenticated Exness-MT5Trial6 session, XAUUSDm resolved, fresh broker quotes, 5,000 verified candles (M5/M15/H1/H4), integrity-ok SQLite, analysis/signal/backtest rebuilt as NEW fingerprinted runs, fail-closed gates proven both directions, four execution locks intact, frontend honest at desktop+mobile, scheduled 5-min sync active.
+- Honest negatives preserved (M15/H1/signal-engine dev results negative; small samples explicitly not profitability claims); lost pre-rebuild run history NOT claimed restored.
+- Advisory: password transited chat at user's initiative (demo account) — rotate if concerned; sandbox rebuilds will wipe .env again (re-provision then re-run this chain).
