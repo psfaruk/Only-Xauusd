@@ -42,14 +42,14 @@ function bar(offsetBars: number, o: number, h: number, l: number, c: number) {
 describe('paper outcome resolution — pure walk (synthetic bars)', () => {
   // BUY setup: entryReference 2650, SL 2640, target 2670, invalidation 2645.
   test('SL touched → stopped, exit at SL', () => {
-    const r = resolvePaperOutcome('BUY', 2650, 2640, 2670, 2645, [bar(1, 2650, 2652, 2639.5, 2644)], DECISION_SEC + 20 * M15, FIXED_NOW_SEC);
+    const r = resolvePaperOutcome('BUY', 2650, 2640, 2670, 2645, [bar(1, 2650, 2652, 2639.5, 2644)], DECISION_SEC + 20 * M15, FIXED_NOW_SEC, DECISION_SEC + M15 + 300);
     expect(r.outcome).toBe('stopped');
     expect(r.exitPrice).toBe(2640);
     expect(r.collision).toBe(false);
   });
 
   test('SL and TP touched in ONE bar → stopped with collision=true (conservative)', () => {
-    const r = resolvePaperOutcome('BUY', 2650, 2640, 2670, 2645, [bar(1, 2650, 2675, 2635, 2660)], DECISION_SEC + 20 * M15, FIXED_NOW_SEC);
+    const r = resolvePaperOutcome('BUY', 2650, 2640, 2670, 2645, [bar(1, 2650, 2675, 2635, 2660)], DECISION_SEC + 20 * M15, FIXED_NOW_SEC, DECISION_SEC + M15 + 300);
     expect(r.outcome).toBe('stopped');
     expect(r.exitPrice).toBe(2640);
     expect(r.collision).toBe(true);
@@ -57,25 +57,25 @@ describe('paper outcome resolution — pure walk (synthetic bars)', () => {
   });
 
   test('close back through the broken level (no SL touch) → invalidated at that close', () => {
-    const r = resolvePaperOutcome('BUY', 2650, 2640, 2670, 2645, [bar(1, 2648, 2649, 2644.5, 2644.2)], DECISION_SEC + 20 * M15, FIXED_NOW_SEC);
+    const r = resolvePaperOutcome('BUY', 2650, 2640, 2670, 2645, [bar(1, 2648, 2649, 2644.5, 2644.2)], DECISION_SEC + 20 * M15, FIXED_NOW_SEC, DECISION_SEC + M15 + 300);
     expect(r.outcome).toBe('invalidated');
     expect(r.exitPrice).toBe(2644.2);
   });
 
   test('target touched → targeted at the target level', () => {
-    const r = resolvePaperOutcome('BUY', 2650, 2640, 2670, 2645, [bar(1, 2652, 2671, 2651, 2668)], DECISION_SEC + 20 * M15, FIXED_NOW_SEC);
+    const r = resolvePaperOutcome('BUY', 2650, 2640, 2670, 2645, [bar(1, 2652, 2671, 2651, 2668)], DECISION_SEC + 20 * M15, FIXED_NOW_SEC, DECISION_SEC + M15 + 300);
     expect(r.outcome).toBe('targeted');
     expect(r.exitPrice).toBe(2670);
   });
 
   test('SL checked BEFORE invalidation close in the same bar (conservative order)', () => {
     // low touches SL AND close < invalidation → stopped wins.
-    const r = resolvePaperOutcome('BUY', 2650, 2640, 2670, 2645, [bar(1, 2648, 2649, 2639, 2643)], DECISION_SEC + 20 * M15, FIXED_NOW_SEC);
+    const r = resolvePaperOutcome('BUY', 2650, 2640, 2670, 2645, [bar(1, 2648, 2649, 2639, 2643)], DECISION_SEC + 20 * M15, FIXED_NOW_SEC, DECISION_SEC + M15 + 300);
     expect(r.outcome).toBe('stopped');
   });
 
   test('no hits, expiry not reached → unresolved (open)', () => {
-    const r = resolvePaperOutcome('BUY', 2650, 2640, 2670, 2645, [bar(1, 2652, 2658, 2650, 2655)], DECISION_SEC + 20 * M15, DECISION_SEC + 3 * M15);
+    const r = resolvePaperOutcome('BUY', 2650, 2640, 2670, 2645, [bar(1, 2652, 2658, 2650, 2655)], DECISION_SEC + 20 * M15, DECISION_SEC + 3 * M15, DECISION_SEC + M15 + 300);
     expect(r.outcome).toBe('unresolved');
     expect(r.exitPrice).toBeNull();
     expect(r.observations).toBe(1);
@@ -84,7 +84,7 @@ describe('paper outcome resolution — pure walk (synthetic bars)', () => {
   test('no hits, expiry passed → expired at the last closed bar close', () => {
     const bars = [bar(1, 2652, 2658, 2650, 2655), bar(2, 2655, 2659, 2651, 2657)];
     const expiry = DECISION_SEC + 3 * M15;
-    const r = resolvePaperOutcome('BUY', 2650, 2640, 2670, 2645, bars, expiry, DECISION_SEC + 10 * M15);
+    const r = resolvePaperOutcome('BUY', 2650, 2640, 2670, 2645, bars, expiry, DECISION_SEC + 10 * M15, DECISION_SEC + M15 + 300);
     expect(r.outcome).toBe('expired');
     expect(r.exitPrice).toBe(2657);
     expect(r.observations).toBe(2);
@@ -92,14 +92,14 @@ describe('paper outcome resolution — pure walk (synthetic bars)', () => {
 
   test('expiry passed with NO observable bars → expired, exit null (never fabricated)', () => {
     const expiry = DECISION_SEC + 3 * M15;
-    const r = resolvePaperOutcome('BUY', 2650, 2640, 2670, 2645, [], expiry, DECISION_SEC + 10 * M15);
+    const r = resolvePaperOutcome('BUY', 2650, 2640, 2670, 2645, [], expiry, DECISION_SEC + 10 * M15, DECISION_SEC + M15 + 300);
     expect(r.outcome).toBe('expired');
     expect(r.exitPrice).toBeNull();
     expect(r.rule).toContain('NO post-signal candles');
   });
 
   test('SELL mirror: target below, SL above, invalidation above', () => {
-    const r = resolvePaperOutcome('SELL', 2650, 2660, 2630, 2655, [bar(1, 2650, 2651, 2629, 2640)], DECISION_SEC + 20 * M15, FIXED_NOW_SEC);
+    const r = resolvePaperOutcome('SELL', 2650, 2660, 2630, 2655, [bar(1, 2650, 2651, 2629, 2640)], DECISION_SEC + 20 * M15, FIXED_NOW_SEC, DECISION_SEC + M15 + 300);
     expect(r.outcome).toBe('targeted');
     expect(r.exitPrice).toBe(2630);
   });
@@ -134,6 +134,11 @@ async function insertSetupEvaluation(opts: {
   invalidationLevel: number;
   decisionSec: number;
   expirySec: number;
+  /** Phase 10.3-B fixture update (disclosed): explicit creation instant —
+   *  production rows are always created AFTER the decision close (scheduler
+   *  300 s) and BEFORE the first post-decision bar closes; the walk's new
+   *  publication bound depends on it. Normal cadence: decision close + 300 s. */
+  createdAtSec: number;
 }): Promise<SetupFixture> {
   const decisionIso = new Date(opts.decisionSec * 1000);
   // Phase 10.3-A fixture update (disclosed): the real engine ALWAYS emits the
@@ -178,6 +183,7 @@ async function insertSetupEvaluation(opts: {
         entryReferenceText: String(opts.entryReference),
       }),
       decisionCandleTimeUtc: decisionIso,
+      createdAt: new Date(opts.createdAtSec * 1000),
       setupKnownAtUtc: new Date((opts.decisionSec + M15) * 1000),
       expiryUtc: new Date(opts.expirySec * 1000),
       quote: '{}',
@@ -210,7 +216,7 @@ describe('paper tracking pipeline — DB integration (synthetic rows, isolated t
       id: 'paper-test-targeted', direction: 'BUY',
       entryReference: 2650, stopLoss: 2640, target: 2670,
       invalidationLevel: 2645,
-      decisionSec, expirySec: decisionSec + 12 * M15,
+      decisionSec, createdAtSec: decisionSec + M15 + 300, expirySec: decisionSec + 12 * M15,
     });
     await insertM15Candle(decisionSec + M15, 2650, 2653, 2649, 2652);
     await insertM15Candle(decisionSec + 2 * M15, 2652, 2671, 2651, 2668); // target touched
@@ -243,7 +249,7 @@ describe('paper tracking pipeline — DB integration (synthetic rows, isolated t
       id: 'paper-test-stopped', direction: 'BUY',
       entryReference: 2650, stopLoss: 2640, target: 2670,
       invalidationLevel: 2645,
-      decisionSec, expirySec: decisionSec + 12 * M15,
+      decisionSec, createdAtSec: decisionSec + M15 + 300, expirySec: decisionSec + 12 * M15,
     });
     await insertM15Candle(decisionSec + M15, 2650, 2675, 2635, 2660); // both touched → stopped
 
@@ -263,7 +269,7 @@ describe('paper tracking pipeline — DB integration (synthetic rows, isolated t
       id: 'paper-test-invalidated', direction: 'BUY',
       entryReference: 2650, stopLoss: 2640, target: 2670,
       invalidationLevel: 2645,
-      decisionSec, expirySec: decisionSec + 12 * M15,
+      decisionSec, createdAtSec: decisionSec + M15 + 300, expirySec: decisionSec + 12 * M15,
     });
     await insertM15Candle(decisionSec + M15, 2648, 2649, 2644.0, 2644.2); // close < 2645, low > 2640 (valid OHLC)
 
@@ -280,7 +286,7 @@ describe('paper tracking pipeline — DB integration (synthetic rows, isolated t
       id: 'paper-test-expired-empty', direction: 'BUY',
       entryReference: 2650, stopLoss: 2640, target: 2670,
       invalidationLevel: 2645,
-      decisionSec, expirySec: decisionSec + 6 * M15, // long past, no candles inserted
+      decisionSec, createdAtSec: decisionSec + M15 + 300, expirySec: decisionSec + 6 * M15, // long past, no candles inserted
     });
     const out = await trackPaperSignals(db, { symbol: 'XAUUSDm', now: () => FIXED_NOW_SEC * 1000 });
     expect(out.resolved.expired).toBe(1);
@@ -298,7 +304,7 @@ describe('paper tracking pipeline — DB integration (synthetic rows, isolated t
       id: 'paper-test-open', direction: 'BUY',
       entryReference: 2650, stopLoss: 2640, target: 2670,
       invalidationLevel: 2645,
-      decisionSec, expirySec,
+      decisionSec, createdAtSec: decisionSec + M15 + 300, expirySec,
     });
     await insertM15Candle(decisionSec + M15, 2652, 2658, 2650, 2655); // no hit
     await insertM15Candle(decisionSec + 2 * M15, 2655, 2659, 2651, 2657); // no hit

@@ -25,6 +25,16 @@
  *       2. M15 CLOSE back through the broken level → invalidated
  *       3. TP touched → targeted
  *     SL+TP in one bar → stopped (collision rule, same as the backtests).
+ *   · Phase 10.3-B TEMPORAL INVARIANT (setup-chronology/1): a bar may
+ *     contribute to the outcome ONLY IF its close instant is strictly AFTER
+ *     the row's signalCreatedAtUtc (publication — a bar that closed before
+ *     the signal existed is pre-publication information and is NEVER walked),
+ *     its open instant is strictly BEFORE expiryUtc (the 12-bar window), and
+ *     its close instant is ≤ now (a bar cannot be used before it has truly
+ *     closed). Ambiguous timestamps, corrupt anchors or unordered bars →
+ *     FAIL-CLOSED (row error, no advance, never a resolution on ambiguous
+ *     data). Gaps (absent bars, e.g. the daily break) are honest
+ *     non-observations, never errors.
  *   · Expiry passing without any hit → expired (exit at the last closed bar's
  *     close; null when no bars were available — never fabricated).
  *   · Costs: the Phase 10 conservative round trip; result recorded in
@@ -149,6 +159,9 @@ interface AdvanceResult {
   outcome: 'stopped' | 'targeted' | 'invalidated' | 'expired' | 'unresolved';
   exitPrice: number | null;
   resolutionBarTime: number | null;
+  /** Phase 10.3-B: the newest bar actually WALKED (post-publication,
+   *  pre-expiry, closed) — null when none qualified. */
+  lastWalkedBarTime: number | null;
   observations: number;
   collision: boolean;
   rule: string;
@@ -167,12 +180,38 @@ export function resolvePaperOutcome(
   bars: CandleBar[], // CLOSED bars strictly AFTER the decision bar, ascending
   expiryUtcSec: number,
   nowUtcSec: number,
+  /** Signal-creation instant (epoch sec) — the publication lower bound
+   *  (Phase 10.3-B). Bars closing at/before this instant are pre-publication
+   *  and can never contribute to the outcome. */
+  signalCreatedUtcSec: number,
 ): AdvanceResult {
+  // ▫▫ Chronology integrity — fail-closed on unreliable ordering ▫▫▫▫▫▫▫▫▫▫
+  // A bar sequence that is not strictly ascending, duplicate-free and
+  // M15-grid aligned means the timestamps cannot be trusted: refuse to walk
+  // (throw → the caller records a row error and leaves the row untouched).
+  let prevSec: number | null = null;
+  for (const b of bars) {
+    if (!Number.isInteger(b.timeUtcSec) || b.timeUtcSec <= 0 || b.timeUtcSec % M15_SEC !== 0) {
+      throw new Error(`paper-walk chronology: bar time ${b.timeUtcSec} is not on the M15 UTC grid`);
+    }
+    if (prevSec !== null && b.timeUtcSec <= prevSec) {
+      throw new Error(`paper-walk chronology: bar order not strictly ascending (${prevSec} → ${b.timeUtcSec})`);
+    }
+    prevSec = b.timeUtcSec;
+  }
+
   let collision = false;
   let lastClose: number | null = null;
   let lastTime: number | null = null;
+  let walked = 0;
 
   for (const bar of bars) {
+    const closeSec = bar.timeUtcSec + M15_SEC;
+    // ▫▫ Phase 10.3-B temporal invariant — availability bounds ▫▫▫▫▫▫▫▫
+    if (closeSec <= signalCreatedUtcSec) continue; // pre-publication bar — excluded
+    if (bar.timeUtcSec >= expiryUtcSec) continue;   // post-expiry bar — excluded
+    if (closeSec > nowUtcSec) continue;             // not truly closed at walk time
+    walked += 1;
     lastClose = bar.close;
     lastTime = bar.timeUtcSec;
     const hitStop = direction === 'BUY' ? bar.low <= stopLoss : bar.high >= stopLoss;
@@ -186,7 +225,8 @@ export function resolvePaperOutcome(
         outcome: 'stopped',
         exitPrice: stopLoss,
         resolutionBarTime: bar.timeUtcSec,
-        observations: bars.indexOf(bar) + 1,
+        lastWalkedBarTime: bar.timeUtcSec,
+        observations: walked,
         collision,
         rule: collision
           ? 'stop and target both touched in one bar → LOSS assumed (conservative collision rule)'
@@ -198,7 +238,8 @@ export function resolvePaperOutcome(
         outcome: 'invalidated',
         exitPrice: bar.close,
         resolutionBarTime: bar.timeUtcSec,
-        observations: bars.indexOf(bar) + 1,
+        lastWalkedBarTime: bar.timeUtcSec,
+        observations: walked,
         collision: false,
         rule: 'M15 close back through the broken level — zone invalidated (engine rule)',
       };
@@ -208,7 +249,8 @@ export function resolvePaperOutcome(
         outcome: 'targeted',
         exitPrice: target,
         resolutionBarTime: bar.timeUtcSec,
-        observations: bars.indexOf(bar) + 1,
+        lastWalkedBarTime: bar.timeUtcSec,
+        observations: walked,
         collision: false,
         rule: 'target touched',
       };
@@ -218,9 +260,10 @@ export function resolvePaperOutcome(
   if (nowUtcSec >= expiryUtcSec) {
     return {
       outcome: 'expired',
-      exitPrice: lastClose, // null when no bars were available — never fabricated
+      exitPrice: lastClose, // null when no post-publication bars were available — never fabricated
       resolutionBarTime: lastTime,
-      observations: bars.length,
+      lastWalkedBarTime: lastTime,
+      observations: walked,
       collision: false,
       rule: lastClose === null
         ? 'expiry passed with NO post-signal candles available — outcome unobservable, P/L stays null'
@@ -232,7 +275,8 @@ export function resolvePaperOutcome(
     outcome: 'unresolved',
     exitPrice: null,
     resolutionBarTime: null,
-    observations: bars.length,
+    lastWalkedBarTime: lastTime,
+    observations: walked,
     collision: false,
     rule: 'open — no stop/target/invalidation yet, expiry not passed',
   };
@@ -377,12 +421,43 @@ export async function trackPaperSignals(
       // ── Advance: the paper row's OWN frozen geometry ────────────────
       // (anchor = the row's decision candle — never a later evaluation's).
       const decisionSec = Math.floor(paper.decisionCandleTimeUtc.getTime() / 1000);
+      const knownSec = Math.floor(paper.setupKnownAtUtc.getTime() / 1000);
+      const createSec = Math.floor(paper.signalCreatedAtUtc.getTime() / 1000);
       const expirySec = Math.floor(paper.expiryUtc.getTime() / 1000);
-      const uptoSec = Math.min(expirySec, nowUtcSec);
-      if (uptoSec <= decisionSec) {
-        result.advanced += 1;
-        continue; // nothing observable yet
+
+      // ── Phase 10.3-B: chronology integrity — FAIL-CLOSED ─────────────
+      // The frozen anchors must be internally consistent before anything is
+      // walked. A row whose creation predates its own setup-known instant, or
+      // whose anchors violate the engine formula (knownAt = decisionOpen+900),
+      // has ambiguous timestamps: record a row error and NEVER advance it.
+      if (createSec < knownSec) {
+        result.errors.push(
+          `${row.id}: paper-walk chronology: signalCreatedAtUtc (${createSec}) < setupKnownAtUtc (${knownSec}) — creation predates the knowable setup (fail-closed, no advance)`,
+        );
+        continue;
       }
+      if (knownSec !== decisionSec + M15_SEC) {
+        result.errors.push(
+          `${row.id}: paper-walk chronology: setupKnownAtUtc ≠ decisionCandleTimeUtc + 900s (${knownSec} vs ${decisionSec + M15_SEC}) — corrupt anchor (fail-closed, no advance)`,
+        );
+        continue;
+      }
+      if (nowUtcSec <= createSec) {
+        result.advanced += 1;
+        continue; // nothing can have closed after the publication instant yet
+      }
+
+      // Phase 10.3-B temporal bounds (bar-open instants):
+      //   lower: open > decisionOpen (never the decision bar itself) AND
+      //          open > creation − 900  ⟺  close > creation (publication)
+      //   upper: open < expiry (only the 12-bar window) AND open ≤ now.
+      // resolvePaperOutcome independently enforces the same bounds — the
+      // query bound keeps the fetch minimal; the pure function is the
+      // authoritative guard (defense in depth, directly unit-tested).
+      const lowerOpenMs = Math.max(
+        paper.decisionCandleTimeUtc.getTime(),
+        paper.signalCreatedAtUtc.getTime() - M15_SEC * 1000,
+      );
       const candleRows = await db.marketCandle.findMany({
         where: {
           symbol: paper.symbol,
@@ -390,7 +465,11 @@ export async function trackPaperSignals(
           isForming: false,
           validationStatus: 'VALID',
           source: 'bridge-mt5',
-          candleTimeUtc: { gt: paper.decisionCandleTimeUtc, lte: new Date(uptoSec * 1000) },
+          candleTimeUtc: {
+            gt: new Date(lowerOpenMs),
+            lt: paper.expiryUtc,
+            lte: new Date(nowUtcSec * 1000),
+          },
         },
         orderBy: { candleTimeUtc: 'asc' },
         take: maxBarsPerSignal,
@@ -412,15 +491,21 @@ export async function trackPaperSignals(
         bars,
         expirySec,
         nowUtcSec,
+        createSec,
       );
 
       const update: Record<string, unknown> = {
         observations: adv.observations,
-        lastCheckedBarTimeUtc: bars.length ? new Date(bars[bars.length - 1].timeUtcSec * 1000) : null,
+        // last bar actually WALKED (post-publication, pre-expiry, closed) —
+        // never a fetched-but-excluded bar
+        lastCheckedBarTimeUtc: adv.lastWalkedBarTime !== null ? new Date(adv.lastWalkedBarTime * 1000) : null,
         details: JSON.stringify({
           costLabels: costs.labels,
           resolutionRule: adv.rule,
           collision: adv.collision,
+          // Phase 10.3-B: the publication bound is documented on the row
+          signalCreatedUtcSec: createSec,
+          walkLowerBoundOpenUtcSec: Math.floor(lowerOpenMs / 1000),
         }),
       };
 
