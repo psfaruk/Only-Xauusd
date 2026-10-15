@@ -347,3 +347,24 @@ Stage Summary:
 - AUDIT-ONLY COMPLETE: 3 MEDIUM findings (F1 level precision, F2 single-target scope, F3 setup-ID/paper-row duplication), 4 LOW, 5 INFO verified-correct. Phase 10.2 pre-registered protocol UNAFFECTED — no constant, rule, threshold or lock touched; verdict logic provably immune to all findings (first-open dedupe + float-consistent metrics).
 - Phase 10.3 plan (authorization-gated, nothing implemented): presentation quantization → setupFingerprint column + paper-row dedupe → walk-time lower bound → rules snapshot + dashboard fields → optional dead-schema cleanup; tests-first, same-data before/after.
 - Files changed: NONE (report + 2 screenshots only). DB: read-only. Push: NOT performed.
+
+---
+Task ID: 19
+Agent: Z.ai Code (main orchestrator)
+Task: PHASE 10.3-A — Setup Identity & Deduplication (authorized implementation; baseline 3bea601 + Phase 10.2 protocol intact)
+
+Work Log:
+- Baseline verification FIRST: HEAD 3bea601 matched the audit report, working tree clean, db:push-managed migration state, 4 execution locks intact, PaperSignalOutcome 0 rows — no stop condition triggered.
+- Read-only live capture: one logical setup (BOS/bearish 4144.821, break 16:00Z) evaluated 14+ times across 4 decision candles (16:00×2, 16:15×3, 16:30×3, 16:45×3+) — the ground truth for the identity design (decision candle and all variable tick data EXCLUDED from the key).
+- Test-first design note audit/phase10.3a-setup-identity-design.md written BEFORE any implementation (fingerprint fields, exclusions with reasons, new-setup conditions, migration plan, full test plan).
+- Implementation: src/lib/signal/setup-identity.ts (pure sha256 identity, setup-identity/1, fail-closed NULL on incomplete identity); additive migration reviewed-then-applied (2 ADD COLUMN + 1 CREATE UNIQUE INDEX, record folder 20261015120000_phase10_3a_setup_fingerprint); SignalEvaluation.setupFingerprint (not unique — audit trail) + PaperSignalOutcome.setupFingerprint @unique (one row per setup EVER); saveSignalEvaluation/service pass executionTimeframe; trackPaperSignals rewrite (evaluationId lookup first for legacy rows, P2002 → duplicatesSuppressed, resolved-found → immutable skip, advance by the paper row's OWN frozen geometry with recomputed riskPrice = engine formula).
+- One regression fixed during work: instrumentation.ts's Phase-10 paper import needed the same NEXT_RUNTIME==='nodejs' guard (setup-identity's node:crypto entered paper.ts's chain; Edge compile clean again after fix, dev.log verified error-free post-restart).
+- Tests: new tests/signal/setup-identity.test.ts — 19 tests covering all 8 user scenarios (S1-S8) + D1 determinism, D2 persisted-vs-recomputed consistency, D3 fail-closed, D4 before/after on the same persisted dataset (11-row cluster: 11 rows → 1, identical counted/metrics/verdict, repeats 10 → 0). Disclosed fixture update in paper.test.ts (complete structure-event identity + geometry-consistent riskPrice — old fixture said 12 where geometry implies 10; assertions preserved in intent).
+- Full verification: bun test 336/336 (317 pre-existing + 19 new), eslint clean, tsc app+bridge 0 errors, dev.log clean after restart, live comparison script (read-only) run: 17 evaluations → 2 setups, cluster 14→1; forward verdict inputs identical (0/0/IN_PROGRESS); live cross-version proof — the NEW code path persisted fingerprint 730259ec7b36… byte-identical to the recomputation from legacy rows' evidence.
+- Browser E2E: desktop 1280×800 + mobile 390×844 — page 200, validation tab honest-empty (প্রি-রেজিস্টার্ড + পর্যবেক্ষণ চলছে, 0/20), signal tab renders the latest evaluation, 0 page errors, no mobile overflow (390=390), footer intact; screenshots audit/phase10.3a-validation-{desktop,mobile}.png.
+- Pre-commit scans: 0 secret hits (PAT/login/password/bridge-token), 0 order/trade/position endpoints; paper-protocol.ts/core.ts/rules.ts/types.ts/config.ts/forward.ts verified NOT in the changed list.
+
+Stage Summary:
+- Phase 10.3-A COMPLETE: the same logical setup can never produce a second paper row (DB-enforced, race-proof via P2002), while genuine new setups (new structure event / new strategy version / BUY vs SELL) always get their own row. Legacy 17 rows untouched (NULL fingerprints, per-evaluation path preserved). Phase 10.2 pre-registered protocol byte-identical — verdict inputs unchanged on the live dataset (0 paper rows, IN_PROGRESS).
+- Local commit only — NO PUSH (still gated on GitHub credentials via the platform's secure mechanism, never chat). No order execution; four locks intact; no data deleted; .env untouched.
+- Residual risks disclosed in audit/phase10.3a-setup-identity-dedup.md §6 (identity-version boundary, backfill owner semantics, strategy-version boundary, live dedup effect unobservable until the first SETUP, riskPrice source change, TF-label source).

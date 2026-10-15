@@ -7,33 +7,48 @@
  * exists anywhere in this project.
  *
  * Semantics (documented, deterministic):
- *   · ONE row per signal evaluation — unique `signalEvaluationId` makes
- *     duplicate outcome counting IMPOSSIBLE by construction. Resolved rows
- *     are IMMUTABLE and never reprocessed.
+ *   · Phase 10.3-A: ONE paper row per LOGICAL SETUP (unique setupFingerprint
+ *     at the database level — open/counted/resolved all block re-creation).
+ *     Repeated evaluations of the same setup (same or different decision
+ *     candle, same or different instant) are suppressed repeats. The row is
+ *     created by the first-processed evaluation and is immutable thereafter;
+ *     every later evaluation of the same setup ADVANCES that same row.
+ *   · Legacy rows without a fingerprint keep the per-evaluation path
+ *     (findUnique by signalEvaluationId) — never rewritten, never backfilled.
+ *   · Resolved rows are IMMUTABLE and never reprocessed.
  *   · Paper entry = `levels.entryReference` (the spread-adjusted reference
  *     the live engine published at signal time) ± slippage.
- *   · Subsequent CLOSED verified M15 bars (after the decision bar) are walked
- *     chronologically; on each bar, in conservative order:
+ *   · Subsequent CLOSED verified M15 bars are walked from the PAPER ROW's OWN
+ *     decision candle (Phase 10.3-A: the anchor never drifts to a later
+ *     evaluation's decision candle); on each bar, in conservative order:
  *       1. SL touched  → stopped   (loss assumed first — conservative)
- *       2. M15 CLOSE back through the broken level (evidence.structureEvent
- *          .level) → invalidated (exit at that bar's close)
+ *       2. M15 CLOSE back through the broken level → invalidated
  *       3. TP touched → targeted
  *     SL+TP in one bar → stopped (collision rule, same as the backtests).
- *   · Expiry (`expiryUtc` from the engine) passing without any hit → expired
- *     (exit at the last closed bar's close; null when no bars were available —
- *     never fabricated).
- *   · Costs: the Phase 10 conservative round trip (spread + 2×slippage +
- *     commission, default commission 0) — the same convention as the
- *     validation harness. entryReference already contains the entry-side
- *     half spread; the overlap is knowingly borne (pessimistic, documented).
- *   · Result recorded in R-multiples (net / riskPrice) — no monetary claim.
+ *   · Expiry passing without any hit → expired (exit at the last closed bar's
+ *     close; null when no bars were available — never fabricated).
+ *   · Costs: the Phase 10 conservative round trip; result recorded in
+ *     R-multiples (net / riskPrice recomputed from the row's own frozen
+ *     geometry — the engine's exact risk formula).
  */
 
 import type { PrismaClient } from '@prisma/client';
 import { baselineCostModel, roundTripCost, type CostModel } from '@/lib/backtest/cost-model';
+import { buildStrategyRules } from './rules';
+import { setupFingerprintFromEvidence } from './setup-identity';
 import type { SignalEvaluation, SignalLevels, SignalEvidence } from './types';
 
 const M15_SEC = 900;
+
+/** Prisma unique-constraint violation (P2002) — the DB-level race guard. */
+function isUniqueViolation(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    (err as { code?: string }).code === 'P2002' &&
+    /unique constraint/i.test(String((err as Error).message))
+  );
+}
 
 export interface PaperTrackOptions {
   symbol?: string;
@@ -52,12 +67,17 @@ export interface PaperTrackResult {
   advanced: number;
   resolved: { stopped: number; targeted: number; invalidated: number; expired: number };
   skippedResolved: number;
+  /** Phase 10.3-A: repeated evaluations of an already-tracked logical setup
+ *      — suppressed by the unique setupFingerprint constraint, never a second
+ *      paper row (includes the concurrent-race case). */
+  duplicatesSuppressed: number;
   errors: string[];
 }
 
 interface ParsedSetup {
   evaluationId: string;
   symbol: string;
+  strategyVersion: string;
   direction: 'BUY' | 'SELL';
   createdAt: Date;
   decisionCandleTime: Date;
@@ -72,6 +92,7 @@ interface ParsedSetup {
 function parseSetupRow(row: {
   id: string;
   symbol: string;
+  strategyVersion: string;
   outcome: string;
   createdAt: Date;
   decisionCandleTimeUtc: Date | null;
@@ -98,6 +119,7 @@ function parseSetupRow(row: {
   return {
     evaluationId: row.id,
     symbol: row.symbol,
+    strategyVersion: row.strategyVersion,
     direction: levels.direction,
     createdAt: row.createdAt,
     decisionCandleTime: row.decisionCandleTimeUtc,
@@ -256,6 +278,7 @@ export async function trackPaperSignals(
     advanced: 0,
     resolved: { stopped: 0, targeted: 0, invalidated: 0, expired: 0 },
     skippedResolved: 0,
+    duplicatesSuppressed: 0,
     errors: [],
   };
 
@@ -275,46 +298,86 @@ export async function trackPaperSignals(
       if (!setup) continue;
       result.scanned += 1;
 
-      const existing = await db.paperSignalOutcome.findUnique({
+      // ── Phase 10.3-A: setup-identity deduplication ────────────────────
+      // Per-evaluation link first (legacy rows keep this path untouched).
+      let paper = await db.paperSignalOutcome.findUnique({
         where: { signalEvaluationId: setup.evaluationId },
       });
-      if (existing && existing.status === 'resolved') {
+      if (paper && paper.status === 'resolved') {
         result.skippedResolved += 1; // DUPLICATE PREVENTION — immutable outcome
         continue;
       }
 
-      if (!existing) {
-        await db.paperSignalOutcome.create({
-          data: {
-            signalEvaluationId: setup.evaluationId,
-            symbol: setup.symbol,
-            direction: setup.direction,
-            signalCreatedAtUtc: setup.createdAt,
-            decisionCandleTimeUtc: setup.decisionCandleTime,
-            setupKnownAtUtc: setup.setupKnownAt,
-            expiryUtc: setup.expiry,
-            datasetFingerprint: setup.datasetFingerprint,
-            inputFingerprint: setup.inputFingerprint || '',
-            sourceCandleRange: JSON.stringify({
-              execution: setup.evidence?.executionWindow ?? null,
-              h1: setup.evidence?.h1Window ?? null,
-              h4: setup.evidence?.h4Window ?? null,
-            }),
-            entryReference: setup.levels.entryReference,
-            stopLoss: setup.levels.stopLoss,
-            target: setup.levels.target,
-            invalidationLevel: invalidationLevelOf(setup),
-            status: 'open',
-            modeledCostsPrice: roundTripCost(costs),
-            details: JSON.stringify({ costLabels: costs.labels }),
-          },
+      if (!paper) {
+        // Compute the logical setup identity from the row's OWN evidence and
+        // strategy version (deterministic; NULL = unidentifiable → fail-closed,
+        // never a guessed identity, never a second paper row).
+        const setupFingerprint = setupFingerprintFromEvidence({
+          symbol: setup.symbol,
+          timeframe: buildStrategyRules().executionTf,
+          strategyVersion: setup.strategyVersion,
+          evidence: setup.evidence,
         });
-        result.newlyOpened += 1;
+        if (setupFingerprint === null) {
+          result.errors.push(
+            `${row.id}: unidentifiable setup — no paper row (fail-closed: incomplete structure-event identity)`,
+          );
+          continue;
+        }
+        try {
+          paper = await db.paperSignalOutcome.create({
+            data: {
+              signalEvaluationId: setup.evaluationId,
+              symbol: setup.symbol,
+              direction: setup.direction,
+              signalCreatedAtUtc: setup.createdAt,
+              decisionCandleTimeUtc: setup.decisionCandleTime,
+              setupKnownAtUtc: setup.setupKnownAt,
+              expiryUtc: setup.expiry,
+              datasetFingerprint: setup.datasetFingerprint,
+              inputFingerprint: setup.inputFingerprint || '',
+              setupFingerprint,
+              sourceCandleRange: JSON.stringify({
+                execution: setup.evidence?.executionWindow ?? null,
+                h1: setup.evidence?.h1Window ?? null,
+                h4: setup.evidence?.h4Window ?? null,
+              }),
+              entryReference: setup.levels.entryReference,
+              stopLoss: setup.levels.stopLoss,
+              target: setup.levels.target,
+              invalidationLevel: invalidationLevelOf(setup),
+              status: 'open',
+              modeledCostsPrice: roundTripCost(costs),
+              details: JSON.stringify({ costLabels: costs.labels }),
+            },
+          });
+          result.newlyOpened += 1;
+        } catch (createErr) {
+          if (isUniqueViolation(createErr)) {
+            // The SAME logical setup already has its ONE paper row (concurrent
+            // race or repeated evaluation) — never a second row, never an error.
+            result.duplicatesSuppressed += 1;
+            paper = await db.paperSignalOutcome.findUnique({
+              where: { setupFingerprint },
+            });
+            if (!paper) continue; // vanished mid-pass — skip honestly
+            if (paper.status === 'resolved') {
+              // Immutable after resolution — same protection as the
+              // per-evaluation path; a re-emission can never re-walk or
+              // re-stamp a resolved row.
+              result.skippedResolved += 1;
+              continue;
+            }
+          } else {
+            throw createErr;
+          }
+        }
       }
 
-      // ── Advance: load subsequent CLOSED verified M15 bars ──────────────
-      const decisionSec = Math.floor(setup.decisionCandleTime.getTime() / 1000);
-      const expirySec = Math.floor(setup.expiry.getTime() / 1000);
+      // ── Advance: the paper row's OWN frozen geometry ────────────────
+      // (anchor = the row's decision candle — never a later evaluation's).
+      const decisionSec = Math.floor(paper.decisionCandleTimeUtc.getTime() / 1000);
+      const expirySec = Math.floor(paper.expiryUtc.getTime() / 1000);
       const uptoSec = Math.min(expirySec, nowUtcSec);
       if (uptoSec <= decisionSec) {
         result.advanced += 1;
@@ -322,12 +385,12 @@ export async function trackPaperSignals(
       }
       const candleRows = await db.marketCandle.findMany({
         where: {
-          symbol: setup.symbol,
+          symbol: paper.symbol,
           timeframe: 'M15',
           isForming: false,
           validationStatus: 'VALID',
           source: 'bridge-mt5',
-          candleTimeUtc: { gt: setup.decisionCandleTime, lte: new Date(uptoSec * 1000) },
+          candleTimeUtc: { gt: paper.decisionCandleTimeUtc, lte: new Date(uptoSec * 1000) },
         },
         orderBy: { candleTimeUtc: 'asc' },
         take: maxBarsPerSignal,
@@ -341,11 +404,11 @@ export async function trackPaperSignals(
       }
 
       const adv = resolvePaperOutcome(
-        setup.direction,
-        setup.levels.entryReference,
-        setup.levels.stopLoss,
-        setup.levels.target,
-        invalidationLevelOf(setup),
+        paper.direction === 'BUY' ? 'BUY' : 'SELL',
+        paper.entryReference,
+        paper.stopLoss,
+        paper.target,
+        paper.invalidationLevel,
         bars,
         expirySec,
         nowUtcSec,
@@ -361,8 +424,21 @@ export async function trackPaperSignals(
         }),
       };
 
+      // riskPrice recomputed from the row's own frozen geometry — the
+      // engine's exact risk formula (entryReference − stopLoss | mirrored).
+      const riskPrice =
+        paper.direction === 'BUY'
+          ? paper.entryReference - paper.stopLoss
+          : paper.stopLoss - paper.entryReference;
+
       if (adv.outcome !== 'unresolved' && adv.exitPrice !== null) {
-        const pnl = paperPnl(setup.direction, setup.levels.entryReference, adv.exitPrice, setup.levels.riskPrice, costs);
+        const pnl = paperPnl(
+          paper.direction === 'BUY' ? 'BUY' : 'SELL',
+          paper.entryReference,
+          adv.exitPrice,
+          riskPrice,
+          costs,
+        );
         Object.assign(update, {
           status: 'resolved',
           outcome: adv.outcome,
@@ -390,7 +466,7 @@ export async function trackPaperSignals(
       }
 
       await db.paperSignalOutcome.update({
-        where: { signalEvaluationId: setup.evaluationId },
+        where: { id: paper.id },
         data: update,
       });
       result.advanced += 1;

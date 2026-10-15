@@ -131,12 +131,17 @@ async function insertSetupEvaluation(opts: {
   entryReference: number;
   stopLoss: number;
   target: number;
-  riskPrice: number;
   invalidationLevel: number;
   decisionSec: number;
   expirySec: number;
 }): Promise<SetupFixture> {
   const decisionIso = new Date(opts.decisionSec * 1000);
+  // Phase 10.3-A fixture update (disclosed): the real engine ALWAYS emits the
+  // complete structure-event identity on SETUP evaluations — the synthetic
+  // seed now carries it too, so the rows exercise the setup-identity dedup
+  // path exactly like production rows. breakCandleTimeUtc is derived from the
+  // fixture's decisionSec (distinct per test → distinct setup identities).
+  const breakIso = new Date((opts.decisionSec - 2 * M15) * 1000);
   await db.signalEvaluation.create({
     data: {
       id: opts.id,
@@ -149,7 +154,14 @@ async function insertSetupEvaluation(opts: {
       datasetFingerprint: `dfp-${opts.id}`,
       inputSnapshot: '{}',
       evidence: JSON.stringify({
-        structureEvent: { level: opts.invalidationLevel },
+        structureEvent: {
+          type: 'BOS',
+          direction: opts.direction === 'BUY' ? 'bullish' : 'bearish',
+          level: opts.invalidationLevel,
+          levelText: String(opts.invalidationLevel),
+          breakCandleTimeUtc: breakIso.toISOString(),
+          barsSinceBreak: 2,
+        },
         executionWindow: { fromUtc: new Date((opts.decisionSec - 300 * M15) * 1000).toISOString(), toUtc: decisionIso.toISOString(), bars: 300 },
         h1Window: { fromUtc: decisionIso.toISOString(), toUtc: decisionIso.toISOString(), bars: 300 },
         h4Window: { fromUtc: decisionIso.toISOString(), toUtc: decisionIso.toISOString(), bars: 300 },
@@ -159,7 +171,8 @@ async function insertSetupEvaluation(opts: {
         entryZoneLow: 2649, entryZoneHigh: 2651,
         entryReference: opts.entryReference,
         stopLoss: opts.stopLoss, target: opts.target,
-        riskPrice: opts.riskPrice, rewardPrice: 2 * opts.riskPrice, rewardRiskRatio: 2,
+        riskPrice: opts.direction === 'BUY' ? opts.entryReference - opts.stopLoss : opts.stopLoss - opts.entryReference,
+        rewardPrice: Math.abs(opts.target - opts.entryReference), rewardRiskRatio: 2,
         entryZoneLowText: '2649', entryZoneHighText: '2651',
         stopLossText: String(opts.stopLoss), targetText: String(opts.target),
         entryReferenceText: String(opts.entryReference),
@@ -195,7 +208,7 @@ describe('paper tracking pipeline — DB integration (synthetic rows, isolated t
     const decisionSec = FIXED_NOW_SEC - 10 * M15;
     await insertSetupEvaluation({
       id: 'paper-test-targeted', direction: 'BUY',
-      entryReference: 2650, stopLoss: 2640, target: 2670, riskPrice: 12,
+      entryReference: 2650, stopLoss: 2640, target: 2670,
       invalidationLevel: 2645,
       decisionSec, expirySec: decisionSec + 12 * M15,
     });
@@ -220,7 +233,7 @@ describe('paper tracking pipeline — DB integration (synthetic rows, isolated t
     expect(rows[0].outcome).toBe('targeted');
     expect(rows[0].exitPrice).toBe(2670);
     expect(rows[0].netPnlPrice).toBeCloseTo(19.72, 6);
-    expect(rows[0].rMultiple).toBeCloseTo(19.72 / 12, 4);
+    expect(rows[0].rMultiple).toBeCloseTo(19.72 / 10, 4); // risk = 2650-2640 = 10 (geometry-consistent)
     expect(rows[0].observations).toBe(2);
   });
 
@@ -228,7 +241,7 @@ describe('paper tracking pipeline — DB integration (synthetic rows, isolated t
     const decisionSec = FIXED_NOW_SEC - 20 * M15;
     await insertSetupEvaluation({
       id: 'paper-test-stopped', direction: 'BUY',
-      entryReference: 2650, stopLoss: 2640, target: 2670, riskPrice: 12,
+      entryReference: 2650, stopLoss: 2640, target: 2670,
       invalidationLevel: 2645,
       decisionSec, expirySec: decisionSec + 12 * M15,
     });
@@ -248,7 +261,7 @@ describe('paper tracking pipeline — DB integration (synthetic rows, isolated t
     const decisionSec = FIXED_NOW_SEC - 30 * M15;
     await insertSetupEvaluation({
       id: 'paper-test-invalidated', direction: 'BUY',
-      entryReference: 2650, stopLoss: 2640, target: 2670, riskPrice: 12,
+      entryReference: 2650, stopLoss: 2640, target: 2670,
       invalidationLevel: 2645,
       decisionSec, expirySec: decisionSec + 12 * M15,
     });
@@ -265,7 +278,7 @@ describe('paper tracking pipeline — DB integration (synthetic rows, isolated t
     const decisionSec = FIXED_NOW_SEC - 40 * M15;
     await insertSetupEvaluation({
       id: 'paper-test-expired-empty', direction: 'BUY',
-      entryReference: 2650, stopLoss: 2640, target: 2670, riskPrice: 12,
+      entryReference: 2650, stopLoss: 2640, target: 2670,
       invalidationLevel: 2645,
       decisionSec, expirySec: decisionSec + 6 * M15, // long past, no candles inserted
     });
@@ -283,7 +296,7 @@ describe('paper tracking pipeline — DB integration (synthetic rows, isolated t
     const expirySec = decisionSec + 12 * M15; // in the future relative to FIXED_NOW
     await insertSetupEvaluation({
       id: 'paper-test-open', direction: 'BUY',
-      entryReference: 2650, stopLoss: 2640, target: 2670, riskPrice: 12,
+      entryReference: 2650, stopLoss: 2640, target: 2670,
       invalidationLevel: 2645,
       decisionSec, expirySec,
     });

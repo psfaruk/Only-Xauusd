@@ -13,6 +13,7 @@ import { TIMEFRAME_SECONDS, type Timeframe } from '@/lib/market/types';
 import { loadAnalysisInput } from '@/lib/analysis/persistence';
 import type { TfLoadedData } from '@/lib/analysis/types';
 import type { SignalEvaluation, SignalWindow, StrategyRules } from './types';
+import { setupFingerprintFromEvidence } from './setup-identity';
 
 export interface LoadedSignalWindows {
   digits: number | null;
@@ -67,6 +68,8 @@ export interface SaveSignalEvaluationArgs {
   quote: Record<string, unknown>;
   durationMs: number;
   startedAtUtc: Date;
+  /** Execution-TF label (Phase 10.3-A) — part of the setup identity. */
+  executionTimeframe: string;
 }
 
 export interface SavedSignalEvaluation {
@@ -80,6 +83,16 @@ export async function saveSignalEvaluation(
   args: SaveSignalEvaluationArgs,
 ): Promise<SavedSignalEvaluation> {
   const e = args.evaluation;
+  // Phase 10.3-A: logical setup identity (nullable; NULL when the evidence
+  // carries no complete structure event — never guessed). NOT unique here —
+  // repeated evaluation rows remain the append-only audit trail; the paper
+  // layer enforces one-row-per-setup via its own unique constraint.
+  const setupFingerprint = setupFingerprintFromEvidence({
+    symbol: e.symbol,
+    timeframe: args.executionTimeframe,
+    strategyVersion: e.strategyVersion,
+    evidence: e.evidence,
+  });
   const row = await db.signalEvaluation.create({
     data: {
       engineVersion: e.engineVersion,
@@ -88,6 +101,7 @@ export async function saveSignalEvaluation(
       outcome: e.outcome,
       reasonCodes: JSON.stringify(e.reasonCodes),
       inputFingerprint: e.inputFingerprint || '',
+      setupFingerprint,
       datasetFingerprint: e.datasetFingerprint,
       inputSnapshot: JSON.stringify({
         windows: e.evidence

@@ -98,6 +98,7 @@ export async function runSignalEvaluation(opts: RunSignalOptions = {}): Promise<
         quote,
         durationMs: Date.now() - startedMs,
         startedAtUtc: startedAt,
+        executionTimeframe: rules.executionTf,
       });
       return saved.id;
     } catch {

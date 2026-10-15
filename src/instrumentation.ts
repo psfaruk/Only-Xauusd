@@ -88,11 +88,19 @@ export async function register() {
         // successful scheduled sync (fire-and-forget, error-isolated). This
         // also advances open rows when the evaluation itself is BLOCKED
         // (e.g. stale quote outside market hours).
-        try {
-          const { trackPaperSignals } = await import('@/lib/signal/paper');
-          void trackPaperSignals(db, { symbol }).catch(() => undefined);
-        } catch {
-          // paper tracking must never break the sync scheduler
+        //
+        // NEXT_RUNTIME guard (official Next.js instrumentation pattern, same
+        // as the signal-evaluation import above): Phase 10.3-A added the
+        // setup-identity module (node:crypto) to paper.ts's import chain, so
+        // this import must also be tree-shaken from the Edge entry to keep
+        // the Edge compile clean. The tracker only ever runs in the Node server.
+        if (process.env.NEXT_RUNTIME === 'nodejs') {
+          try {
+            const { trackPaperSignals } = await import('@/lib/signal/paper');
+            void trackPaperSignals(db, { symbol }).catch(() => undefined);
+          } catch {
+            // paper tracking must never break the sync scheduler
+          }
         }
       }
     } catch (err) {

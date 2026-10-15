@@ -274,6 +274,7 @@ model SignalEvaluation {
   outcome              String // BUY_SETUP | SELL_SETUP | WAIT | BLOCKED | NO_SETUP | FAILED
   reasonCodes          String // JSON string[] — machine-readable, typed
   inputFingerprint     String // sha256 over canonical input + rules + engineVersion
+  setupFingerprint     String? // Phase 10.3-A: sha256 logical setup identity (symbol+TF+strategyVersion+structure event). NULL when the evidence carries no complete structure event (legacy/no-event rows). NOT unique — repeated evaluation rows remain the append-only audit trail.
   datasetFingerprint   String? // sha256 over the execution-TF candles in the window
   inputSnapshot        String // JSON: window ranges, quote, spec (bounded, no secrets)
   evidence             String // JSON: structure event, anchor swing, indicators, HTF trends
@@ -336,6 +337,7 @@ model PaperSignalOutcome {
   expiryUtc             DateTime
   datasetFingerprint    String?
   inputFingerprint      String
+  setupFingerprint      String? @unique // Phase 10.3-A: ONE paper row per logical setup EVER (open/counted/resolved all block re-creation). NULL for legacy rows (multiple NULLs allowed in SQLite) — never backfilled, never rewritten.
   sourceCandleRange     String // JSON: execution/h1/h4 window ranges at signal time
   entryReference        Float
   stopLoss              Float
