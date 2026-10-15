@@ -140,3 +140,23 @@ Stage Summary:
 - bun run build NOT executed (sandbox rule) — disclosed in the final report; verification = 166/166 tests + clean lint/tsc + dev-server browser E2E.
 - Four execution locks intact; zero execution routes/commands anywhere; one credential-handling incident found and remediated before any commit (documented in security audit).
 - Next step: publish this tree (repo remote still at Phase 4), keep the :3031 bridge running; Phase 9+ awaits explicit user authorization.
+
+---
+Task ID: 9
+Agent: Z.ai Code (main orchestrator)
+Task: User request — commit & push all work up to the last phase (Phase 8) to GitHub (psfaruk/Xauusd-agent)
+
+Work Log:
+- Inspected repo state: local git history had been REBUILT by the sandbox (root a8ef8a4 "Initial commit" → 8eba403 squashed UUID auto-commit containing all Phase 8 work); no remote configured; only db/custom.db dirty. GitHub main stood at Phase 4 (b522a58) — histories unrelated.
+- Pre-publish security verification: historical .env in a8ef8a4 contains only benign DATABASE_URL (untracked in 8eba403); strings-scan of db/custom.db + db/test-market.db → 0 matches for MT5 password/login/token; git grep of full HEAD tree → 0 matches (only masked `414•••70` in audit reports); no hardcoded credentials in bridge source; only .env.example tracked among env files (placeholders verified).
+- Found & fixed sandbox-rebuild regressions: 15 tracked files existed on remote but not locally — restored 12 from origin/main (.env.example tracking, .zscripts/relaunch-dev.py, audit evidence glm-tool-call.ts + mt5-auth-probe.ts + 7 Phase 1/3/4 screenshots, public/gold-icon.svg). gold-icon.svg was a LIVE regression: page.tsx:860 + layout.tsx favicon referenced it while it was missing (verified 200 after restore). Dropped 3 stale tool-results/*.txt (copies of source code, no unique value).
+- Restored original .gitignore intent: `!.env.example` exception + `db/*.db` ignore; untracked runtime SQLite files (git rm --cached — kept on disk, dev unaffected; remote repo never tracked them).
+- Commit a0ea280 (restore + untrack), then merge 0b59eac `--allow-unrelated-histories -s ours` linking the rebuilt lineage with the public Phase 1–4 history — push was a clean fast-forward, NO force-push, public history preserved.
+- Pushed via one-time in-memory credential helper (token never written to .git/config or any file; helper deleted after use). Verified: GitHub main head = 0b59eac = local HEAD; token absent from .git/config.
+- Post-push health: GET / 200, gold-icon.svg 200, bridge :3031 /health 200, dev.log shows scheduled sync still running live (MARKET_SYNC_SUCCESS +3 new / ~1802 updated / 0 rejected, source: mt5).
+
+Stage Summary:
+- PUBLISHED: https://github.com/psfaruk/Xauusd-agent @ 0b59eac — now contains everything through Phase 8: read-only mt5-bridge (:3031), market integrity monitor, signal audit tooling, backtest engine, dashboard Data-Health tab, 166 tests, all 6 Phase 8 audit reports, plus restored Phase 1–4 evidence artifacts.
+- Published tree: 1253 files, secrets-scan clean, .env untracked, runtime DBs untracked (re-syncable via bridge).
+- Advisory: the GitHub PAT was shared in chat — user should rotate/revoke it on GitHub.
+- No code changes beyond artifact restoration + .gitignore fix. Bridge & dev server left running.
