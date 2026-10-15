@@ -226,9 +226,15 @@ describe('auditCandleHistory', () => {
     expect(m5.earliestCandleUtc).not.toBeNull();
   });
 
+  // Deterministic clock: closure-window classification is wall-clock dependent
+  // (Mon–Thu 20:00–22:00 UTC daily break + Fri/Sat/Sun weekend envelopes).
+  // Pin the audit to fixed Wednesday 2026-10-14T12:00:00Z so the seeded gap
+  // (Tue 23:45 UTC) is always OUTSIDE every closure envelope — no flakes.
+  const AUDIT_NOW_SEC = Math.floor(FIXED_NOW_MS / 1000);
+
   test('gap detection: a removed bar outside closure windows → suspicious gap', async () => {
     await db.marketCandle.deleteMany();
-    const bars = makeBars(300, 100, SEED_SEC - 28800, { forming: false });
+    const bars = makeBars(300, 100, AUDIT_NOW_SEC - 28800, { forming: false });
     // Write all bars EXCEPT one in the middle (a genuine gap).
     const gapIdx = 50;
     for (let i = 0; i < bars.length; i++) {
@@ -245,7 +251,7 @@ describe('auditCandleHistory', () => {
         },
       });
     }
-    const report = await auditCandleHistory('XAUUSDm', ['M5']);
+    const report = await auditCandleHistory('XAUUSDm', ['M5'], { nowSec: AUDIT_NOW_SEC });
     const m5 = report.timeframes[0];
     expect(m5.closedCount).toBe(99);
     expect(m5.missingOutsideClosure).toBe(1);

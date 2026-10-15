@@ -183,3 +183,23 @@ Stage Summary:
 - Four execution locks intact (phase 9/<11, both arm switches false, read_only); no order/trade/position code anywhere; migration additive-only.
 - Honest limitations recorded: strategy NOT validated (dev negative, OOS insufficient), H4 depth broker-bounded, live-vs-backtest reference-price difference documented on every run.
 - Next step: commit + push this tree on user instruction; Phase 10+ awaits authorization.
+
+---
+Task ID: 11
+Agent: Z.ai Code (main orchestrator, via subagents)
+Task: Sandbox-rebuild recovery + Phase 9 re-verification + publish to GitHub (user instruction: always commit & push, report as copyable text)
+
+Work Log:
+- Incident: sandbox rebuild at 2026-10-15 08:25 UTC wiped .env to DATABASE_URL-only (MT5 credentials, bridge URL/token, DATA_API_TOKEN, MARKET_API_PUBLIC_READS all gone) and recreated db/custom.db empty. The bridge stayed honestly disconnected and app data APIs failed closed (correct design). Live broker credentials are NOT recoverable in this environment (password absent) — restoring the feed requires re-adding MT5_LOGIN/MT5_PASSWORD/MT5_SERVER to .env (commented placeholders were left there).
+- .env runtime posture restored to the Phase 9 E2E-verified preview semantics: MT5_BRIDGE_URL=http://localhost:3031, freshly generated MT5_BRIDGE_TOKEN, MARKET_API_PUBLIC_READS=true; DATA_API_TOKEN generated but left commented (guard rule: token set means every read requires Bearer, which would break the anonymous browser dashboard; with public reads the trigger POSTs fail closed honestly with 503 MARKET_API_TOKEN_NOT_CONFIGURED). Bridge restarted daemonized (plain nohup gets reaped in this sandbox); /health ok, honestly disconnected; all 9 gateways attempted; logged cause: MT5_LOGIN / MT5_PASSWORD not configured.
+- Re-verification after the rebuild: bun test 230/243 — 13 fails root-caused: (a) market API tests silently depended on MARKET_API_PUBLIC_READS leaking from the old dev .env (isolation hole), (b) the auditCandleHistory gap test was wall-clock-coupled: the seeded gap (now minus 44100s) falls inside the Mon-Thu 20:00-22:00 UTC closure envelope whenever the suite runs 08:15-10:15 UTC.
+- Fixes (3 files): src/lib/market/integrity.ts — auditCandleHistory now accepts deps.nowSec (injectable clock; production default Date.now() unchanged; backward compatible with all existing callers); tests/market/integrity.test.ts — gap test pinned to FIXED_NOW Wednesday 2026-10-14T12:00:00Z (gap lands at Tue 23:45 UTC, always outside every closure envelope); tests/market/helpers/setup.ts — explicit process.env.MARKET_API_PUBLIC_READS = true (hermetic tests, no dependence on dev .env).
+- Real results: bun test 243/243 pass, 0 fail (970 expect calls); bun run lint exit 0; bunx tsc --noEmit exit 0 (app); bridge tsconfig tsc exit 0.
+- Live app verification: GET / 200; anonymous reads open per preview posture (data/health 200 honest DISCONNECTED with blocked signal gate; audit/environment 200 v2; signal/latest 200 signal null; backtest/latest 200 null); POST /api/signal/run honest 503 MARKET_API_TOKEN_NOT_CONFIGURED; POST /api/chat anonymous 200 grounded Bengali reply (no invented prices).
+- Browser E2E (agent-browser): all 11 tabs render; honest fail-closed states everywhere (DISCONNECTED feed, MISSING candles, 0 persisted evaluations, credential root-cause displayed in UI); chat answered from tool facts with the deterministic state block; 0 console/page errors; mobile 390x844 no horizontal overflow; screenshots audit/phase9-post-restore-desktop.png and audit/phase9-post-restore-mobile.png.
+- Git housekeeping: local-only commit 2bd64fb (sandbox auto-commit, UUID message) reworded to a meaningful message (parent unchanged = 46d1225 = origin/main, safe reword, no force needed); untracked the runtime .zscripts/dev.pid (+ .gitignore entry); committed the 3 fix files + 2 post-restore screenshots + this worklog entry. Final step of this task: push this tree to origin/main — the presence of this worklog on GitHub is itself the push proof.
+
+Stage Summary:
+- Phase 9 tree published to GitHub (fast-forward, no force-push). Verification at publish time: 243/243 tests, lint clean, tsc clean (app + bridge), browser E2E clean.
+- HONEST current state: live broker feed DOWN since the rebuild (credentials unavailable in-environment); db/custom.db empty (the 3,900+ candles and analysis/signal/backtest history were lost with it — re-syncable once credentials return); every layer fails closed and says so in the UI; four execution locks intact; bridge remains read-only.
+- To fully restore the live feed: re-add MT5_LOGIN / MT5_PASSWORD / MT5_SERVER to .env, restart the bridge (daemon pattern), re-run sync — the tabs then transition from DISCONNECTED/MISSING to live data.

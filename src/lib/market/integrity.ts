@@ -284,10 +284,10 @@ function ohlcValid(o: number, h: number, l: number, c: number): boolean {
 export async function auditCandleHistory(
   symbol: string,
   timeframes: readonly Timeframe[] = ['M5', 'M15', 'H1', 'H4'],
-  deps: { dbClient?: typeof db } = {},
+  deps: { dbClient?: typeof db; nowSec?: number } = {},
 ): Promise<HistoryAuditReport> {
   const database = deps.dbClient ?? db;
-  const nowSec = Math.floor(Date.now() / 1000);
+  const nowSec = deps.nowSec ?? Math.floor(Date.now() / 1000);
   const notes: string[] = [];
   const out: TimeframeHistoryAudit[] = [];
 

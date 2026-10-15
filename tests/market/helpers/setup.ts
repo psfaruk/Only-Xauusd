@@ -15,6 +15,7 @@ import { rmSync } from 'node:fs';
 export const TEST_DB_PATH = '/home/z/my-project/db/test-market.db';
 
 process.env.DATABASE_URL = `file:${TEST_DB_PATH}`;
+process.env.MARKET_API_PUBLIC_READS = 'true'; // hermetic: never depend on dev .env (sandbox rebuild wiped it 2026-10-15)
 
 // Phase 8: isolate tests from the developer's real .env. Bun auto-loads .env,
 // which since Phase 8 carries a real MT5_BRIDGE_URL/credentials for the live
