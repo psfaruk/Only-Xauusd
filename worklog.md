@@ -224,3 +224,22 @@ Stage Summary:
 - Phase 9.1 COMPLETE as an honest recovery attempt: everything verifiable without broker credentials is verified PASS; everything requiring the broker session is BLOCKED (never faked); DB loss documented; no synthetic data; four execution locks intact; no order/trade/position code anywhere.
 - Recovery NOT complete by design — requires the user to re-provision MT5_LOGIN/MT5_PASSWORD/MT5_SERVER into .env (never chat/git), then: restart bridge+dev, verify connected+authenticated with server identity, resolve XAUUSDm, fresh quote validation, read-only sync, H4 depth re-probe, then analysis/signal/backtest as NEW fingerprinted runs; re-enable MARKET_SYNC_INTERVAL_MS=300000 with the creds.
 - Advisory: sandbox rebuilds wipe .env — prefer platform-level env store for credentials if available; rotate the GitHub PAT shared earlier in chat.
+
+---
+Task ID: 13
+Agent: Z.ai Code (main orchestrator)
+Task: PHASE 9.2 — Secure MT5 Reconnection & Verified Market Data Recovery
+
+Work Log:
+- Preflight: actual HEAD = 96f7115 = intended starting commit = origin/main; working tree clean; app :3000 HTTP 200; bridge :3031 HTTP-healthy and honestly disconnected (connected:false, authenticated:false, auto-reconnect armed); no new sandbox rebuild since 9.1 (restored env posture intact).
+- Credential readiness (booleans only, values never printed): MT5_LOGIN ABSENT, MT5_PASSWORD ABSENT, MT5_SERVER ABSENT; MT5_BRIDGE_URL + MT5_BRIDGE_TOKEN SET and pair-consistent (app's authenticated bridge call proves bridgeReachable:true); DATA_API_TOKEN intentionally unset (preview posture, triggers fail closed 503 — verified live).
+- Verdict: live reconnection BLOCKED per spec; bridge kept safely disconnected; signal engine kept fail-closed; continued in safe-offline mode only; no authentication or data recovery claimed.
+- Database: db/custom.db PRAGMA integrity_check ok; 14 tables; SystemEvent 2, all data tables 0 (no fabrication, no forward-fill); no backups exist; idempotency verified by design+tests (upserts keyed on (symbol,timeframe,candleTime), DB unique key); lost history NOT claimed restored.
+- Offline verification executed: bun test 243/243 (exit 0), eslint clean, tsc app 0 errors, tsc bridge 0 errors; build NOT RUN (sandbox rule, recorded). Regression coverage inventory confirmed for all 13 spec-listed areas: missing creds, failed auth, HTTP-healthy-but-disconnected, wrong symbol, stale quote, duplicate ingestion, invalid OHLC, gaps/insufficient history, SQLite persistence (test-market.db 30 candles on disk, integrity ok), fingerprint identity/change, signal blocking, secret redaction, four execution locks (security.execution-lock check + POST-inventory test).
+- Frontend browser verification (desktop 1280x800 + mobile 390x844): all 10 state distinctions honest (bridge healthy vs broker unauthenticated vs symbol unresolved vs quote DISCONNECTED vs candles MISSING vs DB persistence visible vs analysis not-ready vs signal blocked vs backtest empty vs execution LOCKED); server-identity check honestly FAILs with session=unknown != Exness-MT5Trial6; 0 console/page errors; mobile no overflow; screenshots audit/phase9.2-{desktop,mobile}.png.
+- No code changes were needed or made this phase (tree already satisfies every offline requirement). New artifacts: audit/phase9.2-live-data-recovery-report.md (PASS/FAIL/BLOCKED/NOT TESTED/NOT APPLICABLE per criterion incl. the 9 acceptance criteria), 2 screenshots, this worklog entry. Pre-push diff secret scan clean (0 PAT/login/bridge-token hits); no execution endpoints added; commit + push (fast-forward, no force).
+
+Stage Summary:
+- Phase 9.2 reported honestly as BLOCKED on credentials: everything verifiable without broker credentials PASSES (offline suite 243/243, lint/tsc clean, integrity ok, fail-closed gates verified live and by tests, four execution locks intact, frontend honest at desktop+mobile).
+- Acceptance criteria 1-4,6 BLOCKED/NOT TESTED (need authenticated session); 5,7,8,9 PASS.
+- Next action when credentials are provisioned in .env (never chat/git): re-run the full chain — bridge restart, authenticated session + server-identity match, XAUUSDm resolution, fresh quote validation, idempotent M5/M15/H1/H4 sync, H4 depth re-probe, then analysis/signal/backtest as NEW fingerprinted runs, re-enable MARKET_SYNC_INTERVAL_MS=300000.
