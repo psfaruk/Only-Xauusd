@@ -14,7 +14,8 @@
     "test": "bun test",
     "market:smoke": "bun run scripts/mt5-smoke-test.ts",
     "market:sync": "bun run scripts/sync-market.ts",
-    "bridge:dev": "cd mini-services/mt5-bridge && bun run dev"
+    "bridge:dev": "cd mini-services/mt5-bridge && bun run dev",
+    "paper:snapshot": "bun run scripts/phase10.2-paper-snapshot.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

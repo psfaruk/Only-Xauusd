@@ -1,10 +1,11 @@
 /**
  * GET /api/validation/latest — latest Phase 10 validation run (READ-ONLY).
  * Returns the most recent ValidationRun for the symbol (three-way split,
- * walk-forward, sensitivity, perturbation set, pre-registered interpretation)
- * plus the paper-signal forward-tracking summary. Honest emptiness: nulls
- * when nothing exists. This endpoint can never execute a trade (no such
- * code exists anywhere).
+ * walk-forward, sensitivity, perturbation set, pre-registered interpretation),
+ * the paper-signal forward-tracking summary, and the Phase 10.2 pre-registered
+ * forward paper validation status (protocol progress + verdict). Honest
+ * emptiness: nulls when nothing exists. This endpoint can never execute a
+ * trade (no such code exists anywhere).
  */
 
 import { NextResponse } from 'next/server';
@@ -13,6 +14,7 @@ import { config } from '@/lib/config';
 import { db } from '@/lib/db';
 import { getLatestValidation } from '@/lib/backtest/validation-service';
 import { getPaperSignalSummary } from '@/lib/signal/paper';
+import { getForwardPaperStatus } from '@/lib/signal/forward';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,9 +30,10 @@ export async function GET(req: Request) {
     );
   }
 
-  const [latest, paper] = await Promise.all([
+  const [latest, paper, forwardPaper] = await Promise.all([
     getLatestValidation(symbol),
     getPaperSignalSummary(db, symbol, 50),
+    getForwardPaperStatus(db, symbol),
   ]);
 
   return NextResponse.json({
@@ -38,6 +41,7 @@ export async function GET(req: Request) {
     symbol,
     validation: latest,
     paper,
+    forwardPaper,
     disclaimer: latest
       ? 'Validation is a simulation over verified broker candles — NEVER proof of live profitability.'
       : null,

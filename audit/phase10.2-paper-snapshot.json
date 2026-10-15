@@ -1,0 +1,41 @@
+{
+  "generatedAtUtc": "2026-10-15T16:27:59.751Z",
+  "purpose": "durability export — raw rows for honest rehydration after a sandbox rebuild; never fabrication",
+  "protocol": {
+    "version": "phase10.2-forward-paper/1",
+    "rulesVersion": "phase10.2-forward-paper-rules/1",
+    "activatedAtUtc": "2026-10-15T16:30:00Z",
+    "deadlineUtc": "2027-01-13T16:30:00.000Z",
+    "minCompletedTrades": 20,
+    "observationWindowDays": 90
+  },
+  "progress": {
+    "countedCompleted": 0,
+    "openCounted": 0,
+    "repeatObservations": 0,
+    "unobservableResolved": 0,
+    "eligibleRows": 0,
+    "elapsedDays": 0,
+    "daysRemaining": 90
+  },
+  "statusCounts": {
+    "open": 0,
+    "stopped": 0,
+    "targeted": 0,
+    "invalidated": 0,
+    "expired": 0,
+    "expiredUnobservable": 0
+  },
+  "metrics": null,
+  "verdict": {
+    "conclusion": "IN_PROGRESS",
+    "reasons": [
+      "Forward paper observation in progress: 0/20 completed counted trades; 90.0 day(s) of the 90-day window remain.",
+      "No performance claim is made below the pre-registered sample floor."
+    ],
+    "rulesVersion": "phase10.2-forward-paper-rules/1",
+    "disclaimer": "Forward paper results are NOT a profitability claim and do NOT authorize Phase 11 demo execution. Phase 11 requires separate explicit user authorization plus all five pre-agreed conditions (sufficient independent out-of-sample data, acceptable results under realistic spread/slippage/commission, pre-determined drawdown & consecutive-loss acceptability, forward-vs-backtest consistency, four execution locks intact)."
+  },
+  "rawRowCount": 0,
+  "rawRows": []
+}

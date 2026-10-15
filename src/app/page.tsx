@@ -688,6 +688,68 @@ interface ValidationLatestResponse {
       rMultiple: number | null;
     }>;
   };
+  forwardPaper: {
+    protocol: {
+      version: string;
+      rulesVersion: string;
+      activatedAtUtc: string;
+      deadlineUtc: string;
+      minCompletedTrades: number;
+      observationWindowDays: number;
+    };
+    progress: {
+      countedCompleted: number;
+      openCounted: number;
+      repeatObservations: number;
+      unobservableResolved: number;
+      eligibleRows: number;
+      elapsedDays: number;
+      daysRemaining: number;
+    };
+    statusCounts: {
+      open: number;
+      stopped: number;
+      targeted: number;
+      invalidated: number;
+      expired: number;
+      expiredUnobservable: number;
+    };
+    metrics: null | {
+      trades: number;
+      wins: number;
+      losses: number;
+      winRate: number | null;
+      netPnlPrice: number;
+      profitFactor: number | null;
+      sumR: number;
+      avgR: number | null;
+      maxDrawdownR: number;
+      maxConsecutiveLosses: number;
+      top1NetShare: number | null;
+      byDirection: {
+        BUY: { trades: number; wins: number; netPnlPrice: number };
+        SELL: { trades: number; wins: number; netPnlPrice: number };
+      };
+    };
+    verdict: {
+      conclusion: string;
+      reasons: string[];
+      rulesVersion: string;
+      disclaimer: string;
+    };
+    recentTrades: Array<{
+      id: string;
+      direction: string;
+      signalCreatedAtUtc: string;
+      status: string;
+      outcome: string | null;
+      entryReference: number;
+      exitPrice: number | null;
+      netPnlPrice: number | null;
+      rMultiple: number | null;
+      resolvedAtUtc: string | null;
+    }>;
+  };
   disclaimer: string | null;
 }
 
@@ -2667,6 +2729,117 @@ export default function Phase1Dashboard() {
                       </Card>
                     </div>
                   </>
+                );
+              })()}
+
+              {/* ---------------- Forward paper validation (Phase 10.2, pre-registered) */}
+              {validationLatest?.forwardPaper && (() => {
+                const fp = validationLatest.forwardPaper;
+                const fpPnl = (x: number | null | undefined) =>
+                  x === null || x === undefined ? 'text-zinc-500' : x < 0 ? 'text-red-400' : 'text-zinc-200';
+                const verdictBadge =
+                  fp.verdict.conclusion === 'NEGATIVE_AFTER_COSTS'
+                    ? 'border-red-500/40 bg-red-500/10 text-red-300'
+                    : fp.verdict.conclusion === 'PROMISING_CONTINUE_FORWARD'
+                      ? 'border-amber-500/40 bg-amber-500/10 text-amber-300'
+                      : 'border-zinc-600 bg-zinc-800/60 text-zinc-300';
+                const verdictBn: Record<string, string> = {
+                  IN_PROGRESS: 'পর্যবেক্ষণ চলছে',
+                  INCONCLUSIVE_TIMEOUT: 'সময়সীমা শেষ — অনির্ণীত',
+                  NEGATIVE_AFTER_COSTS: 'ঋণাত্মক (খরচ-পরবর্তী)',
+                  INCONCLUSIVE_CONCENTRATION: 'অনির্ণীত — ঘনত্ব বেশি',
+                  INCONCLUSIVE_DRAWDOWN: 'অনির্ণীত — ঝুঁকি সীমার বাইরে',
+                  PROMISING_CONTINUE_FORWARD: 'সামনে এগোনোর প্রমাণ (দাবি নয়)',
+                };
+                return (
+                  <Card className="border-zinc-800 bg-zinc-900/40">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="flex flex-wrap items-center gap-2 text-sm">
+                        ফরোয়ার্ড পেপার ভ্যালিডেশন — Phase 10.2
+                        <Badge variant="outline" className={verdictBadge}>{verdictBn[fp.verdict.conclusion] ?? fp.verdict.conclusion}</Badge>
+                        <Badge variant="outline" className="border-zinc-700 bg-zinc-900 text-zinc-500">প্রি-রেজিস্টার্ড</Badge>
+                      </CardTitle>
+                      <p className="text-xs text-zinc-500">
+                        ফলাফল জমার <span className="text-amber-300">আগেই</span> নিয়ম দৃঢ় করা হয়েছে (first-open গণনা, ২০ ট্রেড ফ্লোর, ৯০ দিন সীমা, ঝুঁকি গেট)। একই সেটআপের পুনরাবৃত্তি পর্যবেক্ষণ কখনো আলাদা ট্রেড নয়। এটি লাভজনকতার দাবি বা ডেমো execution-এর অনুমতি নয়।
+                      </p>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+                        {[
+                          { label: 'সম্পন্ন ট্রেড', value: `${fp.progress.countedCompleted} / ${fp.protocol.minCompletedTrades}` },
+                          { label: 'খোলা', value: String(fp.progress.openCounted) },
+                          { label: 'পুনরাবৃত্তি (বাদ)', value: String(fp.progress.repeatObservations) },
+                          { label: 'অপর্যবেক্ষিত', value: String(fp.progress.unobservableResolved) },
+                          { label: 'অতিবাহিত দিন', value: fmtInd(fp.progress.elapsedDays, 1) },
+                          { label: 'অবশিষ্ট দিন', value: fmtInd(fp.progress.daysRemaining, 1) },
+                        ].map((cell) => (
+                          <div key={cell.label} className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-2.5 text-center">
+                            <p className="text-[11px] text-zinc-500">{cell.label}</p>
+                            <p className="mt-0.5 text-sm font-semibold text-zinc-200">{cell.value}</p>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2 text-[11px] text-zinc-500">
+                        <span>সক্রিয়করণ: <span className="font-mono text-zinc-400">{fmtDhaka(fp.protocol.activatedAtUtc)}</span></span>
+                        <span>সময়সীমা: <span className="font-mono text-zinc-400">{fmtDhaka(fp.protocol.deadlineUtc)}</span></span>
+                        <span>নিয়ম সংস্করণ: <span className="font-mono text-zinc-400">{fp.protocol.rulesVersion}</span></span>
+                      </div>
+
+                      {fp.metrics && (
+                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-8">
+                          {[
+                            { label: 'n', value: String(fp.metrics.trades) },
+                            { label: 'উইন রেট', value: fmtInd(fp.metrics.winRate !== null ? fp.metrics.winRate * 100 : null, 1) + '%' },
+                            { label: 'নেট', value: fmtInd(fp.metrics.netPnlPrice, 2), cls: fpPnl(fp.metrics.netPnlPrice) },
+                            { label: 'PF', value: fmtInd(fp.metrics.profitFactor, 2) },
+                            { label: 'গড় R', value: fmtInd(fp.metrics.avgR, 3), cls: fpPnl(fp.metrics.avgR) },
+                            { label: 'সর্বোচ্চ ড্রডাউন', value: `${fmtInd(fp.metrics.maxDrawdownR, 2)}R` },
+                            { label: 'পরপর লস', value: String(fp.metrics.maxConsecutiveLosses) },
+                            { label: 'টপ-১ শেয়ার', value: fp.metrics.top1NetShare !== null ? fmtInd(fp.metrics.top1NetShare * 100, 1) + '%' : '—' },
+                          ].map((cell) => (
+                            <div key={cell.label} className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-2.5 text-center">
+                              <p className="text-[11px] text-zinc-500">{cell.label}</p>
+                              <p className={`mt-0.5 text-sm font-semibold ${cell.cls ?? 'text-zinc-200'}`}>{cell.value}</p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      <ul className="space-y-1">
+                        {fp.verdict.reasons.map((r, i) => (
+                          <li key={i} className="text-xs leading-relaxed text-zinc-400">· {r}</li>
+                        ))}
+                      </ul>
+
+                      {fp.recentTrades.length === 0 ? (
+                        <p className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3 text-xs text-zinc-400">
+                          এখনো কোনো গণনাকৃত ট্রেড নেই — সৎ খালি অবস্থা। শিডিউল্ড সিঙ্কের পর ইঞ্জিন স্বয়ংক্রিয়ভাবে মূল্যায়ন করছে; SETUP তৈরি হলে এখানে জমতে থাকবে।
+                        </p>
+                      ) : (
+                        <div className="max-h-64 overflow-y-auto custom-scrollbar space-y-1.5 pr-1">
+                          {fp.recentTrades.map((t) => (
+                            <div key={t.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2 text-xs">
+                              <Badge variant="outline" className={t.direction === 'BUY' ? 'border-emerald-500/40 text-emerald-300' : 'border-red-500/40 text-red-300'}>{t.direction}</Badge>
+                              <span className="text-zinc-400">{fmtDhaka(t.signalCreatedAtUtc)}</span>
+                              <span className="font-mono text-zinc-500">এন্ট্রি {t.entryReference}</span>
+                              {t.status === 'open' ? (
+                                <Badge variant="outline" className="border-amber-500/40 text-amber-300">খোলা</Badge>
+                              ) : (
+                                <>
+                                  {t.outcome && <Badge variant="outline" className="border-zinc-700 text-zinc-300">{t.outcome}</Badge>}
+                                  {t.rMultiple !== null && <span className={fpPnl(t.rMultiple)}>R {fmtInd(t.rMultiple, 2)}</span>}
+                                </>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <p className="text-[11px] leading-relaxed text-zinc-600">
+                        ⚠ {fp.verdict.disclaimer}
+                      </p>
+                    </CardContent>
+                  </Card>
                 );
               })()}
             </TabsContent>

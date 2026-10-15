@@ -10,6 +10,12 @@
  * The scheduler calls the same read-only ingestion service as the manual
  * trigger — it cannot place, modify or close orders (no such code exists).
  * Overlap is impossible: runSync refuses concurrent runs (SYNC_IN_PROGRESS).
+ *
+ * Phase 10.2 — after every successful scheduled sync the scheduler also runs
+ * the deterministic signal evaluation (READ-ONLY research signal; fail-closed
+ * gates inside) so live setups are discovered and paper-tracked autonomously
+ * for the pre-registered forward paper protocol. Disable with
+ * FORWARD_PAPER_TRACKING=0.
  */
 
 export async function register() {
@@ -45,8 +51,43 @@ export async function register() {
       if (outcome.status !== 'success') {
         console.warn(`[scheduler] sync ${outcome.status}: ${outcome.errorCode ?? ''} ${outcome.errorMessage ?? ''}`);
       } else {
+        // Phase 10.2 — autonomous forward-paper loop: evaluate the
+        // deterministic engine after every successful scheduled sync so live
+        // setups are discovered and paper-tracked (READ-ONLY; the engine has
+        // its own fail-closed gates and no order code exists anywhere).
+        // Fire-and-forget, error-isolated — can never break the scheduler.
+        //
+        // NEXT_RUNTIME guard (official Next.js instrumentation pattern): the
+        // signal engine fingerprints inputs with node:crypto, which the Edge
+        // instrumentation entry cannot compile. This scheduler only ever runs
+        // in the Node.js server, so the import is statically tree-shaken from
+        // the Edge entry (keeps dev.log free of edge compile errors).
+        if (process.env.FORWARD_PAPER_TRACKING !== '0' && process.env.NEXT_RUNTIME === 'nodejs') {
+          try {
+            const { runSignalEvaluation } = await import('@/lib/signal/service');
+            void runSignalEvaluation({ symbol })
+              .then((r) => {
+                if (
+                  r.outcome === 'BUY_SETUP' ||
+                  r.outcome === 'SELL_SETUP' ||
+                  r.outcome === 'FAILED'
+                ) {
+                  console.log(
+                    `[scheduler] forward-paper signal ${symbol} → ${r.outcome}${
+                      r.evaluation.reasonCodes.length ? ` [${r.evaluation.reasonCodes.join(',')}]` : ''
+                    }`,
+                  );
+                }
+              })
+              .catch(() => undefined);
+          } catch {
+            // signal evaluation must never break the sync scheduler
+          }
+        }
         // Phase 10: advance the read-only paper-signal tracking after every
-        // successful scheduled sync (fire-and-forget, error-isolated).
+        // successful scheduled sync (fire-and-forget, error-isolated). This
+        // also advances open rows when the evaluation itself is BLOCKED
+        // (e.g. stale quote outside market hours).
         try {
           const { trackPaperSignals } = await import('@/lib/signal/paper');
           void trackPaperSignals(db, { symbol }).catch(() => undefined);
