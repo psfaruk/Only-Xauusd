@@ -28,6 +28,16 @@ delete process.env.MT5_LOGIN;
 delete process.env.MT5_PASSWORD;
 delete process.env.MT5_SERVER;
 
+// Phase 10.1: DATA_API_TOKEN is read at CALL time by guardDataApi. A token
+// provisioned in the developer's .env (needed for the live sync/signal POST
+// endpoints after a sandbox rebuild) leaked into tests and turned every
+// unauthenticated test request into 401. NOTE: it must be SET TO '' — not
+// deleted — because @prisma/client re-loads .env when the PrismaClient in
+// src/lib/db.ts is instantiated (dotenv merge semantics: keys ABSENT from
+// process.env get restored from disk, keys already present are left alone).
+// The same is why MT5_BRIDGE_URL/TOKEN are set to '' above rather than deleted.
+process.env.DATA_API_TOKEN = '';
+
 const g = globalThis as unknown as { __marketTestPrepared?: boolean };
 
 if (!g.__marketTestPrepared) {
