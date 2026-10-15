@@ -131,6 +131,30 @@ export interface SignalBacktestResult {
   limitations: string[];
 }
 
+/**
+ * Latest HTF window (bounded rolling) with all bars CLOSED by `asOf` —
+ * exported for reuse by the Phase 10 validation harness so the causal
+ * HTF-alignment semantics can NEVER drift between simulators.
+ */
+export function htfWindowClosedBy(
+  candles: AnalysisCandle[],
+  tfSec: number,
+  asOf: number,
+  tf: Timeframe,
+  windowBars: number,
+): SignalWindow {
+  let end = -1;
+  for (let i = candles.length - 1; i >= 0; i--) {
+    if (candles[i].timeUtcSec + tfSec <= asOf) {
+      end = i;
+      break;
+    }
+  }
+  if (end < 0) return { timeframe: tf, candles: [], source: 'bridge-mt5' };
+  const start = Math.max(0, end - windowBars + 1);
+  return { timeframe: tf, candles: candles.slice(start, end + 1), source: 'bridge-mt5' };
+}
+
 export function signalDatasetFingerprint(
   symbol: string,
   execution: AnalysisCandle[],
@@ -222,18 +246,8 @@ export function runSignalBacktest(
   const h4Sec = TIMEFRAME_SECONDS.H4;
 
   /** Latest HTF window (bounded rolling) with all bars CLOSED by `asOf`. */
-  const htfWindowAsOf = (candles: AnalysisCandle[], tfSec: number, asOf: number, tf: Timeframe): SignalWindow => {
-    let end = -1;
-    for (let i = candles.length - 1; i >= 0; i--) {
-      if (candles[i].timeUtcSec + tfSec <= asOf) {
-        end = i;
-        break;
-      }
-    }
-    if (end < 0) return { timeframe: tf, candles: [], source: 'bridge-mt5' };
-    const start = Math.max(0, end - strategy.windowBars + 1);
-    return { timeframe: tf, candles: candles.slice(start, end + 1), source: 'bridge-mt5' };
-  };
+  const htfWindowAsOf = (candles: AnalysisCandle[], tfSec: number, asOf: number, tf: Timeframe): SignalWindow =>
+    htfWindowClosedBy(candles, tfSec, asOf, tf, strategy.windowBars);
 
   const splitIndex = Math.floor(execution.length * rules.devSplitFraction);
   const trades: SignalBacktestTrade[] = [];

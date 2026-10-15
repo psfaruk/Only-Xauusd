@@ -557,6 +557,140 @@ interface BacktestLatestResponse {
   disclaimer: string | null;
 }
 
+/** Phase 10 — /api/validation/latest response (strategy validation view). */
+interface ValidationSegmentView {
+  status: string;
+  candles: number;
+  fromUtcSec: number | null;
+  toUtcSec: number | null;
+  trades: number;
+  wins: number;
+  losses: number;
+  winRate: number | null;
+  grossPnlPrice: number | null;
+  costsPrice: number | null;
+  netPnlPrice: number | null;
+  profitFactor: number | null;
+  expectancyPrice: number | null;
+  expectancyR: number | null;
+  avgWinPrice: number | null;
+  avgLossPrice: number | null;
+  maxDrawdownPrice: number | null;
+  maxConsecutiveLosses: number;
+  exposurePct: number | null;
+  tradesPerWeek: number | null;
+  concentration: { top1GrossShare: number | null; top3GrossShare: number | null };
+  reason?: string;
+}
+
+interface ValidationLatestResponse {
+  ok: boolean;
+  validation: {
+    id: string;
+    createdAt: string;
+    symbol: string;
+    strategyVersion: string;
+    harnessVersion: string;
+    status: string;
+    datasetFingerprint: string;
+    dataset: {
+      fromUtc: string;
+      toUtc: string;
+      candleCounts: { M15: number; H1: number; H4: number };
+      observedSpread: string;
+    };
+    result: {
+      datasetFingerprint: string;
+      dataset: {
+        executionCandles: number;
+        h1Candles: number;
+        h4Candles: number;
+        fromUtcSec: number;
+        toUtcSec: number;
+        observedSpreadPrice: number;
+        splitFractions: { dev: number; val: number; oos: number };
+      };
+      counters: {
+        evaluations: number;
+        blockedEvaluations: number;
+        noSetup: number;
+        wait: number;
+        candidateSetups: number;
+        validSetups: number;
+        hypotheticalFills: number;
+        completedOutcomes: number;
+      };
+      segments: { dev: ValidationSegmentView; val: ValidationSegmentView; oos: ValidationSegmentView };
+      walkForward: {
+        windows: Array<{
+          index: number;
+          fromUtcSec: number;
+          toUtcSec: number;
+          candles: number;
+          metrics: ValidationSegmentView;
+        }>;
+        aggregate: ValidationSegmentView;
+        note: string;
+      };
+      sensitivity: Array<{
+        scenario: string;
+        spreadPrice: number;
+        slippagePrice: number;
+        commissionPrice: number;
+        trades: number;
+        netPnlPrice: number;
+        profitFactor: number | null;
+        netPositive: boolean;
+        labels: string[];
+      }>;
+      perturbations: Array<{
+        param: string;
+        value: number;
+        baselineValue: number;
+        trades: number;
+        netPnlPrice: number;
+        profitFactor: number | null;
+      }>;
+      warnings: string[];
+      limitations: string[];
+      interpretation: {
+        conclusion: 'INCONCLUSIVE' | 'NEGATIVE_AFTER_COSTS' | 'PROMISING_CONTINUE_FORWARD';
+        reasons: string[];
+        rulesVersion: string;
+      };
+    };
+    limitations: string[];
+    durationMs: number;
+  } | null;
+  paper: {
+    total: number;
+    open: number;
+    resolved: { stopped: number; targeted: number; invalidated: number; expired: number };
+    resolvedWithPnl: number;
+    wins: number;
+    losses: number;
+    netPnlPrice: number | null;
+    sumR: number | null;
+    avgR: number | null;
+    outcomes: Array<{
+      id: string;
+      direction: string;
+      signalCreatedAtUtc: string;
+      expiryUtc: string;
+      status: string;
+      outcome: string | null;
+      entryReference: number;
+      stopLoss: number;
+      target: number;
+      exitPrice: number | null;
+      observations: number;
+      netPnlPrice: number | null;
+      rMultiple: number | null;
+    }>;
+  };
+  disclaimer: string | null;
+}
+
 interface AnalysisLatestResponse {
   ok: true;
   latest: {
@@ -865,6 +999,7 @@ export default function Phase1Dashboard() {
   const [backtestLatest, setBacktestLatest] = useState<BacktestLatestResponse | null>(null);
   const [signalLatest, setSignalLatest] = useState<SignalLatestResponse | null>(null);
   const [signalRunning, setSignalRunning] = useState(false);
+  const [validationLatest, setValidationLatest] = useState<ValidationLatestResponse | null>(null);
   // Chat state — Phase 9 Task D/E
   const [chatMessages, setChatMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string; meta?: ChatResponse | null }>>([]);
   const [chatInput, setChatInput] = useState('');
@@ -873,7 +1008,7 @@ export default function Phase1Dashboard() {
 
   const refresh = useCallback(async () => {
     try {
-      const [hRes, aRes, mRes, qRes, anRes, dhRes, btRes, sgRes] = await Promise.all([
+      const [hRes, aRes, mRes, qRes, anRes, dhRes, btRes, sgRes, vlRes] = await Promise.all([
         fetch('/api/health', { cache: 'no-store' }),
         fetch('/api/audit/environment', { cache: 'no-store' }),
         fetch('/api/data/status', { cache: 'no-store' }).catch(() => null),
@@ -882,6 +1017,7 @@ export default function Phase1Dashboard() {
         fetch('/api/data/health?symbol=XAUUSDm', { cache: 'no-store' }).catch(() => null),
         fetch('/api/backtest/latest?symbol=XAUUSDm', { cache: 'no-store' }).catch(() => null),
         fetch('/api/signal/latest?symbol=XAUUSDm', { cache: 'no-store' }).catch(() => null),
+        fetch('/api/validation/latest?symbol=XAUUSDm', { cache: 'no-store' }).catch(() => null),
       ]);
       if (!hRes.ok && !aRes.ok) throw new Error('API unreachable');
       if (hRes.ok) setHealth((await hRes.json()) as HealthReport);
@@ -909,6 +1045,8 @@ export default function Phase1Dashboard() {
       else setBacktestLatest(null);
       if (sgRes && sgRes.ok) setSignalLatest((await sgRes.json()) as SignalLatestResponse);
       else setSignalLatest(null);
+      if (vlRes && vlRes.ok) setValidationLatest((await vlRes.json()) as ValidationLatestResponse);
+      else setValidationLatest(null);
       setLoadError(null);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : 'unknown error');
@@ -1342,6 +1480,7 @@ export default function Phase1Dashboard() {
               <TabsTrigger value="market" className="data-[state=active]:bg-amber-500/15 data-[state=active]:text-amber-300">মার্কেট ডেটা</TabsTrigger>
               <TabsTrigger value="analysis" className="data-[state=active]:bg-amber-500/15 data-[state=active]:text-amber-300">বিশ্লেষণ</TabsTrigger>
               <TabsTrigger value="signal" className="data-[state=active]:bg-amber-500/15 data-[state=active]:text-amber-300">সিগন্যাল</TabsTrigger>
+              <TabsTrigger value="validation" className="data-[state=active]:bg-amber-500/15 data-[state=active]:text-amber-300">ভ্যালিডেশন</TabsTrigger>
               <TabsTrigger value="chat" className="data-[state=active]:bg-amber-500/15 data-[state=active]:text-amber-300">চ্যাট</TabsTrigger>
               <TabsTrigger value="dhealth" className="data-[state=active]:bg-amber-500/15 data-[state=active]:text-amber-300">ডেটা স্বাস্থ্য</TabsTrigger>
               <TabsTrigger value="arch" className="data-[state=active]:bg-amber-500/15 data-[state=active]:text-amber-300">আর্কিটেকচার</TabsTrigger>
@@ -2237,6 +2376,299 @@ export default function Phase1Dashboard() {
                   })()}
                 </CardContent>
               </Card>
+            </TabsContent>
+
+            {/* ------------------------------------------- Tab: validation (Phase 10) */}
+            <TabsContent value="validation" className="space-y-4">
+              {/* Honest-simulation disclaimer */}
+              <div role="note" className="flex items-start gap-3 rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
+                <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" aria-hidden />
+                <p className="text-xs leading-relaxed text-zinc-400">
+                  এটি <span className="font-semibold text-amber-300">Phase 10 কৌশল-ভ্যালিডেশন</span> — যাচাইকৃত ব্রোকার ক্যান্ডেলের ওপর সিমুলেশন, লাভজনকতার প্রমাণ কখনোই নয়। সিদ্ধান্ত নির্ধারিত নিয়মে (pre-registered) — পর্যাপ্ত OOS নমুনা না থাকলে <span className="font-semibold text-amber-300">INCONCLUSIVE</span>। প্যারামিটার কোনো ফলাফল লুকাতে বদলানো হয়নি।
+                </p>
+              </div>
+
+              {!validationLatest?.validation && (
+                <Card className="border-zinc-800 bg-zinc-900/40">
+                  <CardContent className="p-6">
+                    <p className="text-sm text-zinc-400">
+                      এখনো কোনো ভ্যালিডেশন রান সংরক্ষিত হয়নি — সৎ খালি অবস্থা। রান তৈরি হলে এখানে dev / validation / OOS ফলাফল আলাদাভাবে দেখা যাবে।
+                    </p>
+                  </CardContent>
+                </Card>
+              )}
+
+              {validationLatest?.validation && (() => {
+                const v = validationLatest.validation;
+                const r = v.result;
+                const segLabel: Record<'dev' | 'val' | 'oos', string> = { dev: 'Development (৫০%)', val: 'Validation (২০%)', oos: 'Out-of-Sample (৩০%) — অছুঁয়া' };
+                const segBn: Record<'dev' | 'val' | 'oos', string> = { dev: 'ডেভেলপমেন্ট', val: 'ভ্যালিডেশন', oos: 'আউট-অব-স্যাম্পল' };
+                const conclusionClass =
+                  r.interpretation.conclusion === 'NEGATIVE_AFTER_COSTS'
+                    ? 'border-red-500/40 bg-red-500/10 text-red-300'
+                    : r.interpretation.conclusion === 'PROMISING_CONTINUE_FORWARD'
+                      ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+                      : 'border-amber-500/40 bg-amber-500/10 text-amber-300';
+                const pnlClass = (x: number | null | undefined) => (x === null || x === undefined ? 'text-zinc-500' : x < 0 ? 'text-red-400' : 'text-zinc-200');
+
+                return (
+                  <>
+                    {/* Interpretation header */}
+                    <Card className="border-zinc-800 bg-zinc-900/40">
+                      <CardHeader className="pb-3">
+                        <CardTitle className="flex flex-wrap items-center gap-2 text-base">
+                          সামগ্রিক সিদ্ধান্ত (নির্ধারিত নিয়মে)
+                          <Badge variant="outline" className={conclusionClass}>{r.interpretation.conclusion}</Badge>
+                          <Badge variant="outline" className="ml-auto border-zinc-700 bg-zinc-900 text-zinc-400 font-mono text-[10px]">
+                            {v.harnessVersion}
+                          </Badge>
+                        </CardTitle>
+                        <p className="text-xs text-zinc-500">
+                          রান: {fmtDhaka(v.createdAt)} · কৌশল <span className="font-mono">{v.strategyVersion}</span> · সময় {v.durationMs}ms
+                        </p>
+                      </CardHeader>
+                      <CardContent className="space-y-3">
+                        <ul className="space-y-1">
+                          {r.interpretation.reasons.map((reason, i) => (
+                            <li key={i} className="text-xs leading-relaxed text-zinc-400">· {reason}</li>
+                          ))}
+                        </ul>
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                          <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
+                            <p className="text-xs text-zinc-500">ডেটাসেট ফিঙ্গারপ্রিন্ট</p>
+                            <p className="mt-1 break-all font-mono text-xs text-zinc-300">{r.datasetFingerprint.slice(0, 20)}…</p>
+                          </div>
+                          <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
+                            <p className="text-xs text-zinc-500">কভারেজ (M15)</p>
+                            <p className="mt-1 text-sm text-zinc-200">{fmtDhaka(new Date(r.dataset.fromUtcSec * 1000).toISOString())}</p>
+                            <p className="text-xs text-zinc-600">→ {fmtDhaka(new Date(r.dataset.toUtcSec * 1000).toISOString())}</p>
+                          </div>
+                          <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
+                            <p className="text-xs text-zinc-500">ক্যান্ডেল (M15/H1/H4)</p>
+                            <p className="mt-1 font-mono text-sm text-zinc-200">{r.dataset.executionCandles} / {r.dataset.h1Candles} / {r.dataset.h4Candles}</p>
+                          </div>
+                          <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
+                            <p className="text-xs text-zinc-500">স্প্রেড অনুমান</p>
+                            <p className="mt-1 font-mono text-sm text-amber-300">{r.dataset.observedSpreadPrice}</p>
+                            <p className="text-xs text-zinc-600">বর্তমান পর্যবেক্ষণ — ঐতিহাসিক নয়</p>
+                          </div>
+                        </div>
+                        <p className="text-xs text-zinc-500">
+                          কাউন্টার: মূল্যায়ন {r.counters.evaluations} · ব্লকড {r.counters.blockedEvaluations} · NO_SETUP {r.counters.noSetup} · WAIT {r.counters.wait} · ক্যান্ডিডেট {r.counters.candidateSetups} · ভ্যালিড সেটআপ {r.counters.validSetups} · ফিল {r.counters.hypotheticalFills} · সম্পন্ন {r.counters.completedOutcomes}
+                        </p>
+                      </CardContent>
+                    </Card>
+
+                    {/* Three segments */}
+                    <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                      {(['dev', 'val', 'oos'] as const).map((key) => {
+                        const m = r.segments[key];
+                        return (
+                          <Card key={key} className="border-zinc-800 bg-zinc-900/40">
+                            <CardHeader className="pb-2">
+                              <CardTitle className="flex flex-wrap items-center gap-2 text-sm">
+                                {segBn[key]}
+                                {m.status === 'INSUFFICIENT_DATA' ? (
+                                  <Badge variant="outline" className="border-amber-500/40 bg-amber-500/10 text-amber-300">INSUFFICIENT_DATA</Badge>
+                                ) : (
+                                  <Badge variant="outline" className="border-zinc-700 bg-zinc-900 text-zinc-400">{m.trades} ট্রেড</Badge>
+                                )}
+                              </CardTitle>
+                              <p className="text-xs text-zinc-500">{segLabel[key]}</p>
+                            </CardHeader>
+                            <CardContent>
+                              {m.status === 'INSUFFICIENT_DATA' ? (
+                                <p className="text-xs leading-relaxed text-zinc-400">{m.reason ?? 'নমুনা অপর্যাপ্ত — মেট্রিক বানানো হয়নি।'}</p>
+                              ) : (
+                                <dl className="space-y-1.5 text-xs">
+                                  <div className="flex justify-between gap-2"><dt className="text-zinc-500">কভারেজ</dt><dd className="text-zinc-300">{m.candles} বার</dd></div>
+                                  <div className="flex justify-between gap-2"><dt className="text-zinc-500">উইন-রেট</dt><dd className="text-zinc-200">{fmtInd(m.winRate !== null ? m.winRate * 100 : null, 1)}%</dd></div>
+                                  <div className="flex justify-between gap-2"><dt className="text-zinc-500">গ্রস (খরচ-পূর্ব)</dt><dd className={pnlClass(m.grossPnlPrice)}>{fmtInd(m.grossPnlPrice, 2)}</dd></div>
+                                  <div className="flex justify-between gap-2"><dt className="text-zinc-500">মডেলড খরচ</dt><dd className="text-zinc-400">−{fmtInd(m.costsPrice, 2)}</dd></div>
+                                  <div className="flex justify-between gap-2"><dt className="text-zinc-500">নেট (খরচ-পর)</dt><dd className={pnlClass(m.netPnlPrice)}>{fmtInd(m.netPnlPrice, 2)}</dd></div>
+                                  <div className="flex justify-between gap-2"><dt className="text-zinc-500">প্রফিট ফ্যাক্টর</dt><dd className="text-zinc-200">{fmtInd(m.profitFactor, 2)}</dd></div>
+                                  <div className="flex justify-between gap-2"><dt className="text-zinc-500">এক্সপেক্ট্যান্সি / ট্রেড</dt><dd className={pnlClass(m.expectancyPrice)}>{fmtInd(m.expectancyPrice, 2)}</dd></div>
+                                  <div className="flex justify-between gap-2"><dt className="text-zinc-500">গড় R</dt><dd className={pnlClass(m.expectancyR)}>{fmtInd(m.expectancyR, 3)}</dd></div>
+                                  <div className="flex justify-between gap-2"><dt className="text-zinc-500">সর্বোচ্চ ড্রডাউন</dt><dd className="text-red-400">{fmtInd(m.maxDrawdownPrice, 2)}</dd></div>
+                                  <div className="flex justify-between gap-2"><dt className="text-zinc-500">সর্বোচ্চ পরপর লস</dt><dd className="text-red-400">{m.maxConsecutiveLosses}</dd></div>
+                                  <div className="flex justify-between gap-2"><dt className="text-zinc-500">এক্সপোজার</dt><dd className="text-zinc-200">{fmtInd(m.exposurePct, 1)}%</dd></div>
+                                  <div className="flex justify-between gap-2"><dt className="text-zinc-500">ট্রেড / সপ্তাহ</dt><dd className="text-zinc-200">{fmtInd(m.tradesPerWeek, 2)}</dd></div>
+                                  <div className="flex justify-between gap-2"><dt className="text-zinc-500">টপ-১ লাভের অংশ</dt><dd className="text-zinc-200">{fmtInd(m.concentration.top1GrossShare !== null ? m.concentration.top1GrossShare * 100 : null, 1)}%</dd></div>
+                                </dl>
+                              )}
+                            </CardContent>
+                          </Card>
+                        );
+                      })}
+                    </div>
+
+                    {/* Walk-forward */}
+                    <Card className="border-zinc-800 bg-zinc-900/40">
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-sm">ওয়াক-ফরোয়ার্ড — ক্রমিক সময়-উইন্ডো</CardTitle>
+                        <p className="text-xs leading-relaxed text-zinc-500">{r.walkForward.note}</p>
+                      </CardHeader>
+                      <CardContent className="space-y-2">
+                        <div className="max-h-64 overflow-y-auto custom-scrollbar space-y-1.5 pr-1">
+                          {r.walkForward.windows.map((w) => (
+                            <div key={w.index} className="flex flex-wrap items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2 text-xs">
+                              <span className="font-mono text-zinc-500">w{w.index}</span>
+                              <span className="text-zinc-400">{fmtDhaka(new Date(w.fromUtcSec * 1000).toISOString())} → {fmtDhaka(new Date(w.toUtcSec * 1000).toISOString())}</span>
+                              <span className="text-zinc-600">{w.candles} বার</span>
+                              {w.metrics.status === 'COMPUTED' ? (
+                                <span className="ml-auto flex flex-wrap items-center gap-2">
+                                  <span className="text-zinc-300">{w.metrics.trades} ট্রেড</span>
+                                  <span className={pnlClass(w.metrics.netPnlPrice)}>নেট {fmtInd(w.metrics.netPnlPrice, 2)}</span>
+                                  <span className="text-zinc-400">PF {fmtInd(w.metrics.profitFactor, 2)}</span>
+                                </span>
+                              ) : (
+                                <span className="ml-auto text-amber-400">INSUFFICIENT_DATA ({w.metrics.trades})</span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                        <div className="rounded-lg border border-zinc-700 bg-zinc-900/60 px-3 py-2 text-xs">
+                          <span className="text-zinc-400">সমষ্টি: </span>
+                          {r.walkForward.aggregate.status === 'COMPUTED' ? (
+                            <span className="flex flex-wrap items-center gap-2">
+                              <span className="text-zinc-300">{r.walkForward.aggregate.trades} ট্রেড</span>
+                              <span className={pnlClass(r.walkForward.aggregate.netPnlPrice)}>নেট {fmtInd(r.walkForward.aggregate.netPnlPrice, 2)}</span>
+                              <span className="text-zinc-400">PF {fmtInd(r.walkForward.aggregate.profitFactor, 2)}</span>
+                            </span>
+                          ) : (
+                            <span className="text-amber-400">INSUFFICIENT_DATA — {r.walkForward.aggregate.reason}</span>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+
+                    {/* Sensitivity + Perturbations */}
+                    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                      <Card className="border-zinc-800 bg-zinc-900/40">
+                        <CardHeader className="pb-2">
+                          <CardTitle className="text-sm">খরচ-সংবেদনশীলতা (একই ট্রেড-তালিকা)</CardTitle>
+                          <p className="text-xs text-zinc-500">স্প্রেড বাড়ালে ফল কখনো ভালো হয় না — সীমানা পরীক্ষা, পূর্বাভাস নয়।</p>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="space-y-1.5">
+                            {r.sensitivity.map((s) => (
+                              <div key={s.scenario} className="flex flex-wrap items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2 text-xs">
+                                <span className="font-mono text-zinc-400">{s.scenario}</span>
+                                <span className="text-zinc-600">spr {s.spreadPrice} / slip {s.slippagePrice} / comm {s.commissionPrice}</span>
+                                <span className="ml-auto flex items-center gap-2">
+                                  <span className={pnlClass(s.netPnlPrice)}>নেট {fmtInd(s.netPnlPrice, 2)}</span>
+                                  <span className="text-zinc-400">PF {fmtInd(s.profitFactor, 2)}</span>
+                                  {!s.netPositive && <Badge variant="outline" className="border-red-500/40 bg-red-500/10 text-red-300">ঋণাত্মক</Badge>}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </CardContent>
+                      </Card>
+
+                      <Card className="border-zinc-800 bg-zinc-900/40">
+                        <CardHeader className="pb-2">
+                          <CardTitle className="text-sm">প্যারামিটার পার্টার্বেশন — পূর্ণ সেট</CardTitle>
+                          <p className="text-xs text-zinc-500">কোনো ভ্যারিয়েন্ট বাছাই করা হয়নি; প্রোডাকশন কনফিগ অপরিবর্তিত।</p>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="max-h-64 overflow-y-auto custom-scrollbar space-y-1.5 pr-1">
+                            {r.perturbations.map((p, i) => (
+                              <div key={i} className="flex flex-wrap items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2 text-xs">
+                                <span className="font-mono text-zinc-400">{p.param === '(baseline)' ? '(বেসলাইন)' : `${p.param}`}</span>
+                                {p.param !== '(baseline)' && <span className="font-mono text-zinc-500">= {p.value}</span>}
+                                <span className="ml-auto flex items-center gap-2">
+                                  <span className="text-zinc-300">{p.trades} ট্রেড</span>
+                                  <span className={pnlClass(p.netPnlPrice)}>নেট {fmtInd(p.netPnlPrice, 2)}</span>
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    </div>
+
+                    {/* Paper signals */}
+                    <Card className="border-zinc-800 bg-zinc-900/40">
+                      <CardHeader className="pb-2">
+                        <CardTitle className="flex flex-wrap items-center gap-2 text-sm">
+                          ফরোয়ার্ড পেপার-সিগন্যাল ট্র্যাকিং
+                          <Badge variant="outline" className="border-zinc-700 bg-zinc-900 text-zinc-400">read-only</Badge>
+                        </CardTitle>
+                        <p className="text-xs text-zinc-500">SETUP সিগন্যালের পরে দাম আসলে কী করেছে — ব্রোকার অর্ডার কোথাও নেই (ক্ষমতাই নেই)। প্রতি সিগন্যালে ঠিক একটি ফলাফল — ডুপ্লিকেট অসম্ভব।</p>
+                      </CardHeader>
+                      <CardContent className="space-y-3">
+                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
+                          {[
+                            { label: 'মোট', value: String(validationLatest.paper.total) },
+                            { label: 'খোলা', value: String(validationLatest.paper.open) },
+                            { label: 'স্টপড', value: String(validationLatest.paper.resolved.stopped) },
+                            { label: 'টার্গেটেড', value: String(validationLatest.paper.resolved.targeted) },
+                            { label: 'ইনভ্যালিডেড', value: String(validationLatest.paper.resolved.invalidated) },
+                            { label: 'এক্সপায়ার্ড', value: String(validationLatest.paper.resolved.expired) },
+                            { label: 'গড় R', value: validationLatest.paper.avgR !== null ? fmtInd(validationLatest.paper.avgR, 3) : '—' },
+                          ].map((cell) => (
+                            <div key={cell.label} className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-2.5 text-center">
+                              <p className="text-[11px] text-zinc-500">{cell.label}</p>
+                              <p className="mt-0.5 text-sm font-semibold text-zinc-200">{cell.value}</p>
+                            </div>
+                          ))}
+                        </div>
+                        {validationLatest.paper.outcomes.length === 0 ? (
+                          <p className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3 text-xs text-zinc-400">
+                            এখনো কোনো SETUP সিগন্যাল হয়নি — ট্র্যাক করার কিছু নেই (সৎ খালি)। সিগন্যাল তৈরি হলে প্রতি ৫ মিনিটের শিডিউল্ড সিঙ্কের পর স্বয়ংক্রিয়ভাবে অনুসরণ হবে।
+                          </p>
+                        ) : (
+                          <div className="max-h-64 overflow-y-auto custom-scrollbar space-y-1.5 pr-1">
+                            {validationLatest.paper.outcomes.map((o) => (
+                              <div key={o.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2 text-xs">
+                                <Badge variant="outline" className={o.direction === 'BUY' ? 'border-emerald-500/40 text-emerald-300' : 'border-red-500/40 text-red-300'}>{o.direction}</Badge>
+                                <span className="text-zinc-400">{fmtDhaka(o.signalCreatedAtUtc)}</span>
+                                <span className="font-mono text-zinc-500">এন্ট্রি {o.entryReference}</span>
+                                {o.outcome && <Badge variant="outline" className="border-zinc-700 text-zinc-300">{o.outcome}</Badge>}
+                                {o.rMultiple !== null && <span className={pnlClass(o.rMultiple)}>R {fmtInd(o.rMultiple, 2)}</span>}
+                                <span className="ml-auto text-zinc-600">{o.observations} বার দেখা</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+
+                    {/* Warnings + limitations */}
+                    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                      <Card className="border-amber-500/30 bg-amber-500/5">
+                        <CardHeader className="pb-2">
+                          <CardTitle className="text-sm text-amber-300">সতর্কতা</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          {r.warnings.length === 0 ? (
+                            <p className="text-xs text-zinc-400">কোনো সতর্কতা নেই।</p>
+                          ) : (
+                            <ul className="max-h-56 overflow-y-auto custom-scrollbar space-y-1.5 pr-1">
+                              {r.warnings.map((w, i) => (
+                                <li key={i} className="text-xs leading-relaxed text-zinc-400">⚠ {w}</li>
+                              ))}
+                            </ul>
+                          )}
+                        </CardContent>
+                      </Card>
+                      <Card className="border-zinc-800 bg-zinc-900/40">
+                        <CardHeader className="pb-2">
+                          <CardTitle className="text-sm">পরিচিত সীমাবদ্ধতা</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <ul className="max-h-56 overflow-y-auto custom-scrollbar space-y-1.5 pr-1">
+                            {r.limitations.map((l, i) => (
+                              <li key={i} className="text-xs leading-relaxed text-zinc-500">· {l}</li>
+                            ))}
+                          </ul>
+                        </CardContent>
+                      </Card>
+                    </div>
+                  </>
+                );
+              })()}
             </TabsContent>
 
             {/* ------------------------------------------------ Tab: chat (Phase 9) */}

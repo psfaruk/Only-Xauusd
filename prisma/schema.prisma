@@ -292,6 +292,76 @@ model SignalEvaluation {
 }
 
 // ============================================================================
+// PHASE 10 (ACTIVE) — strategy validation runs + paper-signal forward tracking
+// ----------------------------------------------------------------------------
+// ValidationRun: persisted output of the Phase 10 validation harness over
+// verified broker candles (three-way dev/val/OOS split, walk-forward windows,
+// cost sensitivity, parameter-perturbation SET, pre-registered interpretation).
+// Analysis bookkeeping only — no execution field exists here.
+//
+// PaperSignalOutcome: READ-ONLY forward paper tracking of persisted SETUP
+// evaluations. Exactly ONE row per signal evaluation (unique signalEvaluationId
+// — duplicate outcomes are impossible by construction). Resolved rows are
+// immutable. Records what price DID after a research signal — it can never
+// submit, modify or close a broker order (no such code exists anywhere).
+// ============================================================================
+
+model ValidationRun {
+  id                 String   @id @default(cuid())
+  symbol             String
+  strategyVersion    String
+  harnessVersion     String
+  status             String // completed | insufficient_data | failed
+  datasetFingerprint String
+  datasetFromUtc     DateTime
+  datasetToUtc       DateTime
+  candleCounts       String // JSON {M15,H1,H4}
+  observedSpread     String // canonical decimal text
+  result             String // JSON: full ValidationResult (trades bounded)
+  limitations        String // JSON array
+  durationMs         Int
+  createdAt          DateTime @default(now())
+
+  @@index([symbol, createdAt])
+}
+
+model PaperSignalOutcome {
+  id                    String    @id @default(cuid())
+  signalEvaluationId    String    @unique
+  symbol                String
+  direction             String // BUY | SELL
+  signalCreatedAtUtc    DateTime
+  decisionCandleTimeUtc DateTime
+  setupKnownAtUtc       DateTime
+  expiryUtc             DateTime
+  datasetFingerprint    String?
+  inputFingerprint      String
+  sourceCandleRange     String // JSON: execution/h1/h4 window ranges at signal time
+  entryReference        Float
+  stopLoss              Float
+  target                Float
+  invalidationLevel     Float
+  status                String    @default("open") // open | resolved
+  outcome               String? // stopped | targeted | invalidated | expired
+  resolvedAtUtc         DateTime?
+  resolutionBarTimeUtc  DateTime?
+  exitPrice             Float?
+  observations          Int       @default(0)
+  lastCheckedBarTimeUtc DateTime?
+  modeledCostsPrice     Float
+  grossPnlPrice         Float?
+  netPnlPrice           Float?
+  rMultiple             Float?
+  details               String? // JSON: collision flags, resolution rule, notes
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([symbol, status])
+  @@index([symbol, outcome])
+  @@index([status])
+}
+
+// ============================================================================
 // PHASE 7 (planned) — deterministic risk gate
 // ============================================================================
 

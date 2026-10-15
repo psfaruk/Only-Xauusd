@@ -44,6 +44,15 @@ export async function register() {
       );
       if (outcome.status !== 'success') {
         console.warn(`[scheduler] sync ${outcome.status}: ${outcome.errorCode ?? ''} ${outcome.errorMessage ?? ''}`);
+      } else {
+        // Phase 10: advance the read-only paper-signal tracking after every
+        // successful scheduled sync (fire-and-forget, error-isolated).
+        try {
+          const { trackPaperSignals } = await import('@/lib/signal/paper');
+          void trackPaperSignals(db, { symbol }).catch(() => undefined);
+        } catch {
+          // paper tracking must never break the sync scheduler
+        }
       }
     } catch (err) {
       console.error('[scheduler] sync crashed:', err instanceof Error ? err.message : err);

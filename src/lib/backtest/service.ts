@@ -30,7 +30,7 @@ export interface RunBacktestOutcome {
 /** Verified-candles-only loader. Read-time re-validation (Phase 4 loader
  *  semantics): NaN-text, non-positive or OHLC-inconsistent rows are EXCLUDED,
  *  never silently kept. */
-async function loadVerifiedCandles(
+export async function loadVerifiedCandles(
   symbol: string,
   timeframe: Timeframe,
   maxCandles: number,

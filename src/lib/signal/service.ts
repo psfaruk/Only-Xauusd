@@ -28,6 +28,7 @@ import { SIGNAL_ENGINE_VERSION, type SignalEvaluation, type SignalReasonCode } f
 import { evaluateSignal, failedSignalEvaluation } from './core';
 import { buildStrategyRules } from './rules';
 import { loadSignalWindows, saveSignalEvaluation } from './persistence';
+import { trackPaperSignals } from './paper';
 
 export interface RunSignalOptions {
   symbol?: string;
@@ -102,6 +103,12 @@ export async function runSignalEvaluation(opts: RunSignalOptions = {}): Promise<
     } catch {
       return null; // persistence failure must never mask the verdict
     }
+  };
+
+  /** Phase 10: advance read-only paper tracking after every evaluation run.
+   *  Fire-and-forget, error-isolated — can never affect the verdict. */
+  const advancePaperTracking = () => {
+    void trackPaperSignals(db, { symbol, now: nowMs }).catch(() => undefined);
   };
 
   const blockedOutcome = async (
@@ -228,6 +235,7 @@ export async function runSignalEvaluation(opts: RunSignalOptions = {}): Promise<
     });
 
     const runId = await persist(evaluation, minimalQuote);
+    advancePaperTracking();
     await logEvent({
       level:
         evaluation.outcome === 'BUY_SETUP' || evaluation.outcome === 'SELL_SETUP'
