@@ -1,0 +1,298 @@
+// ============================================================================
+// XAUUSD AI Trading Agent — Prisma Schema (Foundation, Phase 1)
+// ----------------------------------------------------------------------------
+// Design notes:
+// - SQLite provider (sandbox constraint). JSON payloads are stored as String
+//   because Prisma does not support the Json type on SQLite.
+// - Tables for market data / analysis / signals / risk / execution are DEFINED
+//   here as the architectural foundation, but only `SystemEvent` is actively
+//   written by Phase 1 code. Each model is tagged with the phase that will
+//   activate it. No execution-related row is ever written before Phase 11.
+// ============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// ACTIVE IN PHASE 1 — audit logging & system events
+// ============================================================================
+
+/// Central audit trail. Every module (GLM verify, health, future engines)
+/// records machine-readable events here. Never store secrets in `meta`.
+model SystemEvent {
+  id        String   @id @default(cuid())
+  level     String // debug | info | warn | error
+  category  String // app | health | glm | audit | market | analysis | signal | risk | approval | execution | bridge
+  code      String // machine-readable, e.g. GLM_VERIFY_OK
+  message   String
+  meta      String? // JSON string, secret-masked by logger
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([category, level])
+}
+
+// ============================================================================
+// PHASE 3 (ACTIVE) — market data persistence
+// ----------------------------------------------------------------------------
+// Price storage decision (empirically verified, see audit/phase3-audit.md):
+// Prisma "Decimal" on SQLite maps to a DECIMAL-affinity column which SQLite
+// stores as REAL (float64) — typeof() === 'real' — so it is NOT a true decimal.
+// To avoid binary floating-point artifacts in PERSISTED prices, all price
+// fields are canonical decimal TEXT strings (e.g. "2654.32"), produced via
+// toFixed(verifiedDigits) from broker metadata. Exact, immutable, no drift.
+// Time-based queries never filter on price; analysis parses at read time.
+// ============================================================================
+
+/// Broker candles. One row per (symbol, timeframe, bar-open-UTC) — idempotent
+/// upsert target. The latest FORMING bar is stored with isForming=true and is
+/// never exposed as confirmed historical data.
+model MarketCandle {
+  id               String   @id @default(cuid())
+  symbol           String
+  timeframe        String // M5 | M15 | H1 | H4 (allowlist-enforced at ingestion)
+  candleTimeUtc    DateTime // bar OPEN time, UTC (bridge normalizes broker→UTC)
+  open             String // canonical decimal text — exact price
+  high             String
+  low              String
+  close            String
+  tickVolume       Int? // broker tick volume when supplied
+  spread           String? // candle spread in PRICE units when supplied
+  source           String // row-level provenance, e.g. mt5-bridge | demo-bridge
+  isForming        Boolean  @default(false)
+  validationStatus String   @default("VALID") // VALID | WARNING | INVALID
+  receivedAtUtc    DateTime
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([symbol, timeframe, candleTimeUtc])
+  @@index([symbol, timeframe, candleTimeUtc])
+}
+
+/// Latest-tick snapshot — exactly one row per symbol (id = symbol).
+/// Deliberately NOT a high-frequency tick history: excessive tick writes are
+/// avoided by design (spec Phase 3 §B). Staleness is judged by tickTimeUtc.
+model MarketLatestTick {
+  symbol           String   @id
+  bid              String // canonical decimal text
+  ask              String
+  spread           String? // ask − bid, PRICE units
+  spreadPoints     String? // (ask − bid) / point — only when point is calculable from verified digits
+  tickTimeUtc      DateTime
+  receivedAtUtc    DateTime
+  source           String
+  validationStatus String   @default("VALID") // VALID | WARNING | INVALID
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+/// Only VERIFIED broker/MT5 values. Nullable fields stay null until the
+/// bridge actually reports them — nothing is inferred from assumptions.
+/// verifiedFields lists which columns came from the bridge vs. derived
+/// (e.g. point = 10^-digits is marked derived in meta, never claimed as broker-reported).
+model SymbolSpec {
+  symbol         String   @id
+  digits         Int?
+  point          String? // canonical decimal text
+  tickSize       String?
+  tickValue      String?
+  volumeMin      String?
+  volumeMax      String?
+  volumeStep     String?
+  source         String
+  verifiedFields String // JSON array of field names actually verified
+  meta           String? // JSON provenance notes (derivations) — never secrets
+  lastVerifiedAt DateTime
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+/// Data-quality check outcomes (bounded per sync run — never floods).
+model DataQualityIssue {
+  id               String    @id @default(cuid())
+  checkType        String // e.g. OHLC_CONSISTENCY | MISSING_CANDLE | STALE_TICK | GAP_SCAN
+  symbol           String?
+  timeframe        String?
+  targetTimeUtc    DateTime?
+  targetRecordId   String?
+  severity         String // info | warning | error
+  errorCode        String // stable machine-readable code
+  details          String // JSON — safe diagnostics only, no credentials
+  checkedAtUtc     DateTime
+  resolutionStatus String    @default("open") // open | resolved | ignored
+  resolvedAt       DateTime?
+
+  @@index([symbol, timeframe, checkedAtUtc])
+  @@index([resolutionStatus, severity])
+}
+
+/// Every ingestion run — honest bookkeeping. Incomplete runs are never
+/// marked successful (status: running | success | partial | failed | skipped).
+model SyncRun {
+  id            String    @id @default(cuid())
+  mode          String // scheduled | manual | backfill
+  source        String // bridge feed source at run time (mt5 | demo | none)
+  symbol        String
+  timeframes    String // JSON array of requested timeframes
+  rangeStartUtc DateTime?
+  rangeEndUtc   DateTime?
+  startedAtUtc  DateTime  @default(now())
+  endedAtUtc    DateTime?
+  requested     Int       @default(0) // bars the caller asked the bridge for
+  received      Int       @default(0) // bars the bridge returned
+  inserted      Int       @default(0)
+  updated       Int       @default(0)
+  rejected      Int       @default(0) // failed validation
+  duplicates    Int       @default(0) // same key received more than once in one run
+  status        String    @default("running")
+  errorCode     String?
+  errorMessage  String? // safe, non-secret
+  durationMs    Int?
+
+  @@index([startedAtUtc])
+  @@index([symbol, status])
+}
+
+// ============================================================================
+// PHASE 4 (ACTIVE) — deterministic analysis runs
+// ----------------------------------------------------------------------------
+// v2 (Phase 4): additive extension only — new nullable columns + indexes.
+// No existing column was renamed, dropped or retyped; no data was touched
+// (verified: AnalysisRun had 0 rows before this migration — see
+// audit/phase4-audit.md). Status values: pending | completed | blocked | failed.
+// An incomplete/failed run is NEVER returned as a valid analysis.
+// ============================================================================
+
+model AnalysisRun {
+  id            String    @id @default(cuid())
+  symbol        String
+  engineVersion String
+  timeframes    String // JSON: which timeframes were analysed
+  input         String // JSON: exact inputs used (reproducibility)
+  result        String // JSON: deterministic analysis output
+  status        String    @default("pending") // pending | completed | blocked | failed
+  reasonCodes   String? // JSON string[] — block/failure reasons (machine-readable)
+  warnings      String? // JSON string[] — non-blocking warnings
+  inputFingerprint String? // sha256 hex over canonical input + config + engineVersion
+  calculationConfig String? // JSON: full calculation configuration snapshot
+  generatedAtUtc DateTime?
+  durationMs    Int?
+  startedAt     DateTime  @default(now())
+  completedAt   DateTime?
+
+  @@index([symbol, status, startedAt])
+  @@index([startedAt])
+}
+
+model Signal {
+  id         String    @id @default(cuid())
+  setupId     String    @unique
+  analysisId  String?
+  symbol      String
+  direction   String // BUY | SELL | WAIT
+  entry       Float?
+  entryLow    Float?
+  entryHigh   Float?
+  stopLoss    Float?
+  takeProfit  Float?
+  riskReward  Float?
+  expiry      DateTime?
+  status      String    @default("active") // active | expired | rejected | executed
+  reason      String? // human-readable WAIT/block reason
+  createdAt   DateTime  @default(now())
+
+  @@index([symbol, status, createdAt])
+}
+
+// ============================================================================
+// PHASE 6 (planned) — GLM multi-agent reviews
+// ============================================================================
+
+model AiReview {
+  id         String   @id @default(cuid())
+  signalId   String?
+  analysisId String?
+  agent      String // orchestrator | analyst | setup_reviewer | critic | risk_reviewer
+  verdict    String // approve | reject | wait
+  reasoning  String
+  meta       String?
+  createdAt  DateTime @default(now())
+}
+
+
+// ============================================================================
+// PHASE 8 (ACTIVE) — historical backtest bookkeeping
+// ----------------------------------------------------------------------------
+// Persisted result of the Phase 8 backtest simulator over VERIFIED broker
+// candles. A backtest is a SIMULATION, never proof of live profitability.
+// No execution-related field exists here; this table records analysis only.
+// ============================================================================
+
+model BacktestRun {
+  id                String   @id @default(cuid())
+  strategyVersion   String
+  symbol            String
+  timeframe         String
+  status            String // completed | insufficient_data | failed
+  datasetFingerprint String
+  datasetFromUtc    DateTime
+  datasetToUtc      DateTime
+  candleCount       Int
+  source            String
+  exclusions        String // JSON array
+  rules             String // JSON: BacktestRules
+  devMetrics        String // JSON: BacktestMetrics
+  oosMetrics        String // JSON: BacktestMetrics
+  trades            String // JSON: BacktestTrade[] (bounded)
+  limitations       String // JSON array
+  durationMs        Int
+  createdAt         DateTime @default(now())
+
+  @@index([symbol, timeframe, createdAt])
+}
+
+// ============================================================================
+// PHASE 7 (planned) — deterministic risk gate
+// ============================================================================
+
+model RiskCheck {
+  id        String   @id @default(cuid())
+  signalId  String
+  checks    String // JSON: [{ rule, passed, detail }]
+  passed    Boolean
+  createdAt DateTime @default(now())
+
+  @@index([signalId])
+}
+
+// ============================================================================
+// PHASE 11 (planned) — approval-based execution (LOCKED until Phase 11 gate)
+// No row is ever written here by Phase 1 code.
+// ============================================================================
+
+model TradeApproval {
+  id        String    @id @default(cuid())
+  signalId  String
+  status    String    @default("pending") // pending | approved | rejected | expired
+  note      String?
+  createdAt DateTime  @default(now())
+  decidedAt DateTime?
+  expiresAt DateTime?
+}
+
+model ExecutionLog {
+  id        String   @id @default(cuid())
+  signalId  String
+  request   String // JSON sent to bridge (never contains account secrets)
+  result    String // JSON broker response
+  status    String // sent | filled | rejected | failed
+  createdAt DateTime @default(now())
+
+  @@index([signalId])
+}

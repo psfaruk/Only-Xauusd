@@ -1,0 +1,17 @@
+{
+  "name": "mt5-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "description": "READ-ONLY Exness MT5 market-data bridge (Phase 8) — authenticated web-terminal protocol, no trading commands by construction",
+  "scripts": {
+    "dev": "bun --hot --env-file=../../.env index.ts",
+    "start": "bun --env-file=../../.env index.ts"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.10",
+    "bun-types": "^1.4.3"
+  }
+}
