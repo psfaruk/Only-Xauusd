@@ -14,6 +14,12 @@ import { loadAnalysisInput } from '@/lib/analysis/persistence';
 import type { TfLoadedData } from '@/lib/analysis/types';
 import type { SignalEvaluation, SignalWindow, StrategyRules } from './types';
 import { setupFingerprintFromEvidence } from './setup-identity';
+import {
+  RULES_SNAPSHOT_VERSION,
+  buildRulesSnapshot,
+  parseRulesSnapshot,
+  type RulesSnapshotRead,
+} from './rules-snapshot';
 
 export interface LoadedSignalWindows {
   digits: number | null;
@@ -70,6 +76,11 @@ export interface SaveSignalEvaluationArgs {
   startedAtUtc: Date;
   /** Execution-TF label (Phase 10.3-A) — part of the setup identity. */
   executionTimeframe: string;
+  /** Phase 10.3-D: the ACTUAL rules used for this evaluation (snapshot source). */
+  rules: StrategyRules;
+  /** Phase 10.3-D: verified broker digits at evaluation time; null = unavailable
+   *  (spec never verified — recorded honestly as provenance "unavailable"). */
+  digits: number | null;
 }
 
 export interface SavedSignalEvaluation {
@@ -93,6 +104,15 @@ export async function saveSignalEvaluation(
     strategyVersion: e.strategyVersion,
     evidence: e.evidence,
   });
+  // Phase 10.3-D: immutable, versioned, validated snapshot of the rules
+  // actually used for THIS evaluation. Build failure → structured diagnostic
+  // (never throws — persistence must not mask the verdict). Legacy rows keep
+  // rules:null and are displayed as "not recorded", never backfilled.
+  const rulesBuild = buildRulesSnapshot(args.rules, {
+    symbol: e.symbol,
+    engineVersion: e.engineVersion,
+    digits: args.digits,
+  });
   const row = await db.signalEvaluation.create({
     data: {
       engineVersion: e.engineVersion,
@@ -111,7 +131,13 @@ export async function saveSignalEvaluation(
               h4: e.evidence.h4Window,
             }
           : null,
-        rules: null, // rules snapshot added by the service (kept small)
+        rules: rulesBuild.ok
+          ? rulesBuild.snapshot
+          : {
+              rulesSnapshotVersion: RULES_SNAPSHOT_VERSION,
+              error: 'INVALID_RULES_SNAPSHOT',
+              diagnostic: rulesBuild.diagnostic,
+            },
       }),
       evidence: JSON.stringify(e.evidence ?? {}),
       levels: e.levels ? JSON.stringify(e.levels) : null,
@@ -142,6 +168,11 @@ export interface LatestSignalEvaluation {
   evidence: SignalEvaluation['evidence'];
   inputFingerprint: string;
   datasetFingerprint: string | null;
+  /** Phase 10.3-A identity — null for legacy/unidentifiable rows (never guessed). */
+  setupFingerprint: string | null;
+  /** Phase 10.3-D: the STORED rules snapshot (present / not-recorded / invalid).
+   *  Parsed from the row — never recomputed from current configuration. */
+  rulesSnapshot: RulesSnapshotRead;
   executionLocked: boolean;
   quote: Record<string, unknown> | null;
   durationMs: number | null;
@@ -162,6 +193,8 @@ function parseLatestRow(row: {
   evidence: string;
   inputFingerprint: string;
   datasetFingerprint: string | null;
+  setupFingerprint: string | null;
+  inputSnapshot: string;
   executionLocked: boolean;
   quote: string;
   durationMs: number | null;
@@ -188,6 +221,8 @@ function parseLatestRow(row: {
     evidence: safeParse<SignalEvaluation['evidence']>(row.evidence, null),
     inputFingerprint: row.inputFingerprint,
     datasetFingerprint: row.datasetFingerprint,
+    setupFingerprint: row.setupFingerprint ?? null,
+    rulesSnapshot: parseRulesSnapshot(row.inputSnapshot),
     executionLocked: row.executionLocked,
     quote: safeParse<Record<string, unknown> | null>(row.quote, null),
     durationMs: row.durationMs,
@@ -217,4 +252,33 @@ export async function getSignalEvaluationHistory(
     })
     .catch(() => []);
   return rows.map(parseLatestRow);
+}
+
+/** Phase 10.3-D: all-time counts for a symbol — evaluations vs DISTINCT logical
+ *  setups (null fingerprints = legacy/unidentifiable and are counted as
+ *  evaluations but NEVER as distinct setups — no fabricated identities).
+ *  Display-only: on DB error returns null (honest absence beats a fake 0). */
+export interface SignalEvaluationCounts {
+  totalEvaluations: number;
+  distinctSetups: number;
+}
+
+export async function getSignalEvaluationCounts(
+  db: PrismaClient,
+  symbol?: string,
+): Promise<SignalEvaluationCounts | null> {
+  try {
+    const totalEvaluations = await db.signalEvaluation.count({
+      where: symbol ? { symbol } : undefined,
+    });
+    const grouped = await db.signalEvaluation.groupBy({
+      by: ['setupFingerprint'],
+      where: symbol
+        ? { symbol, setupFingerprint: { not: null } }
+        : { setupFingerprint: { not: null } },
+    });
+    return { totalEvaluations, distinctSetups: grouped.length };
+  } catch {
+    return null;
+  }
 }

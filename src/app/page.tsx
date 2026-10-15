@@ -235,6 +235,29 @@ interface SignalEvidenceView {
   h4Window: { fromUtc: string; toUtc: string; bars: number };
 }
 
+/** Phase 10.3-D — rules-snapshot manifest entry (as returned by /api/signal/*). */
+interface RuleManifestEntryView {
+  id: string;
+  value: number | string | string[] | null;
+  unit: string;
+  scope: string;
+  source: string;
+}
+
+/** Phase 10.3-D — stored rules snapshot read result (present / not-recorded / invalid). */
+interface RulesSnapshotView {
+  status: 'present' | 'not-recorded' | 'invalid';
+  reason?: string;
+  snapshot?: {
+    rulesSnapshotVersion: number;
+    engineVersion: string;
+    strategyVersion: string;
+    symbol: string;
+    rules: RuleManifestEntryView[];
+    snapshotHash: string;
+  };
+}
+
 interface SignalLatestResponse {
   ok: boolean;
   symbol: string;
@@ -245,6 +268,7 @@ interface SignalLatestResponse {
     reasonCodes: string[];
     engineVersion: string;
     strategyVersion: string;
+    symbol: string;
     decisionCandleTimeUtc: string | null;
     setupKnownAtUtc: string | null;
     expiryUtc: string | null;
@@ -252,6 +276,10 @@ interface SignalLatestResponse {
     evidence: SignalEvidenceView | null;
     inputFingerprint: string;
     datasetFingerprint: string | null;
+    /** Phase 10.3-A identity — null on legacy/unidentifiable rows (never guessed). */
+    setupFingerprint: string | null;
+    /** Phase 10.3-D — the STORED rules snapshot (never recomputed from current config). */
+    rulesSnapshot: RulesSnapshotView;
     executionLocked: boolean;
     quote: Record<string, unknown> | null;
   } | null;
@@ -270,6 +298,30 @@ interface SignalLatestResponse {
     limitations: string[];
   } | null;
   notes: string[];
+}
+
+/** Phase 10.3-D — /api/signal/history response (append-only trail + counts). */
+interface SignalHistoryEntryView {
+  id: string;
+  createdAt: string;
+  outcome: string;
+  reasonCodes: string[];
+  engineVersion: string;
+  strategyVersion: string;
+  setupFingerprint: string | null;
+  rulesSnapshot: RulesSnapshotView;
+  executionLocked: boolean;
+}
+
+interface SignalHistoryResponse {
+  ok: boolean;
+  symbol: string;
+  count: number;
+  /** All-time counts — evaluations vs DISTINCT logical setups (legacy rows
+   *  count as evaluations only, never as setups — no fabricated identities). */
+  counts: { totalEvaluations: number; distinctSetups: number } | null;
+  outcomeCounts: Record<string, number>;
+  history: SignalHistoryEntryView[];
 }
 
 /** Phase 9 — /api/chat response. */
@@ -1148,6 +1200,8 @@ export default function Phase1Dashboard() {
   const [backtestLatest, setBacktestLatest] = useState<BacktestLatestResponse | null>(null);
   const [signalLatest, setSignalLatest] = useState<SignalLatestResponse | null>(null);
   const [signalRunning, setSignalRunning] = useState(false);
+  // Phase 10.3-D — evaluation history + counts (evaluations vs distinct setups)
+  const [signalHistory, setSignalHistory] = useState<SignalHistoryResponse | null>(null);
   const [validationLatest, setValidationLatest] = useState<ValidationLatestResponse | null>(null);
   // Phase 10.3-C — verified symbol metadata (digits) for price display precision
   const [dataLatest, setDataLatest] = useState<DataLatestResponse | null>(null);
@@ -1159,7 +1213,7 @@ export default function Phase1Dashboard() {
 
   const refresh = useCallback(async () => {
     try {
-      const [hRes, aRes, mRes, qRes, anRes, dhRes, btRes, sgRes, vlRes, dlRes] = await Promise.all([
+      const [hRes, aRes, mRes, qRes, anRes, dhRes, btRes, sgRes, vlRes, dlRes, shRes] = await Promise.all([
         fetch('/api/health', { cache: 'no-store' }),
         fetch('/api/audit/environment', { cache: 'no-store' }),
         fetch('/api/data/status', { cache: 'no-store' }).catch(() => null),
@@ -1171,6 +1225,8 @@ export default function Phase1Dashboard() {
         fetch('/api/validation/latest?symbol=XAUUSDm', { cache: 'no-store' }).catch(() => null),
         // Phase 10.3-C — verified SymbolSpec (digits/verifiedFields) for display precision
         fetch('/api/data/latest?symbol=XAUUSDm', { cache: 'no-store' }).catch(() => null),
+        // Phase 10.3-D — evaluation history + counts (read-only, existing endpoint)
+        fetch('/api/signal/history?symbol=XAUUSDm&limit=20', { cache: 'no-store' }).catch(() => null),
       ]);
       if (!hRes.ok && !aRes.ok) throw new Error('API unreachable');
       if (hRes.ok) setHealth((await hRes.json()) as HealthReport);
@@ -1202,6 +1258,8 @@ export default function Phase1Dashboard() {
       else setValidationLatest(null);
       if (dlRes && dlRes.ok) setDataLatest((await dlRes.json()) as DataLatestResponse);
       else setDataLatest(null);
+      if (shRes && shRes.ok) setSignalHistory((await shRes.json()) as SignalHistoryResponse);
+      else setSignalHistory(null);
       setLoadError(null);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : 'unknown error');
@@ -2397,16 +2455,26 @@ export default function Phase1Dashboard() {
                     const s = signalLatest.signal;
                     return (
                       <>
-                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
                           <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
                             <p className="text-xs text-zinc-500">ইঞ্জিন / কৌশল</p>
                             <p className="mt-1 font-mono text-sm text-zinc-200">{s.engineVersion}</p>
                             <p className="font-mono text-xs text-zinc-500">{s.strategyVersion}</p>
+                            <p className="text-xs text-zinc-600">সিম্বল: <span className="font-mono">{s.symbol}</span> · M15</p>
                           </div>
                           <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
                             <p className="text-xs text-zinc-500">সিদ্ধান্ত ক্যান্ডেল (M15)</p>
                             <p className="mt-1 text-sm text-zinc-200">{s.decisionCandleTimeUtc ? fmtDhaka(s.decisionCandleTimeUtc) : '—'}</p>
                             <p className="text-xs text-zinc-500">জানা গেছে: {s.setupKnownAtUtc ? fmtDhaka(s.setupKnownAtUtc) : '—'}</p>
+                          </div>
+                          <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
+                            <p className="text-xs text-zinc-500">সেটআপ আঙ্গুলছাপ (10.3-A)</p>
+                            {s.setupFingerprint ? (
+                              <p className="mt-1 break-all font-mono text-xs text-zinc-300" title={s.setupFingerprint}>{s.setupFingerprint.slice(0, 16)}…</p>
+                            ) : (
+                              <p className="mt-1 text-xs text-zinc-500">আঙ্গুলছাপ নেই (legacy/অ-শনাক্ত)</p>
+                            )}
+                            <p className="text-xs text-zinc-600">একই লজিক্যাল সেটআপ = একই আঙ্গুলছাপ</p>
                           </div>
                           <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
                             <p className="text-xs text-zinc-500">ডেটাসেট ফিঙ্গারপ্রিন্ট</p>
@@ -2416,7 +2484,11 @@ export default function Phase1Dashboard() {
                           <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
                             <p className="text-xs text-zinc-500">এক্সিকিউশন লক</p>
                             <p className="mt-1 text-sm text-zinc-200">{s.executionLocked ? 'সক্রিয় (read-only)' : '—'}</p>
-                            <p className="text-xs text-zinc-600">মেয়াদ: {s.expiryUtc ? fmtDhaka(s.expiryUtc) : '—'}</p>
+                            <p className="text-xs text-zinc-600">
+                              মেয়াদ: {s.expiryUtc ? (
+                                <>{fmtDhaka(s.expiryUtc)}{new Date(s.expiryUtc).getTime() < Date.now() ? <span className="ml-1 text-amber-400">(মেয়াদোত্তীর্ণ)</span> : null}</>
+                              ) : '—'}
+                            </p>
                           </div>
                         </div>
 
@@ -2544,6 +2616,56 @@ export default function Phase1Dashboard() {
                             <PriceLevelText value={(s.quote as { bid?: string }).bid} spec={priceSpec} className="font-mono" /> / <PriceLevelText value={(s.quote as { ask?: string }).ask} spec={priceSpec} className="font-mono" /> ({String((s.quote as { ageSeconds?: number }).ageSeconds ?? '—')}s আগে)
                           </p>
                         )}
+
+                        {/* Rules manifest — Phase 10.3-D (stored snapshot; 3 honest states) */}
+                        {s.rulesSnapshot.status === 'present' && s.rulesSnapshot.snapshot && (() => {
+                          const rs = s.rulesSnapshot.snapshot!;
+                          const sourceBn: Record<string, string> = {
+                            'verified-configuration': 'যাচাইকৃত কনফিগ',
+                            'strategy-constant': 'কৌশল-ধ্রুবক',
+                            'broker-metadata': 'ব্রোকার মেটাডেটা',
+                            unavailable: 'অনুপলব্ধ',
+                          };
+                          return (
+                            <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
+                              <p className="flex flex-wrap items-center gap-2 text-xs font-semibold text-zinc-400">
+                                নিয়ম-ম্যানিফেস্ট (এই মূল্যায়নে ব্যবহৃত)
+                                <Badge variant="outline" className="border-zinc-700 bg-zinc-900 font-mono text-[10px] text-zinc-400">v{rs.rulesSnapshotVersion}</Badge>
+                                <span className="break-all font-mono text-[10px] text-zinc-600" title={rs.snapshotHash}>hash {rs.snapshotHash.slice(0, 12)}…</span>
+                              </p>
+                              <p className="mt-1 text-[11px] leading-relaxed text-zinc-600">
+                                সংরক্ষিত স্ন্যাপশট — পরে কনফিগ বদলালেও এই সারির মান বদলায় না। নিয়ম = চালু থাকা কনফিগারেশন; পাস/ফেল অবস্থা কারণ-কোডে (উপরে)।
+                              </p>
+                              <div className="mt-2 max-h-64 overflow-y-auto custom-scrollbar space-y-1 pr-1" role="region" aria-label="নিয়ম-ম্যানিফেস্ট তালিকা">
+                                {rs.rules.map((entry) => (
+                                  <div key={entry.id} className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 rounded border border-zinc-800/60 bg-zinc-900/60 px-2 py-1 text-[11px]">
+                                    <span className="break-all font-mono text-zinc-400">{entry.id}</span>
+                                    <span className="font-mono text-zinc-200">
+                                      = {entry.value === null ? 'null' : Array.isArray(entry.value) ? entry.value.join('+') : String(entry.value)}
+                                    </span>
+                                    <span className="text-zinc-600">{entry.unit}</span>
+                                    <span className="ml-auto text-zinc-600" title={`source: ${entry.source}`}>{sourceBn[entry.source] ?? entry.source}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })()}
+                        {s.rulesSnapshot.status === 'not-recorded' && (
+                          <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3" role="note">
+                            <p className="text-xs text-amber-300">নিয়ম-স্ন্যাপশট: এই মূল্যায়নের জন্য রেকর্ড করা হয়নি (Not recorded for this evaluation)</p>
+                            <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+                              পুরনো (legacy) সারি — 10.3-D-এর আগে নিয়ম শুধু ইনপুট-ফিঙ্গারপ্রিন্টের ভেতরে হ্যাশ আকারে সংরক্ষিত হতো। অনুমান করে বর্তমান কনফিগ দেখানো হয় না; এটি কৌশলের ব্যর্থতাও নয়। নতুন মূল্যায়নে স্বয়ংক্রিয়ভাবে স্ন্যাপশট সংরক্ষিত হবে।
+                            </p>
+                          </div>
+                        )}
+                        {s.rulesSnapshot.status === 'invalid' && (
+                          <div className="rounded-lg border border-red-500/30 bg-red-500/5 p-3" role="alert">
+                            <p className="text-xs text-red-300">নিয়ম-স্ন্যাপশট অকার্যকর/অসংগত — নিরাপদে প্রত্যাখ্যাত</p>
+                            <p className="mt-1 break-all font-mono text-[11px] text-zinc-500">কারণ: {s.rulesSnapshot.reason ?? 'অজানা'}</p>
+                            <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">এটি কৌশলের ব্যর্থতা নয় — সংরক্ষিত স্ন্যাপশটের গঠন/অখণ্ডতা যাচাইে ব্যর্থ। মূল্যায়নের ফলাফল ও কারণ-কোড অপরিবর্তিত।</p>
+                          </div>
+                        )}
                       </>
                     );
                   })()}
@@ -2572,6 +2694,65 @@ export default function Phase1Dashboard() {
                       </div>
                     );
                   })()}
+                </CardContent>
+              </Card>
+
+              {/* Recent evaluations — Phase 10.3-D (append-only trail; legacy rows labelled) */}
+              <Card className="border-zinc-800 bg-zinc-900/40">
+                <CardHeader className="pb-2">
+                  <CardTitle className="flex flex-wrap items-center gap-2 text-sm">
+                    সাম্প্রতিক মূল্যায়ন (append-only)
+                    <Badge variant="outline" className="border-zinc-700 bg-zinc-900 text-zinc-400">read-only</Badge>
+                    {signalHistory?.counts && (
+                      <span className="ml-auto text-xs font-normal text-zinc-500">
+                        মোট <span className="font-mono text-zinc-300">{signalHistory.counts.totalEvaluations}</span> মূল্যায়ন ·{' '}
+                        <span className="font-mono text-zinc-300">{signalHistory.counts.distinctSetups}</span> স্বতন্ত্র সেটআপ
+                      </span>
+                    )}
+                  </CardTitle>
+                  <p className="text-xs text-zinc-500">
+                    মূল্যায়ন-সংখ্যা ≠ স্বতন্ত্র সেটআপ-সংখ্যা — একই লজিক্যাল সেটআপ বারবার মূল্যায়ন হতে পারে (10.3-A dedup)। আঙুলছাপ-নেই সারি = legacy/অ-শনাক্ত — কোনো আইডি বানানো হয় না।
+                  </p>
+                </CardHeader>
+                <CardContent>
+                  {!signalHistory && (
+                    <p className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3 text-xs text-zinc-500">
+                      মূল্যায়ন-ইতিহাস এখন লোড করা যায়নি (সৎ খালি)।
+                    </p>
+                  )}
+                  {signalHistory && signalHistory.history.length === 0 && (
+                    <p className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3 text-xs text-zinc-500">
+                      এখনো কোনো মূল্যায়ন সংরক্ষিত হয়নি — উপরের বাটন দিয়ে চালান।
+                    </p>
+                  )}
+                  {signalHistory && signalHistory.history.length > 0 && (
+                    <div className="max-h-72 overflow-y-auto custom-scrollbar space-y-1.5 pr-1" role="region" aria-label="সাম্প্রতিক মূল্যায়ন তালিকা">
+                      {signalHistory.history.map((h) => (
+                        <div key={h.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2 text-xs">
+                          <span className="text-zinc-400">{fmtDhaka(h.createdAt)}</span>
+                          <Badge variant="outline" className={signalOutcomeBadgeClass(h.outcome)}>
+                            {signalOutcomeBn[h.outcome] ?? h.outcome}
+                          </Badge>
+                          {h.reasonCodes.length > 0 && (
+                            <span className="break-all font-mono text-[10px] text-zinc-500">{h.reasonCodes.join(', ')}</span>
+                          )}
+                          {h.setupFingerprint ? (
+                            <span className="ml-auto break-all font-mono text-[10px] text-zinc-600" title={h.setupFingerprint}>
+                              সেটআপ {h.setupFingerprint.slice(0, 10)}…
+                            </span>
+                          ) : (
+                            <span className="ml-auto text-[10px] text-zinc-600">আঙুলছাপ নেই (legacy/অ-শনাক্ত)</span>
+                          )}
+                          {h.rulesSnapshot.status === 'not-recorded' && (
+                            <span className="text-[10px] text-amber-500/80" title="Not recorded for this evaluation">নিয়ম-রেকর্ড নেই</span>
+                          )}
+                          {h.rulesSnapshot.status === 'invalid' && (
+                            <span className="text-[10px] text-red-400/80" title={`অকার্যকর স্ন্যাপশট: ${h.rulesSnapshot.reason ?? ''}`}>স্ন্যাপশট অকার্যকর</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             </TabsContent>
@@ -2798,6 +2979,24 @@ export default function Phase1Dashboard() {
                         <p className="text-xs text-zinc-500">SETUP সিগন্যালের পরে দাম আসলে কী করেছে — ব্রোকার অর্ডার কোথাও নেই (ক্ষমতাই নেই)। প্রতি সিগন্যালে ঠিক একটি ফলাফল — ডুপ্লিকেট অসম্ভব।</p>
                       </CardHeader>
                       <CardContent className="space-y-3">
+                        {/* Phase 10.3-D — three DIFFERENT counts, never conflated */}
+                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                          <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-2.5 text-center">
+                            <p className="text-[11px] text-zinc-500">মোট মূল্যায়ন (সব ফলাফল)</p>
+                            <p className="mt-0.5 text-sm font-semibold text-zinc-200">{signalHistory?.counts ? signalHistory.counts.totalEvaluations : '—'}</p>
+                          </div>
+                          <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-2.5 text-center">
+                            <p className="text-[11px] text-zinc-500">স্বতন্ত্র লজিক্যাল সেটআপ</p>
+                            <p className="mt-0.5 text-sm font-semibold text-zinc-200">{signalHistory?.counts ? signalHistory.counts.distinctSetups : '—'}</p>
+                          </div>
+                          <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-2.5 text-center">
+                            <p className="text-[11px] text-zinc-500">পেপার-ফলাফল সারি (নিচের গ্রিড)</p>
+                            <p className="mt-0.5 text-sm font-semibold text-zinc-200">{validationLatest.paper.total}</p>
+                          </div>
+                        </div>
+                        <p className="text-[11px] leading-relaxed text-zinc-600">
+                          তিনটি সংখ্যা আলাদা ধারণা: মূল্যায়ন = append-only ইতিহাসের সারি; স্বতন্ত্র সেটআপ = ইউনিক সেটআপ-আঙ্গুলছাপ (10.3-A); পেপার-ফলাফল = প্রতি সেটআপে ঠিক একটি forward ট্র্যাকিং সারি। পেপার-ফলাফল কখনোই আসল ব্রোকার ট্রেড নয়।
+                        </p>
                         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
                           {[
                             { label: 'মোট', value: String(validationLatest.paper.total) },

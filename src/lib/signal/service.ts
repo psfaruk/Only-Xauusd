@@ -91,6 +91,9 @@ export async function runSignalEvaluation(opts: RunSignalOptions = {}): Promise<
   const persist = async (
     evaluation: SignalEvaluation,
     quote: Record<string, unknown>,
+    /** Verified digits at evaluation time (null when the spec was never
+     *  verified — e.g. pre-gate-3 blocks; recorded honestly as unavailable). */
+    digits: number | null = null,
   ): Promise<string | null> => {
     try {
       const saved = await saveSignalEvaluation(db, {
@@ -99,6 +102,9 @@ export async function runSignalEvaluation(opts: RunSignalOptions = {}): Promise<
         durationMs: Date.now() - startedMs,
         startedAtUtc: startedAt,
         executionTimeframe: rules.executionTf,
+        // Phase 10.3-D: the ACTUAL rules object used for this evaluation run.
+        rules,
+        digits,
       });
       return saved.id;
     } catch {
@@ -115,6 +121,7 @@ export async function runSignalEvaluation(opts: RunSignalOptions = {}): Promise<
   const blockedOutcome = async (
     codes: SignalReasonCode[],
     quote: Record<string, unknown>,
+    digits: number | null = null,
   ): Promise<SignalRunOutcome> => {
     const evaluation: SignalEvaluation = {
       engineVersion: SIGNAL_ENGINE_VERSION,
@@ -132,7 +139,7 @@ export async function runSignalEvaluation(opts: RunSignalOptions = {}): Promise<
       datasetFingerprint: null,
       generatedAtUtc: new Date(nowUtcSec * 1000).toISOString(),
     };
-    const runId = await persist(evaluation, quote);
+    const runId = await persist(evaluation, quote, digits);
     await logEvent({
       level: 'warn',
       category: 'signal',
@@ -172,7 +179,7 @@ export async function runSignalEvaluation(opts: RunSignalOptions = {}): Promise<
     const spec = await db.symbolSpec.findUnique({ where: { symbol } }).catch(() => null);
     const digits = spec?.digits ?? null;
     if (digits === null) {
-      return { ...(await blockedOutcome(['SPEC_MISSING'], minimalQuote)), quoteReport };
+      return { ...(await blockedOutcome(['SPEC_MISSING'], minimalQuote, digits)), quoteReport };
     }
 
     // ── Gate 4: market-data readiness (tick + per-TF freshness) ───────────
@@ -235,7 +242,7 @@ export async function runSignalEvaluation(opts: RunSignalOptions = {}): Promise<
       rules,
     });
 
-    const runId = await persist(evaluation, minimalQuote);
+    const runId = await persist(evaluation, minimalQuote, windows.digits);
     advancePaperTracking();
     await logEvent({
       level:

@@ -7,7 +7,7 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { guardDataApi, parseQuery } from '@/lib/api-guard';
-import { getSignalEvaluationHistory } from '@/lib/signal/persistence';
+import { getSignalEvaluationCounts, getSignalEvaluationHistory } from '@/lib/signal/persistence';
 import { config } from '@/lib/config';
 import { signalHistoryQuerySchema } from '@/lib/signal/schemas';
 
@@ -31,10 +31,15 @@ export async function GET(req: Request) {
       acc[h.outcome] = (acc[h.outcome] ?? 0) + 1;
       return acc;
     }, {});
+    // Phase 10.3-D: all-time counts — EVALUATIONS (audit-trail rows) vs
+    // DISTINCT LOGICAL SETUPS (non-null setupFingerprint; legacy/
+    // unidentifiable rows are counted as evaluations only, never as setups).
+    const counts = await getSignalEvaluationCounts(db, symbol);
     return NextResponse.json({
       ok: true,
       symbol,
       count: history.length,
+      counts,
       outcomeCounts,
       history,
       note: 'Append-only trail — earlier evaluations are never overwritten or deleted.',

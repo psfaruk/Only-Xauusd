@@ -582,6 +582,9 @@ describe('D2 — persistence writes the same fingerprint the tracker recomputes'
     };
     const saved = await saveSignalEvaluation(db, {
       evaluation, quote: {}, durationMs: 5, startedAtUtc: new Date(NOW()), executionTimeframe: 'M15',
+      // Phase 10.3-D (fixture update, disclosed): the ACTUAL rules + verified
+      // digits now persist as a rules snapshot inside inputSnapshot.
+      rules: buildStrategyRules(), digits: 3,
     });
     const row = await db.signalEvaluation.findUnique({ where: { id: saved.id } });
     const recomputed = setupFingerprintFromEvidence({ symbol: SYMBOL, timeframe: 'M15', strategyVersion: STRAT_V9, evidence: JSON.parse(row!.evidence) });
@@ -606,7 +609,10 @@ describe('D2 — persistence writes the same fingerprint the tracker recomputes'
       evidence: { structureEvent: null, anchorSwing: null, indicators: { ema50: 50, rsi14: 60, atr14: 2, adx14: 20 }, htfContext: { h1Trend: 'unclear' as const, h4Trend: 'unclear' as const }, decisionClose: 2650, retestBarTimeUtc: null, executionWindow: { fromUtc: new Date(T0 * 1000).toISOString(), toUtc: new Date(X * 1000).toISOString(), bars: 300 }, h1Window: { fromUtc: new Date(T0 * 1000).toISOString(), toUtc: new Date(T0 * 1000).toISOString(), bars: 300 }, h4Window: { fromUtc: new Date(T0 * 1000).toISOString(), toUtc: new Date(T0 * 1000).toISOString(), bars: 300 } },
       inputFingerprint: 'fp-d2b', datasetFingerprint: null, generatedAtUtc: new Date(NOW()).toISOString(),
     };
-    const saved = await saveSignalEvaluation(db, { evaluation, quote: {}, durationMs: 5, startedAtUtc: new Date(NOW()), executionTimeframe: 'M15' });
+    const saved = await saveSignalEvaluation(db, {
+      evaluation, quote: {}, durationMs: 5, startedAtUtc: new Date(NOW()), executionTimeframe: 'M15',
+      rules: buildStrategyRules(), digits: 3, // Phase 10.3-D fixture update (disclosed)
+    });
     const row = await db.signalEvaluation.findUnique({ where: { id: saved.id } });
     expect(row?.setupFingerprint ?? null).toBeNull();
     await db.signalEvaluation.delete({ where: { id: saved.id } });
