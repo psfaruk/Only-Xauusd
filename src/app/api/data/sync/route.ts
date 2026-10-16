@@ -7,7 +7,9 @@
  *
  * Body: { symbol, timeframes?, mode: "manual"|"backfill", rangeStartUtc?, rangeEndUtc? }
  * Backfill ranges are bounded (MARKET_BACKFILL_MAX_DAYS / _MAX_BARS).
- * Heavily rate-limited; bearer-gated when DATA_API_TOKEN is configured.
+ * Heavily rate-limited; bearer-gated when DATA_API_TOKEN is configured
+ * (Phase 13 preview opt-in: MARKET_API_PUBLIC_TRIGGERS=true opens triggers
+ * only when no token is set — broker-read-only, still rate-limited).
  */
 
 import { guardDataApi, jsonError } from '@/lib/api-guard';

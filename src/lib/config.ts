@@ -129,12 +129,21 @@ export const config = {
   },
   dataApi: {
     /** Optional bearer token — when set, ALL /api/data/* and /api/analysis/*
-     * requests require it. WRITE/TRIGGER endpoints (POST) require it ALWAYS. */
+     * requests require it. WRITE/TRIGGER endpoints (POST) require it ALWAYS
+     * (unless the explicit MARKET_API_PUBLIC_TRIGGERS preview opt-in is set —
+     * see publicTriggers below). */
     hasToken: Boolean(process.env.DATA_API_TOKEN),
     /** Explicit, opt-in public reads for GET endpoints when DATA_API_TOKEN is
      * unset (default: false = fail closed). Intended for preview/dashboards
      * only — NEVER enable in production (see README §Security). */
     publicReads: bool('MARKET_API_PUBLIC_READS', false),
+    /** Explicit, opt-in public TRIGGERS for POST endpoints when DATA_API_TOKEN
+     * is unset (default: false = fail closed). Preview/dashboards only — the
+     * guarded operations are read-only w.r.t. the broker (sync + deterministic
+     * analysis + research signal evaluation; no order code exists), and the
+     * tight trigger rate-limit bucket still applies. NEVER enable in
+     * production (see README §Security). */
+    publicTriggers: bool('MARKET_API_PUBLIC_TRIGGERS', false),
     rateLimitPerMin: Math.min(Math.max(10, num('DATA_API_RATE_LIMIT_PER_MIN', 120)), 600),
   },
   analysis: {
@@ -225,6 +234,7 @@ export function configSnapshot() {
     dataApi: {
       tokenProtected: config.dataApi.hasToken,
       publicReads: config.dataApi.publicReads,
+      publicTriggers: config.dataApi.publicTriggers,
       rateLimitPerMin: config.dataApi.rateLimitPerMin,
     },
     limits: { maxEventsReturned: config.limits.maxEventsReturned },

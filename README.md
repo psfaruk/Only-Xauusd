@@ -34,7 +34,7 @@ BOS/CHoCH, Wilder-কনভেনশন ইন্ডিকেটর (EMA 20/50/2
 
 | ঝুঁকি (Phase 3 রিভিউ) | সমাধান |
 | --- | --- |
-| API auth ডিফল্টে খোলা | POST trigger এখন **সবসময়** টোকেন দাবি করে — টোকেন না থাকলে 503 `MARKET_API_TOKEN_NOT_CONFIGURED` (বাইপাস নেই)। GET ডিফল্টে fail-closed; `MARKET_API_PUBLIC_READS=true` দিলে কেবল তখনই খোলা (preview-এর জন্য, production-এ কখনো নয়) |
+| API auth ডিফল্টে খোলা | POST trigger এখন **সবসময়** টোকেন দাবি করে — টোকেন না থাকলে ৫০৩ `MARKET_API_TOKEN_NOT_CONFIGURED` (বাইপাস নেই)। GET ডিফল্টে fail-closed; `MARKET_API_PUBLIC_READS=true` দিলে কেবল তখনই খোলা (preview-এর জন্য, production-এ কখনো নয়)। **Phase 13:** টোকেন না থাকলে POST trigger-ও শুধু স্পষ্ট `MARKET_API_PUBLIC_TRIGGERS=true` দিলে খোলা — অপারেশনগুলো ব্রোকারের প্রতি read-only (sync/analysis/signal), কঠোর rate-limit প্রযোজ্য; production-এ কখনো নয়। টোকেন সেট থাকলে এই ফ্ল্যাগ উপেক্ষিত — bearer সবসময় লাগবে। |
 | Backfill coverage যাচাই ছিল না | টাইমস্ট্যাম্প-ভিত্তিক coverage যাচাই — requested range-এর due-grid বনাম DB-তে থাকা closed candle; অসম্পূর্ণ হলে run **কখনো success নয়** (partial/failed + `BACKFILL_INCOMPLETE`) |
 | অডিট-রিপোর্ট অসঙ্গতি | বর্তমান commit-এর জন্য নতুন অডিট `audit/phase4-audit.md` (পুরনোটি ইতিহাস হিসেবে অক্ষুণ্ণ) |
 | Migration-এ পুরনো ডেটা ঝুঁকি | Phase 4 মাইগ্রেশন কেবল additive (ALTER ADD COLUMN + CREATE INDEX) — drop নেই; যাচাই: `prisma/migrations/20261014133225_phase4_analysis_runs/migration.sql` + রো-কাউন্ট প্রমাণ |
@@ -356,13 +356,20 @@ curl http://localhost:3000/api/analysis/latest
 প্রতিটি রান AnalysisRun সারিতে থাকে: exact input snapshot (decimal-text), calculationConfig,
 ফল, sha256 ফিঙ্গারপ্রিন্ট — একই ইনপুট আবার দিলে বাইট-অভিন্ন ফল আসে (টেস্টে প্রমাণিত)।
 
-## ৪. নিরাপত্তা (Phase 4 hardened)
+## ৪. নিরাপত্তা (Phase 4 hardened, Phase 13-এ স্পষ্ট preview opt-in)
 
-- **POST trigger সবসময় টোকেন দাবি করে** (`/api/data/sync`, `/api/analysis/run`) —
-  `DATA_API_TOKEN` না থাকলে 503 `MARKET_API_TOKEN_NOT_CONFIGURED`, কোনো বাইপাস নেই।
+- **POST trigger সবসময় টোকেন দাবি করে** (`/api/data/sync`, `/api/analysis/run`,
+  `/api/signal/run`) — `DATA_API_TOKEN` না থাকলে 503 `MARKET_API_TOKEN_NOT_CONFIGURED`।
+  একমাত্র ব্যতিক্রম (Phase 13): টোকেন না থাকলে **স্পষ্ট** `.env` opt-in
+  `MARKET_API_PUBLIC_TRIGGERS=true` দিলে ট্রিগার খোলা — কারণ এই অপারেশনগুলো ব্রোকারের
+  প্রতি read-only (candle sync + deterministic analysis + research signal evaluation;
+  কোনো order কোড নেই) এবং autonomous scheduler একই কাজ প্রতি ৫ মিনিটে করে।
+  Trigger rate-limit bucket (`DATA_API_RATE_LIMIT_PER_MIN`-এর দশমাংশ, ন্যূনতম ২ —
+  ডিফল্টে ১২/মিনিট/IP) সবসময় প্রযোজ্য।
+  **টোকেন সেট থাকলে ফ্ল্যাগ উপেক্ষিত** — bearer যাচাই সবসময় চলবে।
 - GET ডিফল্টে fail-closed; শুধু `MARKET_API_PUBLIC_READS=true` দিলে খোলা —
   শুধুমাত্র preview/ড্যাশবোর্ডের জন্য, **production-এ কখনো নয়**।
-- Production/VPS: লম্বা random `DATA_API_TOKEN` দিন, public reads বন্ধ রাখুন।
+- Production/VPS: লম্বা random `DATA_API_TOKEN` দিন, public reads/triggers বন্ধ রাখুন।
 - Analysis লেয়ারে কোনো BUY/SELL/order/position/lot টোকেন নেই (স্ট্যাটিক টেস্ট); LLM
   কখনো ইন্ডিকেটর গণনা করে না — সব বিশ্লেষণ শুদ্ধ TypeScript, LLM-মুক্ত।
 

@@ -5,9 +5,12 @@
  * trade signal, an entry, a position size or any execution instruction — no
  * order/trade/position functionality exists anywhere in this codebase.
  *
- * Security (Phase 4 hardening): TRIGGER endpoints require DATA_API_TOKEN
- * ALWAYS — unset token → 503 MARKET_API_TOKEN_NOT_CONFIGURED (fail closed,
- * no bypass). Heavy rate limiting.
+ * Security (Phase 4 hardening, Phase 13 preview opt-in): TRIGGER endpoints
+ * require DATA_API_TOKEN ALWAYS — unset token → 503
+ * MARKET_API_TOKEN_NOT_CONFIGURED (fail closed). The only exception is the
+ * explicit, separately-documented preview opt-in MARKET_API_PUBLIC_TRIGGERS=true
+ * (broker-read-only operations; tight rate limit still applies). Heavy rate
+ * limiting.
  *
  * Responses:
  *   200 { ok: true, run, analysis }            — analysis ran; analysis.status

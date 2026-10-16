@@ -42,7 +42,7 @@ export const bnErrorText: Record<string, string> = {
   SYNC_IN_PROGRESS: 'একটি সিঙ্ক ইতিমধ্যেই চলছে — নতুনটি বাতিল।',
   // Phase 4 (analysis + hardened API)
   MARKET_API_TOKEN_NOT_CONFIGURED:
-    'DATA_API_TOKEN সেট করা হয়নি — সুরক্ষিত endpoint fail-closedভাবে বন্ধ (এটি ইচ্ছাকৃত, ৫০৩)।',
+    'DATA_API_TOKEN সেট করা হয়নি — সুরক্ষিত endpoint fail-closedভাবে বন্ধ (এটি ইচ্ছাকৃত, ৫০৩)। প্রিভিউ ড্যাশবোর্ডের জন্য .env-এ MARKET_API_PUBLIC_TRIGGERS=true দিন, অথবা প্রোডাকশনে DATA_API_TOKEN সেট করুন।',
   BACKFILL_INCOMPLETE: 'ব্যাকফিলের অনুরোধ-করা পরিসর টাইমস্ট্যাম্প-ভিত্তিক যাচাইতে অসম্পূর্ণ — সফল বলা হবে না।',
   DATA_NOT_READY: 'বিশ্লেষণের জন্য ডেটা এখনো প্রস্তুত নয়।',
   DATA_INVALID: 'ডেটা যাচাইয়ে ব্যর্থ — বিশ্লেষণের জন্য অবিশ্বস্ত।',
@@ -55,6 +55,42 @@ export const bnErrorText: Record<string, string> = {
   RSI_FLAT_MARKET: 'সমতল বাজার — RSI সংজ্ঞায়িত ৫০ (সতর্কতা)।',
   ADX_FLAT_MARKET: 'সমতল বাজার — DX সংজ্ঞায়িত ০ (সতর্কতা)।',
   TICK_ZERO_SPREAD: 'টিকের স্প্রেড শূন্য — সতর্কতা সহ রাখা হয়েছে।',
+  // Phase 13 — signal-engine verdict reason codes (WAIT/NO_SETUP gates are
+  // HEALTHY strategy outcomes, not errors; the wording must say exactly that
+  // so an honest WAIT never reads as a system failure).
+  HTF_H4_OPPOSITE: 'H4 প্রেক্ষাপট সেটআপের দিকের বিপরীত — উচ্চতর টাইমফ্রেম অনুমোদন দেয়নি (স্বাভাবিক WAIT)।',
+  HTF_H1_OPPOSITE: 'H1 প্রেক্ষাপট সেটআপের দিকের বিপরীত — উচ্চতর টাইমফ্রেম অনুমোদন দেয়নি (স্বাভাবিক WAIT)।',
+  RETEST_PENDING: 'কাঠামো-ভাঙা শনাক্ত হয়েছে — এখন লেভেলে retest-এর অপেক্ষায় (স্বাভাবিক WAIT)।',
+  ZONE_INVALIDATED: 'দাম এন্ট্রি-জোন পেরিয়ে চলে গেছে — এই সেটআপ আর বৈধ নয় (স্বাভাবিক WAIT)।',
+  STRUCTURE_BREAK_TOO_OLD: 'কাঠামো-ভাঙা খুব পুরোনো হয়ে গেছে — সঠিক সময়ে এন্ট্রি-জোন মিলেনি (স্বাভাবিক WAIT)।',
+  NO_STRUCTURE_BREAK: 'সাম্প্রতিক উইন্ডোতে কোনো BOS/CHoCH কাঠামো-ভাঙা নেই (স্বাভাবিক NO_SETUP)।',
+  NO_ANCHOR_SWING: 'স্টপ-লসের জন্য বৈধ অ্যাংকর সুইং পাওয়া যায়নি (স্বাভাবিক WAIT)।',
+  EMA_TREND_OPPOSITE: 'EMA ট্রেন্ড সেটআপের দিকের বিপরীত (স্বাভাবিক WAIT)।',
+  RSI_OUT_OF_RANGE: 'RSI গ্রহণযোগ্য ব্যান্ডের বাইরে (স্বাভাবিক WAIT)।',
+  ADX_BELOW_MIN: 'ট্রেন্ড-শক্তি (ADX) ন্যূনতম সীমার নিচে — বাজার চপচপে (স্বাভাবিক WAIT)।',
+  SPREAD_TOO_WIDE: 'স্প্রেড সর্বোচ্চ সীমার চেয়ে চওড়া (স্বাভাবিক WAIT)।',
+  SPREAD_INVALID: 'স্প্রেড মান অবৈধ — গণনা করা যায়নি।',
+  PRICE_BEYOND_ENTRY_ZONE: 'দাম এন্ট্রি-জোনের বাইরে — অপেক্ষা চলবে (স্বাভাবিক WAIT)।',
+  AT_ZONE_BOUNDARY: 'দাম এন্ট্রি-জোনের কিনারায় — নিশ্চিত অপেক্ষা (স্বাভাবিক WAIT)।',
+  LEVEL_CALC_INVALID: 'এন্ট্রি/SL/TP লেভেল গণনা বৈধ হয়নি — সেটআপ বাতিল (সুরক্ষা)।',
+  INDICATOR_WARMUP: 'ইন্ডিকেটর এখনো ওয়ার্ম-আপ করছে — আরও বদ্ধ ক্যান্ডেল দরকার।',
+  INSUFFICIENT_H4_HISTORY: 'H4 ইতিহাস অপর্যাপ্ত — উচ্চতর-টাইমফ্রেম প্রেক্ষাপট যাচাই করা যায়নি।',
+  INSUFFICIENT_H1_HISTORY: 'H1 ইতিহাস অপর্যাপ্ত — উচ্চতর-টাইমফ্রেম প্রেক্ষাপট যাচাই করা যায়নি।',
+  FORMING_CANDLE_IN_INPUT: 'ইনপুটে গঠনশীল ক্যান্ডেল ঢুকে পড়েছে — fail-closed বাতিল (সুরক্ষা)।',
+  GAP_IN_WINDOW: 'বিশ্লেষণ উইন্ডোতে ফাঁক — অনিরাপদ, তাই বাতিল (সুরক্ষা)।',
+  CHRONOLOGY_BROKEN: 'ক্যান্ডেলের কালানুক্রম ভাঙা — fail-closed বাতিল (সুরক্ষা)।',
+  QUOTE_STALE: 'কোট পুরোনো হয়ে গেছে — সিদ্ধান্ত নেওয়া অনিরাপদ (fail-closed)।',
+  QUOTE_UNAVAILABLE: 'সর্বশেষ কোট পাওয়া যায়নি (fail-closed)।',
+  TICK_INVALID: 'টিক যাচাইয়ে ব্যর্থ (fail-closed)।',
+  SOURCE_NOT_BROKER: 'ডেটার উৎস ব্রোকার নয় — অবিশ্বস্ত (fail-closed)।',
+  NOT_AUTHENTICATED: 'ব্রিজ সেশন প্রমাণীকৃত নয় (fail-closed)।',
+  BUY_SETUP: 'BUY সেটআপ শনাক্ত (গবেষণা সিগন্যাল — কোনো অর্ডার নয়)।',
+  SELL_SETUP: 'SELL সেটআপ শনাক্ত (গবেষণা সিগন্যাল — কোনো অর্ডার নয়)।',
+  WAIT: 'অপেক্ষা — এই মুহূর্তে কোনো বৈধ সেটআপ নেই (স্বাভাবিক, সৎ ফল)।',
+  NO_SETUP: 'সেটআপ নেই — কৌশলের শর্ত পূরণ হয়নি (স্বাভাবিক, সৎ ফল)।',
+  BLOCKED: 'ডেটা-গেটে বন্ধ — অবিশ্বস্ত ইনপুটে সিদ্ধান্ত হয় না (fail-closed)।',
+  FAILED: 'মূল্যায়ন ব্যর্থ — বিস্তারিত সিস্টেম লগে।',
+  SIGNAL_ERROR: 'সিগন্যাল ইঞ্জিনে অপ্রত্যাশিত ত্রুটি।',
 };
 
 export function bnForCode(code: string): string {

@@ -5,9 +5,17 @@
  * surface.
  *
  * Security posture (Phase 4 hardening — fail closed, README §Security):
- *   · TRIGGER endpoints (POST /api/data/sync, POST /api/analysis/run) require
- *     DATA_API_TOKEN ALWAYS. When the token is unset they respond 503
- *     MARKET_API_TOKEN_NOT_CONFIGURED and never run. There is no bypass.
+ *   · TRIGGER endpoints (POST /api/data/sync, POST /api/analysis/run,
+ *     POST /api/signal/run) require DATA_API_TOKEN ALWAYS. When the token is
+ *     unset they respond 503 MARKET_API_TOKEN_NOT_CONFIGURED and never run.
+ *     There is no bypass — except ONE explicit, separately-documented preview
+ *     opt-in: MARKET_API_PUBLIC_TRIGGERS=true (Phase 13). That flag only
+ *     matters when the token is UNSET, never weakens a token-protected
+ *     deployment, and the tight trigger rate-limit bucket still applies.
+ *     The guarded operations are read-only w.r.t. the broker (sync +
+ *     deterministic analysis + research signal evaluation; no order code
+ *     exists anywhere), which is exactly what the autonomous scheduler already
+ *     does every MARKET_SYNC_INTERVAL_MS.
  *   · READ endpoints (GET) require the bearer token whenever it is set.
  *     When it is unset they fail closed with the same 503 UNLESS the operator
  *     explicitly opts in via MARKET_API_PUBLIC_READS=true (preview/dashboards
@@ -76,8 +84,11 @@ export function jsonError(
 
 /**
  * Guard a protected request. `bucket`:
- *   · 'trigger' — write/trigger endpoints (POST sync / POST analysis run):
- *     bearer token ALWAYS required; unset token → 503 fail closed.
+ *   · 'trigger' — write/trigger endpoints (POST sync / POST analysis run /
+ *     POST signal run): bearer token ALWAYS required; unset token → 503 fail
+ *     closed, unless the operator explicitly opted in to public triggers via
+ *     MARKET_API_PUBLIC_TRIGGERS=true (preview-only; Phase 13). A set token
+ *     always requires a valid bearer — the flag never weakens that posture.
  *   · 'read' — read endpoints (GET): token required when set; when unset,
  *     allowed only with the explicit MARKET_API_PUBLIC_READS opt-in,
  *     otherwise 503 fail closed.
@@ -124,10 +135,27 @@ export function guardDataApi(
   };
 
   if (bucket === 'trigger') {
-    // Triggers ALWAYS require the token — no bypass, no opt-in.
-    const failure = requireToken();
-    if (failure) return { ok: false, response: failure };
-    return { ok: true };
+    // Triggers require the token — no implicit bypass. ONE explicit,
+    // separately-documented preview opt-in (Phase 13): when NO token is
+    // configured the operator may open the (broker-read-only, rate-limited)
+    // trigger surface with MARKET_API_PUBLIC_TRIGGERS=true. When a token IS
+    // set, the bearer check always runs and the flag is ignored.
+    if (token) {
+      const failure = requireToken();
+      if (failure) return { ok: false, response: failure };
+      return { ok: true };
+    }
+    if (process.env.MARKET_API_PUBLIC_TRIGGERS === 'true' || process.env.MARKET_API_PUBLIC_TRIGGERS === '1') {
+      return { ok: true }; // explicitly opted-in public trigger (preview only)
+    }
+    return {
+      ok: false,
+      response: jsonError(
+        503,
+        ErrorCode.MARKET_API_TOKEN_NOT_CONFIGURED,
+        'Fail-closed: DATA_API_TOKEN is not set. This endpoint never runs unauthenticated. Set DATA_API_TOKEN (see README §Security) or, for preview dashboards only, MARKET_API_PUBLIC_TRIGGERS=true.',
+      ),
+    };
   }
 
   // Reads: token set → bearer required. Token unset → public opt-in or 503.

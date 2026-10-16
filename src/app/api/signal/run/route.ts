@@ -7,7 +7,9 @@
  * codebase, and the four-switch execution lock stays engaged.
  *
  * Security: TRIGGER endpoint — DATA_API_TOKEN ALWAYS required (unset → 503
- * fail closed, no bypass). Fail-closed data gates run before any setup is
+ * fail closed). The only exception is the explicit preview opt-in
+ * MARKET_API_PUBLIC_TRIGGERS=true (Phase 13; broker-read-only ops, tight
+ * rate limit still applies). Fail-closed data gates run before any setup is
  * evaluated; BLOCKED is a VALID, honest outcome (HTTP 200).
  *
  * Responses:

@@ -21,7 +21,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BarChart3, Home, MessageCircle, ShieldCheck, Activity } from 'lucide-react';
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -267,10 +267,32 @@ export default function TradingTerminal() {
     }
   }, [marketStatus?.symbol, refresh, toast]);
 
+  /**
+   * Phase 13 — sync-first helper for on-demand runs. The signal engine
+   * fail-closes on ticks older than MARKET_STALE_TICK_SEC (120s default) while
+   * the scheduler syncs every 300s, so an on-demand evaluation BETWEEN syncs
+   * would honestly BLOCK with TICK_STALE. Fetching fresh data first keeps the
+   * verdict meaningful without touching any data-quality threshold. Sync
+   * failures are ignored here — the evaluation then reports the honest stale
+   * verdict itself.
+   */
+  const syncBeforeRun = useCallback(async (symbol: string) => {
+    try {
+      await fetch('/api/data/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbol, mode: 'manual' }),
+      });
+    } catch {
+      // network-level failure — the subsequent evaluation shows the honest state
+    }
+  }, []);
+
   const runAnalysisNow = useCallback(async () => {
     setAnalysisRunning(true);
     try {
       const symbol = marketStatus?.symbol ?? SYMBOL;
+      await syncBeforeRun(symbol);
       const res = await fetch('/api/analysis/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -305,12 +327,13 @@ export default function TradingTerminal() {
     } finally {
       setAnalysisRunning(false);
     }
-  }, [marketStatus?.symbol, refresh, toast]);
+  }, [marketStatus?.symbol, refresh, syncBeforeRun, toast]);
 
   const runSignalNow = useCallback(async () => {
     setSignalRunning(true);
     try {
       const symbol = marketStatus?.symbol ?? SYMBOL;
+      await syncBeforeRun(symbol);
       const res = await fetch('/api/signal/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -346,7 +369,7 @@ export default function TradingTerminal() {
     } finally {
       setSignalRunning(false);
     }
-  }, [marketStatus?.symbol, refresh, toast]);
+  }, [marketStatus?.symbol, refresh, syncBeforeRun, toast]);
 
   // ---- Chat submit (Enter-to-send wired in ChatView; logic extracted+tested) ----
   const sendChat = useCallback(
@@ -593,6 +616,9 @@ export default function TradingTerminal() {
               <SheetTitle className="flex items-center gap-2 text-sm text-zinc-100">
                 <MessageCircle className="h-4 w-4 text-amber-400" aria-hidden /> বাংলা এআই চ্যাট
               </SheetTitle>
+              <SheetDescription className="sr-only">
+                Read-only টুল-ভিত্তিক সহকারী — সিস্টেম স্ট্যাটাস, বাজার ডেটা ও সর্বশেষ মূল্যায়ন নিয়ে বাংলায় প্রশ্ন করুন। ট্রেড চালানোর ক্ষমতা নেই।
+              </SheetDescription>
             </SheetHeader>
             <div className="h-[calc(100vh-4rem)]">{chatView}</div>
           </SheetContent>

@@ -180,8 +180,10 @@ describe('POST /api/data/sync (case 15-adjacent + validation)', () => {
   test('unauthenticated POST is refused before any work (fail closed, no bypass)', async () => {
     const hadToken = process.env.DATA_API_TOKEN;
     const hadFlag = process.env.MARKET_API_PUBLIC_READS;
+    const hadTriggers = process.env.MARKET_API_PUBLIC_TRIGGERS;
     delete process.env.DATA_API_TOKEN;
     process.env.MARKET_API_PUBLIC_READS = 'true'; // even with public reads ON…
+    delete process.env.MARKET_API_PUBLIC_TRIGGERS; // …and the trigger opt-in OFF
     try {
       const { POST } = await import('@/app/api/data/sync/route');
       const res = await POST(
@@ -200,6 +202,8 @@ describe('POST /api/data/sync (case 15-adjacent + validation)', () => {
       else process.env.DATA_API_TOKEN = hadToken;
       if (hadFlag === undefined) delete process.env.MARKET_API_PUBLIC_READS;
       else process.env.MARKET_API_PUBLIC_READS = hadFlag;
+      if (hadTriggers === undefined) delete process.env.MARKET_API_PUBLIC_TRIGGERS;
+      else process.env.MARKET_API_PUBLIC_TRIGGERS = hadTriggers;
     }
   });
 
@@ -241,6 +245,115 @@ describe('POST /api/data/sync (case 15-adjacent + validation)', () => {
       expect(body.outcome.errorCode).toBe('BRIDGE_NOT_CONFIGURED');
     } finally {
       delete process.env.DATA_API_TOKEN;
+    }
+  });
+});
+
+describe('Phase 13 — MARKET_API_PUBLIC_TRIGGERS explicit preview opt-in (trigger guard)', () => {
+  const save = (keys: string[]) => {
+    const had: Record<string, string | undefined> = {};
+    for (const k of keys) had[k] = process.env[k];
+    return had;
+  };
+  const restore = (had: Record<string, string | undefined>) => {
+    for (const [k, v] of Object.entries(had)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  };
+
+  test('token unset + trigger opt-in ON → guard passes; route zod still rejects bad body (400, not 503)', async () => {
+    const had = save(['DATA_API_TOKEN', 'MARKET_API_PUBLIC_TRIGGERS', 'MARKET_API_PUBLIC_READS']);
+    delete process.env.DATA_API_TOKEN;
+    delete process.env.MARKET_API_PUBLIC_READS;
+    process.env.MARKET_API_PUBLIC_TRIGGERS = 'true';
+    try {
+      const { POST } = await import('@/app/api/data/sync/route');
+      const res = await POST(
+        req('/api/data/sync', {
+          method: 'POST',
+          // unique client IP → isolated rate-limit bucket (guard runs BEFORE auth)
+          headers: { 'Content-Type': 'application/json', 'x-forwarded-for': '198.51.100.101' },
+          body: JSON.stringify({ symbol: SYMBOL, timeframes: ['M7'], mode: 'manual' }),
+        }),
+      );
+      expect(res.status).toBe(400); // passed the guard → zod rejected M7
+      const body = (await res.json()) as { ok: boolean; error: { code: string } };
+      expect(body.ok).toBe(false);
+      expect(body.error.code).toBe('BAD_REQUEST');
+    } finally {
+      restore(had);
+    }
+  });
+
+  test('token unset + trigger opt-in ON + valid body → route RUNS (bridge unconfigured in tests → 503 BRIDGE_NOT_CONFIGURED, ok:true)', async () => {
+    const had = save(['DATA_API_TOKEN', 'MARKET_API_PUBLIC_TRIGGERS', 'MARKET_API_PUBLIC_READS']);
+    delete process.env.DATA_API_TOKEN;
+    delete process.env.MARKET_API_PUBLIC_READS;
+    process.env.MARKET_API_PUBLIC_TRIGGERS = 'true';
+    try {
+      const { POST } = await import('@/app/api/data/sync/route');
+      const res = await POST(
+        req('/api/data/sync', {
+          method: 'POST',
+          // unique client IP → isolated rate-limit bucket (guard runs BEFORE auth)
+          headers: { 'Content-Type': 'application/json', 'x-forwarded-for': '198.51.100.102' },
+          body: JSON.stringify({ symbol: SYMBOL, mode: 'manual' }),
+        }),
+      );
+      expect(res.status).toBe(503);
+      const body = (await res.json()) as { ok: boolean; outcome: { status: string; errorCode: string } };
+      expect(body.ok).toBe(true); // the route executed — this is NOT the guard's 503
+      expect(body.outcome.status).toBe('failed');
+      expect(body.outcome.errorCode).toBe('BRIDGE_NOT_CONFIGURED');
+    } finally {
+      restore(had);
+    }
+  });
+
+  test('token SET + trigger opt-in ON → bearer still required (401) — the flag never weakens a token-protected deployment', async () => {
+    const had = save(['DATA_API_TOKEN', 'MARKET_API_PUBLIC_TRIGGERS']);
+    process.env.DATA_API_TOKEN = 'some-token-value';
+    process.env.MARKET_API_PUBLIC_TRIGGERS = 'true';
+    try {
+      const { POST } = await import('@/app/api/data/sync/route');
+      const res = await POST(
+        req('/api/data/sync', {
+          method: 'POST',
+          // unique client IP → isolated rate-limit bucket (guard runs BEFORE auth)
+          headers: { 'Content-Type': 'application/json', 'x-forwarded-for': '198.51.100.103' },
+          body: JSON.stringify({ symbol: SYMBOL, mode: 'manual' }),
+        }),
+      );
+      expect(res.status).toBe(401); // flag ignored when a token is configured
+      const body = (await res.json()) as { ok: boolean; error: { code: string } };
+      expect(body.error.code).toBe('AUTH_MISSING_TOKEN');
+    } finally {
+      restore(had);
+    }
+  });
+
+  test('token unset + trigger opt-in unset → default fail-closed 503 MARKET_API_TOKEN_NOT_CONFIGURED preserved', async () => {
+    const had = save(['DATA_API_TOKEN', 'MARKET_API_PUBLIC_TRIGGERS', 'MARKET_API_PUBLIC_READS']);
+    delete process.env.DATA_API_TOKEN;
+    delete process.env.MARKET_API_PUBLIC_READS;
+    delete process.env.MARKET_API_PUBLIC_TRIGGERS;
+    try {
+      const { POST } = await import('@/app/api/data/sync/route');
+      const res = await POST(
+        req('/api/data/sync', {
+          method: 'POST',
+          // unique client IP → isolated rate-limit bucket (guard runs BEFORE auth)
+          headers: { 'Content-Type': 'application/json', 'x-forwarded-for': '198.51.100.104' },
+          body: JSON.stringify({ symbol: SYMBOL, mode: 'manual' }),
+        }),
+      );
+      expect(res.status).toBe(503);
+      const body = (await res.json()) as { ok: boolean; error: { code: string } };
+      expect(body.ok).toBe(false);
+      expect(body.error.code).toBe('MARKET_API_TOKEN_NOT_CONFIGURED');
+    } finally {
+      restore(had);
     }
   });
 });

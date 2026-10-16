@@ -253,8 +253,10 @@ describe('analysis — POST /api/analysis/run', () => {
   test('without DATA_API_TOKEN the POST NEVER runs (fail closed, even with public reads ON)', async () => {
     const hadToken = process.env.DATA_API_TOKEN;
     const hadFlag = process.env.MARKET_API_PUBLIC_READS;
+    const hadTriggers = process.env.MARKET_API_PUBLIC_TRIGGERS;
     delete process.env.DATA_API_TOKEN;
     process.env.MARKET_API_PUBLIC_READS = 'true'; // reads may be open — POSTs must not be
+    delete process.env.MARKET_API_PUBLIC_TRIGGERS; // trigger opt-in OFF → fail closed
     try {
       const { POST } = await import('@/app/api/analysis/run/route');
       const res = await POST(
@@ -275,6 +277,8 @@ describe('analysis — POST /api/analysis/run', () => {
       else process.env.DATA_API_TOKEN = hadToken;
       if (hadFlag === undefined) delete process.env.MARKET_API_PUBLIC_READS;
       else process.env.MARKET_API_PUBLIC_READS = hadFlag;
+      if (hadTriggers === undefined) delete process.env.MARKET_API_PUBLIC_TRIGGERS;
+      else process.env.MARKET_API_PUBLIC_TRIGGERS = hadTriggers;
     }
   });
 

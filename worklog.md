@@ -555,3 +555,29 @@ Stage Summary:
 - Full suite 532/532 green and now order-independent (7-file hermeticity fix); 33 new focused UI tests; lint/tsc clean; desktop+mobile E2E verified with 12 screenshots + GLM vision checks.
 - All four execution locks remain LOCKED (env + code + live + static tripwires); bridge stays GET-only read-only; zero protocol/strategy/safety file changes; single route preserved; NO commit, NO push (change set awaits review).
 - Artifacts: audit/ui-redesign-implementation.md, audit/ui02-*.png (12), src/components/terminal/ (9 files), src/lib/dashboard/ (4), src/app/api/data/chart/route.ts, tests/ui/ (4 files).
+
+---
+Task ID: 26
+Agent: Z.ai Code (main orchestrator)
+Task: PHASE 13 — Full System Recovery & Production Readiness (48-hour no-signal investigation + fix)
+
+Work Log:
+- Baseline: main @ c82dc4e clean; dev server + bridge daemon + scheduler all running (restored by prior session at ~12:56Z); .env intact with all MT5_*/MARKET_* keys (names only inspected, values never printed).
+- 48h investigation (scripts/phase13-pipeline-audit.ts, read-only): current DB holds records only from 2026-10-16T12:56:58Z — sandbox rebuilds wiped .env+DB, so the 48h window has NO retained records; during that period bridge was unconfigured → zero syncs/evaluations → chat/UI failed closed with MARKET_API_TOKEN_NOT_CONFIGURED. Stated honestly in reports (no fabricated history).
+- Retained-window classification: 17 evals = 13 WAIT + 4 NO_SETUP, zero BUY/SELL ever; reasons RETEST_PENDING×6, HTF_H1_OPPOSITE×6, ZONE_INVALIDATED×3, STRUCTURE_BREAK_TOO_OLD×1, HTF_H4_OPPOSITE×1; scheduler max gap exactly 5.0 min, all syncs success, 0 rejected candles; directional paths proven by engine fixtures (BUY_SETUP/SELL_SETUP with valid levels) → live WAIT is legitimate mixed H1/H4 market context, NOT an engine defect.
+- Traced MARKET_API_TOKEN_NOT_CONFIGURED to guardDataApi 'trigger' branch (src/lib/api-guard.ts): DATA_API_TOKEN unset in preview posture → all 3 manual action buttons 503'd = the "UI partially disabled" symptom. Not an external API token.
+- FIX D1: explicit preview opt-in MARKET_API_PUBLIC_TRIGGERS (default false, fail-closed preserved; ignored when a token is set; broker-read-only ops; tight trigger rate limit) — api-guard.ts + config.ts (parse+snapshot) + .env + .env.example + README (2 sections) + 3 route doc-comments; 4 new guard tests + 2 existing tests extended (bun auto-loads .env — tests must control the flag; new tests use unique x-forwarded-for IPs to isolate the shared in-process rate-limit bucket).
+- FIX D2: syncBeforeRun UI orchestration in page.tsx — analysis/signal buttons sync first so on-demand verdicts are fresh (MARKET_STALE_TICK_SEC=120 vs 300s cadence previously made ~60% of clicks BLOCKED/TICK_STALE); no threshold changed.
+- FIX D3 (root contributor to "system is broken" perception): 30+ engine reason codes unmapped in Bengali → honest WAIT showed "অজানা সমস্যা (HTF_H4_OPPOSITE)"; added full honest mappings ((স্বাভাবিক WAIT) wording) + tests/ui/reason-code-i18n.test.ts (scans conditions.ts, asserts 100% coverage + WAIT-family wording + live-observed codes).
+- FIX D4: chat Sheet SheetDescription (a11y console warning gone).
+- Bridge deep-verify: :3031/health connected+authenticated Exness-MT5Trial6 47ms 355 symbols; unauth data endpoints 401; POST 405 GET-only; live XAUUSDm bid 4197.609/ask 4197.849 spread 0.240 digits 3. (Diagnostic gotcha solved: .env token value is quoted; cut -d= truncated it at base64 padding — shell extraction artifact, not an app issue.)
+- Browser E2E desktop 1280×800: eval button → honest WAIT toast with translated reason + SignalEvaluation persisted; analysis tab → COMPLETED + AnalysisRun persisted (table previously all-time 0 because manual runs were 503-blocked); system→market-data→manual sync → mode:manual success persisted; Bengali chat → grounded reply citing live evaluation evidence (WAIT/HTF_H4_OPPOSITE/CHoCH@4181.492); TF switch to H4; zero page errors. Mobile 375×812: 5-item nav, zero horizontal overflow, footer at exact document bottom (1610/1610), eval button works. 6 screenshots audit/phase13-*.png.
+- Verification: tsc 0; eslint 0/0; bun test 540/540 (31 files, 85,420 expects — up from 532); diff review: zero changes to signal/market/analysis libs, prisma, instrumentation, bridge, execution locks; live /api/health executionLocked:true read_only phase 4; bridge stays GET-only.
+- Deliverables: audit/signal-pipeline-root-cause.md (C1 sandbox-rebuild environment loss dominant cause; C2 legitimate WAIT; C3 guard+UX defects), audit/production-readiness-report.md (PASS/FAIL/BLOCKED/NOT TESTED checklist + deployment gap), audit/phase13-changelog.md. NOT committed/pushed (awaiting review).
+
+Stage Summary:
+- 48h no-signal root cause: sandbox rebuilds wiped .env+DB (pipeline down most of the window) + legitimate mixed-HTF WAIT once restored + all manual triggers 503 + unmapped reason codes made healthy WAIT look like failures. Engine itself proven healthy and directional-capable via fixtures; no strategy/data-quality/risk threshold touched.
+- All on-demand read-only functionality released and E2E-verified: sync, analysis, signal evaluation, chat, chart, history, diagnostics — desktop + mobile.
+- New explicit MARKET_API_PUBLIC_TRIGGERS preview opt-in with fail-closed default preserved and tested; production posture documented (DATA_API_TOKEN + both public flags off).
+- Remaining blockers (honest): persistent hosting required (ephemeral sandbox WILL wipe again), credential rotation advised (MT5 secrets were pasted in chat earlier), production build not runnable in sandbox, backtest history wiped (re-run on persistent host).
+- All four execution locks LOCKED and unchanged; no order-execution code exists anywhere; 540/540 tests green; NO commit, NO push.
