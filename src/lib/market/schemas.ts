@@ -21,7 +21,7 @@ export const AllowedSymbol = z.string().refine(
   { message: `symbol is not in the allowlist (${config.market.symbols.join(', ')})` },
 );
 
-/** Strict timeframe allowlist check (M5 | M15 | H1 | H4 subset). */
+/** Strict timeframe allowlist check (M1 | M5 | M15 | H1 | H4 subset). */
 export const AllowedTimeframe = z.string().refine(
   (tf) => (config.market.timeframes as readonly string[]).includes(tf),
   { message: `timeframe is not in the allowlist (${config.market.timeframes.join(', ')})` },

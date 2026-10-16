@@ -1,0 +1,18 @@
+{
+  "name": "tick-stream",
+  "version": "1.0.0",
+  "private": true,
+  "description": "READ-ONLY live tick relay (Task 29-b) — polls the mt5-bridge quote stream and broadcasts to dashboard websocket clients; no trading capability by construction",
+  "scripts": {
+    "dev": "bun --hot --env-file=../../.env index.ts",
+    "start": "bun --env-file=../../.env index.ts",
+    "probe": "bun run probe.ts"
+  },
+  "dependencies": {
+    "socket.io": "^4.8.4"
+  },
+  "devDependencies": {
+    "bun-types": "^1.4.3",
+    "socket.io-client": "^4.8.4"
+  }
+}

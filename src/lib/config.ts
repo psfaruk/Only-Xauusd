@@ -111,18 +111,26 @@ export const config = {
   market: {
     /** Strict symbol allowlist — anything else is rejected (SYMBOL_NOT_ALLOWED). */
     symbols: csv('MARKET_SYMBOLS', 'XAUUSDm'),
-    /** Strict timeframe allowlist (subset of M5/M15/H1/H4). */
+    /** Strict timeframe allowlist (subset of M1/M5/M15/H1/H4). M1 was added
+     *  in the Task 29 sell-miss fix — the bridge always served M1; the app
+     *  never asked. Sync/chart/analysis only: the strategy's own TFs
+     *  (M15 execution + H1/H4 context) are untouched — signal gates take
+     *  their TF list from the rules, never from this allowlist. */
     timeframes: (() => {
-      const all = ['M5', 'M15', 'H1', 'H4'] as const;
-      const requested = csv('MARKET_TIMEFRAMES', 'M5,M15,H1,H4');
+      const all = ['M1', 'M5', 'M15', 'H1', 'H4'] as const;
+      const requested = csv('MARKET_TIMEFRAMES', 'M1,M5,M15,H1,H4');
       const valid = requested.filter((tf): tf is (typeof all)[number] =>
         (all as readonly string[]).includes(tf),
       );
       return valid.length > 0 ? valid : [...all];
     })(),
-    /** Per-timeframe staleness thresholds (seconds) — configurable per tf. */
+    /** Per-timeframe staleness thresholds (seconds) — configurable per tf.
+     *  M1 default 420s (NOT 3×duration): the 300s scheduler cadence bounds
+     *  honest freshness for a 60s bar — 180s would flap STALE between
+     *  5-minute syncs (see audit/sellmiss-root-cause.md §5). */
     staleTickSec: num('MARKET_STALE_TICK_SEC', 120),
     staleTfSec: {
+      M1: num('MARKET_STALE_M1_SEC', 420),
       M5: num('MARKET_STALE_M5_SEC', 3 * 300),
       M15: num('MARKET_STALE_M15_SEC', 3 * 900),
       H1: num('MARKET_STALE_H1_SEC', 3 * 3_600),

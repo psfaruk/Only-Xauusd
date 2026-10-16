@@ -168,8 +168,9 @@ export interface BridgeStatus {
   reason?: string | null;
   symbols?: number;
   /** Live tick-stream observability (bridge /api/status Phase 8 extras —
-   *  served by the bridge; older consumers ignore them). Used by the SSE
-   *  stream + diagnostics panel to show GENUINE tick counts. */
+   *  served by the bridge; older consumers ignore them). Used by the
+   *  tick-stream mini-service (socket.io :3041, Task 29-b) and the dashboard
+   *  diagnostics panel to show GENUINE tick counts. */
   authenticated?: boolean;
   quoteCount?: number;
   lastQuoteAtMs?: number;

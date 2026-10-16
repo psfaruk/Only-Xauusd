@@ -17,7 +17,7 @@ import { makeBars } from '../market/helpers/mock-bridge';
 import { FIXED_NOW_MS, FIXED_NOW_SEC, fixedNow } from '../market/helpers/setup';
 
 const SYMBOL = 'XAUUSDm';
-const ALL_TFS: Timeframe[] = ['M5', 'M15', 'H1', 'H4'];
+const ALL_TFS: Timeframe[] = ['M1', 'M5', 'M15', 'H1', 'H4']; // M1 joined the allowlist (Task 29)
 
 // ---------------------------------------------------------------------------
 // Seed helpers (SYNTHETIC data only)
@@ -149,7 +149,7 @@ afterAll(async () => {
 // ---------------------------------------------------------------------------
 
 describe('readiness — valid closed-candle data → COMPLETED', () => {
-  test('all four timeframes analysed; structure + indicators + context present; persisted honestly', async () => {
+  test('all five timeframes analysed; structure + indicators + context present; persisted honestly', async () => {
     for (const tf of ALL_TFS) await seedTf(tf);
     await seedTick();
     await seedSpec();

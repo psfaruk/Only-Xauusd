@@ -17,7 +17,7 @@ import { FIXED_NOW_MS, FIXED_NOW_SEC } from './helpers/setup';
 const SYMBOL = 'XAUUSDm';
 
 async function seedTf(
-  timeframe: 'M5' | 'M15' | 'H1' | 'H4',
+  timeframe: 'M1' | 'M5' | 'M15' | 'H1' | 'H4', // M1 joined the allowlist (Task 29)
   opts: { count?: number; lastOpenSec?: number; holes?: number[]; source?: string; forming?: boolean } = {},
 ) {
   const count = opts.count ?? 50;
@@ -101,7 +101,8 @@ describe('readiness — empty database (fail closed)', () => {
 });
 
 describe('readiness — fresh, complete data', () => {
-  test('fresh closed candles on all 4 tfs + fresh tick + verified spec → ready=true, VALID', async () => {
+  test('fresh closed candles on all 5 tfs + fresh tick + verified spec → ready=true, VALID', async () => {
+    await seedTf('M1');
     await seedTf('M5');
     await seedTf('M15');
     await seedTf('H1');
@@ -123,6 +124,7 @@ describe('readiness — fresh, complete data', () => {
   });
 
   test('without a verified spec → SPEC_MISSING stays a visible WARNING (never silently valid)', async () => {
+    await seedTf('M1');
     await seedTf('M5');
     await seedTf('M15');
     await seedTf('H1');
@@ -138,6 +140,7 @@ describe('readiness — fresh, complete data', () => {
 describe('readiness — staleness per timeframe', () => {
   test('old M5 candles → STALE for M5 (threshold 3×tf), ready=false', async () => {
     await seedTf('M5', { lastOpenSec: FIXED_NOW_SEC - 3_600 }); // 1h old → beyond 900s
+    await seedTf('M1');
     await seedTf('M15');
     await seedTf('H1');
     await seedTf('H4');
@@ -151,6 +154,7 @@ describe('readiness — staleness per timeframe', () => {
   });
 
   test('stale tick alone (fresh candles) → tick STALE, ready=false', async () => {
+    await seedTf('M1');
     await seedTf('M5');
     await seedTf('M15');
     await seedTf('H1');
@@ -186,6 +190,7 @@ describe('readiness — forming candles are never confirmed history', () => {
 describe('readiness — session-aware gap reporting', () => {
   test('weekday hole → missingCandles ≥ 1 with GAP_POSSIBLE; still fresh → WARNING not INVALID', async () => {
     await seedTf('M5', { count: 60, holes: [30] }); // hole ~2.5h ago on Wednesday
+    await seedTf('M1');
     await seedTf('M15');
     await seedTf('H1');
     await seedTf('H4');
@@ -235,6 +240,7 @@ describe('getAnalysisReadiness — downstream fail-closed contract', () => {
   });
 
   test('ready → full readiness result returned', async () => {
+    await seedTf('M1');
     await seedTf('M5');
     await seedTf('M15');
     await seedTf('H1');
@@ -242,6 +248,6 @@ describe('getAnalysisReadiness — downstream fail-closed contract', () => {
     await seedTick(10);
     const r = await getAnalysisReadiness({ symbol: SYMBOL, now: () => FIXED_NOW_MS });
     expect(r.ready).toBe(true);
-    expect('timeframes' in r && r.timeframes.length).toBe(4);
+    expect('timeframes' in r && r.timeframes.length).toBe(5);
   });
 });

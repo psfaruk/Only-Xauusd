@@ -15,7 +15,7 @@ export const AnalysisRunSchema = z
     timeframes: z
       .array(AllowedTimeframe)
       .min(1, 'at least one timeframe is required')
-      .max(4, 'at most 4 timeframes')
+      .max(5, 'at most 5 timeframes') // allowlist grew to 5 with M1 (Task 29)
       .transform((tfs) => [...new Set(tfs)]) // dedup, order preserved
       .optional(),
   })

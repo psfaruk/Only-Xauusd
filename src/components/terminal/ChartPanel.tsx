@@ -6,7 +6,8 @@
  * Professional candlestick chart on REAL persisted broker candles
  * (/api/data/chart — validated MT5 bridge data; no invented prices).
  *
- *   · Timeframes  : H4 / H1 / M15 / M5 (backend allowlist)
+ *   · Timeframes  : H4 / H1 / M15 / M5 / M1 (backend allowlist; M1 added in
+ *                   the Task 29 sell-miss fix — 60s bars, chart granularity)
  *   · Overlays    : EMA 20 / 50 / 200 (engine-convention series from the API),
  *                   confirmed swing highs/lows, BOS/CHoCH break markers,
  *                   last swing S/R price lines

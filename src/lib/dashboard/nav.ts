@@ -32,8 +32,10 @@ export function isTerminalView(v: unknown): v is TerminalView {
   return typeof v === 'string' && NAV_ITEMS.some((n) => n.id === v);
 }
 
-/** Chart timeframe model — allowlist mirrors the backend (M5..H4 only). */
-export const CHART_TIMEFRAMES = ['M5', 'M15', 'H1', 'H4'] as const;
+/** Chart timeframe model — allowlist mirrors the backend (M1..H4). M1 was
+ *  added in the Task 29 sell-miss fix: same validated bridge feed, 60s bars
+ *  (chart granularity only — the strategy itself stays M15-based). */
+export const CHART_TIMEFRAMES = ['M1', 'M5', 'M15', 'H1', 'H4'] as const;
 export type ChartTimeframe = (typeof CHART_TIMEFRAMES)[number];
 
 export function isChartTimeframe(v: unknown): v is ChartTimeframe {

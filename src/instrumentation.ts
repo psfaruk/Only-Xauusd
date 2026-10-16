@@ -35,10 +35,10 @@ export async function register() {
   const { db } = await import('@/lib/db');
 
   const symbol = (process.env.MARKET_SYMBOLS ?? 'XAUUSDm').split(',')[0]?.trim() || 'XAUUSDm';
-  const timeframes = (process.env.MARKET_TIMEFRAMES ?? 'M5,M15,H1,H4')
+  const timeframes = (process.env.MARKET_TIMEFRAMES ?? 'M1,M5,M15,H1,H4')
     .split(',')
     .map((t) => t.trim())
-    .filter((t) => ['M5', 'M15', 'H1', 'H4'].includes(t));
+    .filter((t) => ['M1', 'M5', 'M15', 'H1', 'H4'].includes(t));
 
   console.log(`[instrumentation] market sync scheduler: ON — every ${Math.round(minInterval / 1000)}s for ${symbol} [${timeframes.join('/')}]`);
 
@@ -46,7 +46,7 @@ export async function register() {
     try {
       const outcome = await runSync(
         { bridge: bridgeClient, db },
-        { mode: 'scheduled', symbol, timeframes: timeframes as Array<'M5' | 'M15' | 'H1' | 'H4'> },
+        { mode: 'scheduled', symbol, timeframes: timeframes as Array<'M1' | 'M5' | 'M15' | 'H1' | 'H4'> },
       );
       if (outcome.status !== 'success') {
         console.warn(`[scheduler] sync ${outcome.status}: ${outcome.errorCode ?? ''} ${outcome.errorMessage ?? ''}`);

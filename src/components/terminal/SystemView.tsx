@@ -30,6 +30,7 @@ import {
   Wrench,
   XCircle,
   Zap,
+  Activity,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -70,6 +71,7 @@ import type {
   VerifyResponse,
 } from '@/lib/dashboard/types';
 import type { PriceDisplaySpec } from '@/lib/market/price-display';
+import type { TickStreamState } from '@/hooks/use-tick-stream';
 
 export function SystemView({
   audit,
@@ -93,6 +95,7 @@ export function SystemView({
   priceSpec,
   quoteDigitsMismatch,
   loading,
+  tickStream,
 }: {
   audit: AuditResponse | null;
   auditError?: string | null;
@@ -117,6 +120,10 @@ export function SystemView({
   priceSpec: PriceDisplaySpec;
   quoteDigitsMismatch: boolean;
   loading?: boolean;
+  /** Live tick-stream (Task 29-c) — socket.io relay of genuine bridge ticks.
+   *  null-safe: a down stream renders an honest unavailable card, never
+   *  fabricated values. */
+  tickStream: TickStreamState | null;
 }) {
   return (
     <div className="space-y-4">
@@ -385,6 +392,105 @@ export function SystemView({
                 )}
               </CardContent>
             </Card>
+
+            {/* Task 29-c — genuine live tick-stream observability (socket.io relay,
+                port 3041). Counters below are REAL bridge counters, never inferred. */}
+            <Card className="border-zinc-800 bg-zinc-900/40" data-testid="tick-stream-card">
+              <CardHeader className="pb-3">
+                <CardTitle className="flex flex-wrap items-center gap-2 text-base">
+                  <Activity className="h-4 w-4 text-amber-400" aria-hidden /> লাইভ টিক স্ট্রিম
+                  <Badge
+                    variant="outline"
+                    data-testid="tick-stream-status"
+                    className={
+                      tickStream?.status === 'live'
+                        ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+                        : tickStream?.status === 'down'
+                          ? 'border-red-500/40 bg-red-500/10 text-red-300'
+                          : 'border-zinc-700 bg-zinc-800/50 text-zinc-400'
+                    }
+                  >
+                    {tickStream?.status === 'live' ? 'লাইভ' : tickStream?.status === 'down' ? 'বিচ্ছিন্ন' : 'যুক্ত হচ্ছে'}
+                  </Badge>
+                </CardTitle>
+                <p className="text-xs text-zinc-500">
+                  tick-stream মিনি-সার্ভিস (socket.io :3041) — ব্রিজ থেকে প্রতি সেকেন্ড পোল, দাম বদলালেই সম্প্রচার। ২০-সেকেন্ড পোলের বিকল্প নয় — সমান্তরাল লাইভ চ্যানেল; স্ট্রিম না থাকলে পোলই যথেষ্ট (fail-closed)।
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-2 text-xs">
+                {tickStream?.status === 'live' && tickStream.tick ? (
+                  <>
+                    <div className="grid grid-cols-3 gap-2">
+                      {([
+                        ['Bid', String(tickStream.tick.bid), 'text-emerald-300'],
+                        ['Ask', String(tickStream.tick.ask), 'text-red-300'],
+                        ['Spread', (tickStream.tick.spread).toFixed(tickStream.tick.digits ?? 3), 'text-zinc-200'],
+                      ] as Array<[string, string, string]>).map(([k, v, cls]) => (
+                        <div key={k} className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-2 text-center">
+                          <p className="text-[10px] uppercase tracking-wide text-zinc-500">{k}</p>
+                          <p className={`mt-0.5 font-mono text-sm ${cls}`}>{v}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      {([
+                        ['ব্রিজ মোট টিক', tickStream.bridge?.quoteCount != null ? tickStream.bridge.quoteCount.toLocaleString('en-US') : null],
+                        ['রিলে সিকোয়েন্স', String(tickStream.tick.serviceSeq)],
+                        ['এই সেশনে', String(tickStream.sessionTicks)],
+                      ] as Array<[string, string | null]>).map(([k, v]) => (
+                        <div key={k} className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-2 text-center">
+                          <p className="text-[10px] text-zinc-500">{k}</p>
+                          <p className="mt-0.5 font-mono text-sm text-amber-200" data-testid={k === 'ব্রিজ মোট টিক' ? 'tick-stream-quotecount' : undefined}>{v ?? '—'}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="flex items-center justify-between border-b border-zinc-800/60 pb-1.5 text-zinc-500">
+                      <span>শেষ কোট (ঢাকা)</span>
+                      <span className="font-mono text-zinc-200">
+                        {tickStream.tick.quoteTimeUtc ? fmtDhaka(tickStream.tick.quoteTimeUtc) : '—'}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between border-b border-zinc-800/60 pb-1.5 text-zinc-500">
+                      <span>ব্রিজ সার্ভার / গেটওয়ে</span>
+                      <span className="font-mono text-zinc-200">
+                        {tickStream.bridge?.server ?? '—'} · {tickStream.bridge?.gateway ?? '—'}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between border-b border-zinc-800/60 pb-1.5 text-zinc-500">
+                      <span>লেটেন্সি / অফসেট</span>
+                      <span className="font-mono text-zinc-200">
+                        {tickStream.bridge?.latencyMs != null ? `${tickStream.bridge.latencyMs} ms` : '—'} /{' '}
+                        {tickStream.bridge?.offsetSec != null ? `${tickStream.bridge.offsetSec}s` : '—'}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between border-b border-zinc-800/60 pb-1.5 text-zinc-500">
+                      <span>রিকানেক্ট / আপটাইম</span>
+                      <span className="font-mono text-zinc-200">
+                        {tickStream.bridge?.reconnects != null ? String(tickStream.bridge.reconnects) : '—'} /{' '}
+                        {tickStream.bridge?.uptimeMs != null ? fmtAge(tickStream.bridge.uptimeMs / 1000) : '—'}
+                      </span>
+                    </div>
+                    {tickStream.bridge?.lastError ? (
+                      <p role="note" className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-amber-300" data-testid="tick-stream-lasterror">
+                        সর্বশেষ ব্রিজ ত্রুটি (নিরাময় হয়েছে কি না স্ট্রিমই বলে): {tickStream.bridge.lastError}
+                      </p>
+                    ) : null}
+                  </>
+                ) : tickStream?.status === 'live' ? (
+                  <p className="rounded-lg border border-dashed border-zinc-800 p-3 text-center text-zinc-500">
+                    সংযোগ আছে, এখনো কোনো টিক সম্প্রচারিত হয়নি — বাজার স্থির থাকলে স্বাভাবিক (দাম বদলালেই আসবে)।
+                  </p>
+                ) : tickStream?.status === 'down' ? (
+                  <p role="note" className="rounded-lg border border-red-500/40 bg-red-500/10 p-2.5 text-red-300">
+                    স্ট্রিম অনুপলব্ধ — ডেটা বানানো হয় না। নিয়মিত ২০-সেকেন্ড পোল চালু আছে; স্ট্রিম ফিরলে লাইভ কাউন্টার দেখা যাবে।
+                  </p>
+                ) : (
+                  <p className="rounded-lg border border-dashed border-zinc-800 p-3 text-center text-zinc-500">
+                    স্ট্রিমে যুক্ত হচ্ছে…
+                  </p>
+                )}
+              </CardContent>
+            </Card>
           </div>
 
           <Card className="border-zinc-800 bg-zinc-900/40">
@@ -399,7 +505,7 @@ export function SystemView({
                 ফর্মিং ক্যান্ডেল কখনোই নিশ্চিত ইতিহাস হিসেবে গণ্য হয় না — শুধু বন্ধ (closed) ক্যান্ডেল বিবেচিত।
               </p>
             </CardHeader>
-            <CardContent className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <CardContent className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
               {(marketStatus?.readiness.timeframes ?? []).map((tf) => (
                 <div key={tf.timeframe} className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3">
                   <div className="flex items-center justify-between gap-2">

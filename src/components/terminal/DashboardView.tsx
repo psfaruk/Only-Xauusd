@@ -31,6 +31,7 @@ import type {
   SignalLatestResponse,
 } from '@/lib/dashboard/types';
 import type { PriceDisplaySpec } from '@/lib/market/price-display';
+import type { TickStreamState } from '@/hooks/use-tick-stream';
 
 export function MarketSnapshot({
   marketStatus,
@@ -38,6 +39,7 @@ export function MarketSnapshot({
   priceSpec,
   loading,
   marketError,
+  tickStream,
 }: {
   marketStatus: MarketStatusResponse | null;
   dataHealth: DataHealthResponse | null;
@@ -46,7 +48,16 @@ export function MarketSnapshot({
   /** Master-audit fix B-D1: API-outage code — rendered as an explicit
    * unavailable banner, NEVER conflated with "no data yet". */
   marketError?: string | null;
+  /** Task 29-c: live tick-stream overlay. When the socket stream is live its
+   *  tick is shown ("লাইভ স্ট্রিম" badge); a down/absent stream falls back to
+   *  the 20s poll values — never fabricated, never both-claimed. */
+  tickStream?: TickStreamState | null;
 }) {
+  const liveTick = tickStream?.status === 'live' && tickStream.tick ? tickStream.tick : null;
+  const pollTick = marketStatus?.readiness?.tick ?? null;
+  const bidValue = liveTick ? String(liveTick.bid) : (pollTick?.bid ?? null);
+  const askValue = liveTick ? String(liveTick.ask) : (pollTick?.ask ?? null);
+  const spreadValue = liveTick ? liveTick.spread.toFixed(liveTick.digits ?? 3) : (pollTick?.spread ?? null);
   return (
     <section aria-label="মার্কেট স্ন্যাপশট" className="rounded-xl border border-zinc-800 bg-zinc-900/40" data-testid="market-snapshot">
       <div className="flex items-center gap-2 border-b border-zinc-800/80 px-3 py-2">
@@ -57,19 +68,29 @@ export function MarketSnapshot({
             {qualityStateBn[marketStatus.readiness.qualityState]}
           </Badge>
         )}
+        {liveTick && (
+          <Badge
+            variant="outline"
+            data-testid="market-live-badge"
+            className={marketStatus ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'ml-auto border-emerald-500/40 bg-emerald-500/10 text-emerald-300'}
+          >
+            <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-emerald-400" aria-hidden />
+            লাইভ স্ট্রিম
+          </Badge>
+        )}
       </div>
       <div className="space-y-3 p-3">
         {marketError && !marketStatus ? (
           <p role="alert" className="rounded-lg border border-red-500/40 bg-red-500/10 p-2.5 text-xs text-red-300">
             মার্কেট-স্ট্যাটাস API অনুপলব্ধ — <span className="font-mono">{marketError}</span>। এটি "টিক নেই"-এর মতো নয় (fail-closed); সংযোগ ফিরলে ৩০ সেকেন্ডে ডেটা আসবে।
           </p>
-        ) : marketStatus?.readiness.tick.bid ? (
-          <div className="grid grid-cols-3 gap-2">
+        ) : bidValue ? (
+          <div className="grid grid-cols-3 gap-2" data-testid="market-tick-grid">
             {(
               [
-                ['Bid', marketStatus.readiness.tick.bid, 'text-emerald-400'],
-                ['Ask', marketStatus.readiness.tick.ask, 'text-red-400'],
-                ['Spread', marketStatus.readiness.tick.spread, 'text-zinc-200'],
+                ['Bid', bidValue, 'text-emerald-400'],
+                ['Ask', askValue, 'text-red-400'],
+                ['Spread', spreadValue, 'text-zinc-200'],
               ] as Array<[string, string | null, string]>
             ).map(([k, v, cls]) => (
               <div key={k} className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-2 text-center">
@@ -92,8 +113,8 @@ export function MarketSnapshot({
           </p>
         )}
 
-        {/* Per-TF readiness chips */}
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {/* Per-TF readiness chips (M1..H4 — 5 TFs since Task 29) */}
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
           {(marketStatus?.readiness.timeframes ?? []).map((tf) => (
             <div key={tf.timeframe} className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-2">
               <div className="flex items-center justify-between gap-1">
@@ -116,6 +137,13 @@ export function MarketSnapshot({
             কোট সতেজতা: <span className="font-mono text-zinc-300">{dataHealth.quote.freshness}</span> · উৎস{' '}
             <span className="text-zinc-300">{dataHealth.quote.sourceLabel}</span>
             {dataHealth.quote.quoteTimeUtc ? ` · কোট-সময় ${fmtDhaka(dataHealth.quote.quoteTimeUtc)}` : ''}
+          </p>
+        )}
+        {liveTick && (
+          <p className="text-[11px] leading-relaxed text-zinc-500" data-testid="market-live-line">
+            লাইভ স্ট্রিম: সিকোয়েন্স <span className="font-mono text-zinc-300">{liveTick.serviceSeq}</span> · রিলে বিলম্ব{' '}
+            <span className="font-mono text-zinc-300">{liveTick.bridgeLatencyMs}ms</span> · কোট-সময়{' '}
+            <span className="font-mono text-zinc-300">{fmtDhaka(liveTick.quoteTimeUtc)}</span> — স্ট্রিম বিচ্ছিন্ন হলে ২০-সেকেন্ড পোলই এখতেব রাখে।
           </p>
         )}
       </div>
@@ -252,6 +280,7 @@ export function DashboardView({
   signalError,
   marketError,
   loading,
+  tickStream,
 }: {
   health: HealthReport | null;
   marketStatus: MarketStatusResponse | null;
@@ -263,6 +292,9 @@ export function DashboardView({
   signalError?: string | null;
   marketError?: string | null;
   loading?: boolean;
+  /** Live tick-stream (Task 29-c) — forwarded to MarketSnapshot; a down
+   *  stream falls back to the 20s poll, never fabricates. */
+  tickStream: TickStreamState | null;
 }) {
   return (
     <div className="space-y-4">
@@ -283,7 +315,7 @@ export function DashboardView({
         error={signalError}
         loading={loading}
       />
-      <MarketSnapshot marketStatus={marketStatus} dataHealth={dataHealth} priceSpec={priceSpec} loading={loading} marketError={marketError} />
+      <MarketSnapshot marketStatus={marketStatus} dataHealth={dataHealth} priceSpec={priceSpec} loading={loading} marketError={marketError} tickStream={tickStream} />
       <SystemMiniCards health={health} marketStatus={marketStatus} loading={loading} marketError={marketError} />
 
       {marketStatus?.sync.lastRun && (

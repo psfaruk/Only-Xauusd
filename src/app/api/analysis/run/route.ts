@@ -87,7 +87,7 @@ export async function GET() {
       method: 'POST',
       body: {
         symbol: 'string, allowlisted (optional — defaults to the first allowlisted symbol)',
-        timeframes: 'array of M5|M15|H1|H4 (optional, max 4, defaults to the configured allowlist)',
+        timeframes: 'array of M1|M5|M15|H1|H4 (optional, max 5, defaults to the configured allowlist)',
       },
       description:
         'Triggers a DETERMINISTIC technical-analysis run (structure + indicators). Analysis-only: no signal, no order, no trade functionality exists. Requires DATA_API_TOKEN (fail closed).',

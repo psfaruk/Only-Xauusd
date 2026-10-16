@@ -24,6 +24,7 @@ import { BarChart3, Home, MessageCircle, ShieldCheck, Activity } from 'lucide-re
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
+import { useTickStream } from '@/hooks/use-tick-stream';
 import {
   priceDisplaySpecFromSymbolSpec,
   type PriceDisplaySpec,
@@ -67,6 +68,9 @@ const SYMBOL = 'XAUUSDm';
 
 export default function TradingTerminal() {
   const { toast } = useToast();
+  // Task 29-c — single live tick-stream socket for the whole page (socket.io
+  // :3041 via the platform gateway XTransformPort query; see use-tick-stream).
+  const tickStream = useTickStream();
 
   // ---- Data state (all real API payloads; null = honestly unavailable) -------
   const [health, setHealth] = useState<HealthReport | null>(null);
@@ -483,6 +487,7 @@ export default function TradingTerminal() {
       onRunSync={() => void runSyncNow()}
       priceSpec={priceSpec}
       quoteDigitsMismatch={quoteDigitsMismatch}
+      tickStream={tickStream}
       loading={loading}
     />
   );
@@ -585,6 +590,7 @@ export default function TradingTerminal() {
                 signalError={apiErrors.signal ?? null}
                 marketError={apiErrors.market ?? null}
                 loading={loading}
+                tickStream={tickStream}
               />
             )}
             {view === 'chart' && (

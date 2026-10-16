@@ -41,8 +41,8 @@ describe('terminal bottom navigation (mobile)', () => {
 });
 
 describe('chart timeframe model', () => {
-  test('allowlist mirrors the backend: M5, M15, H1, H4 only', () => {
-    expect([...CHART_TIMEFRAMES]).toEqual(['M5', 'M15', 'H1', 'H4']);
+  test('allowlist mirrors the backend: M1, M5, M15, H1, H4 (M1 added Task 29)', () => {
+    expect([...CHART_TIMEFRAMES]).toEqual(['M1', 'M5', 'M15', 'H1', 'H4']);
   });
 
   test('isChartTimeframe rejects unsupported timeframes', () => {
