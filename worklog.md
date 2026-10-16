@@ -719,3 +719,5 @@ Stage Summary:
 - Pipeline verified end-to-end live: bridge (offset-normalized, drift 0s) → sync (idempotent, 0 rejected/dup) → scheduler (5-min, honest NO_SETUP) → API → UI (grounded, traceable, fail-closed everywhere).
 - Migration chain now deploy-safe (fresh-host migrate deploy tested); production posture documented; honest blockers listed (persistent hosting, sandbox build constraint, GLM-timeout test gap).
 - Four execution locks LOCKED and test-pinned; 549/549 green; lint/tsc/prisma-validate clean.
+
+**Push verification (Task 28 addendum):** commit `04bd126` pushed to `origin/main` (15b56f4..04bd126, exit 0); remote tip live-verified via `git ls-remote` = `04bd126…` = local main; working tree clean.
