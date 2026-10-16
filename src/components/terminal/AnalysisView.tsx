@@ -44,6 +44,7 @@ export function AnalysisView({
   validationLatest,
   validationError,
   backtestLatest,
+  backtestError,
   signalHistory,
   priceSpec,
   loading,
@@ -55,6 +56,9 @@ export function AnalysisView({
   validationLatest: ValidationLatestResponse | null;
   validationError?: string | null;
   backtestLatest: BacktestLatestResponse | null;
+  /** Master-audit fix B-D1: backtest-API outage code — an outage must not
+   * read as "এখনো কোনো ব্যাকটেস্ট রান নেই". */
+  backtestError?: string | null;
   signalHistory: SignalHistoryResponse | null;
   priceSpec: PriceDisplaySpec;
   loading?: boolean;
@@ -343,6 +347,7 @@ export function AnalysisView({
               v={validationLatest.validation}
               signalHistory={signalHistory}
               backtestLatest={backtestLatest}
+              backtestError={backtestError}
               priceSpec={priceSpec}
             />
           )}
@@ -360,11 +365,15 @@ function ValidationBody({
   v,
   signalHistory,
   backtestLatest,
+  backtestError,
   priceSpec,
 }: {
   v: NonNullable<ValidationLatestResponse['validation']>;
   signalHistory: SignalHistoryResponse | null;
   backtestLatest: BacktestLatestResponse | null;
+  /** Master-audit fix B-D1: backtest-API outage code (threaded from
+   * AnalysisView so the outage banner renders at the point of consumption). */
+  backtestError?: string | null;
   priceSpec: PriceDisplaySpec;
 }) {
   const r = v.result;
@@ -729,7 +738,13 @@ function ValidationBody({
         </CardHeader>
         <CardContent className="space-y-2 text-xs">
           {!backtestLatest?.latest ? (
-            <p className="text-zinc-400">এখনো কোনো ব্যাকটেস্ট রান নেই।</p>
+            backtestError ? (
+              <p role="alert" className="rounded-lg border border-red-500/40 bg-red-500/10 p-2.5 text-red-300">
+                ব্যাকটেস্ট API অনুপলব্ধ — <span className="font-mono">{backtestError}</span>। এটি "রান নেই"-এর মতো নয় (fail-closed); সংরক্ষিত রান থাকলেও এখন দেখানো যাচ্ছে না।
+              </p>
+            ) : (
+              <p className="text-zinc-400">এখনো কোনো ব্যাকটেস্ট রান নেই।</p>
+            )
           ) : (
             <>
               <p className="text-zinc-300">

@@ -473,6 +473,146 @@ describe('case 18 — NO trading/order endpoints exist (static guarantee)', () =
   });
 });
 
+// ---------------------------------------------------------------------------
+// Master-audit fix A1 (2026-10-16): POST /api/ai/verify is now behind the
+// trigger guard like every other action route. These tests prove the guard
+// fires BEFORE any GLM round-trip or SystemEvent write can happen.
+// ---------------------------------------------------------------------------
+describe('POST /api/ai/verify — trigger guard (master audit fix A1)', () => {
+  test('token set + no bearer → 401 before any GLM work', async () => {
+    const hadToken = process.env.DATA_API_TOKEN;
+    const hadTriggers = process.env.MARKET_API_PUBLIC_TRIGGERS;
+    process.env.DATA_API_TOKEN = 'test-token-a1-guard';
+    delete process.env.MARKET_API_PUBLIC_TRIGGERS;
+    try {
+      const { POST } = await import('@/app/api/ai/verify/route');
+      const res = await POST(
+        req('/api/ai/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-forwarded-for': '10.77.0.1' },
+          body: JSON.stringify({ force: true }),
+        }),
+      );
+      expect(res.status).toBe(401);
+      const body = (await res.json()) as { ok: boolean; error: { code: string } };
+      expect(body.ok).toBe(false);
+      expect(body.error.code).toBe('AUTH_MISSING_TOKEN');
+    } finally {
+      if (hadToken === undefined) delete process.env.DATA_API_TOKEN;
+      else process.env.DATA_API_TOKEN = hadToken;
+      if (hadTriggers === undefined) delete process.env.MARKET_API_PUBLIC_TRIGGERS;
+      else process.env.MARKET_API_PUBLIC_TRIGGERS = hadTriggers;
+    }
+  });
+
+  test('token unset + trigger opt-in off → 503 fail-closed even with public reads on', async () => {
+    const hadToken = process.env.DATA_API_TOKEN;
+    const hadReads = process.env.MARKET_API_PUBLIC_READS;
+    const hadTriggers = process.env.MARKET_API_PUBLIC_TRIGGERS;
+    delete process.env.DATA_API_TOKEN;
+    process.env.MARKET_API_PUBLIC_READS = 'true';
+    delete process.env.MARKET_API_PUBLIC_TRIGGERS;
+    try {
+      const { POST } = await import('@/app/api/ai/verify/route');
+      const res = await POST(
+        req('/api/ai/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-forwarded-for': '10.77.0.2' },
+          body: JSON.stringify({ force: true }),
+        }),
+      );
+      expect(res.status).toBe(503);
+      const body = (await res.json()) as { ok: boolean; error: { code: string } };
+      expect(body.ok).toBe(false);
+      expect(body.error.code).toBe('MARKET_API_TOKEN_NOT_CONFIGURED');
+    } finally {
+      if (hadToken === undefined) delete process.env.DATA_API_TOKEN;
+      else process.env.DATA_API_TOKEN = hadToken;
+      if (hadReads === undefined) delete process.env.MARKET_API_PUBLIC_READS;
+      else process.env.MARKET_API_PUBLIC_READS = hadReads;
+      if (hadTriggers === undefined) delete process.env.MARKET_API_PUBLIC_TRIGGERS;
+      else process.env.MARKET_API_PUBLIC_TRIGGERS = hadTriggers;
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Master-audit fix A5 (2026-10-16): validation backwaters aligned with
+// sibling routes — signal/run no longer swallows malformed JSON, and the
+// health/audit surfaces validate the symbol against the allowlist instead
+// of silently falling back / returning empty data.
+// ---------------------------------------------------------------------------
+describe('master audit A5 — consistent request validation', () => {
+  test('POST /api/signal/run with malformed JSON → 400 (was silently treated as {})', async () => {
+    const hadToken = process.env.DATA_API_TOKEN;
+    const hadTriggers = process.env.MARKET_API_PUBLIC_TRIGGERS;
+    delete process.env.DATA_API_TOKEN;
+    process.env.MARKET_API_PUBLIC_TRIGGERS = 'true';
+    try {
+      const { POST } = await import('@/app/api/signal/run/route');
+      const res = await POST(
+        req('/api/signal/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-forwarded-for': '10.78.0.1' },
+          body: '{not valid json',
+        }),
+      );
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { ok: boolean; error: { code: string; message?: string } };
+      expect(body.ok).toBe(false);
+      expect(body.error.code).toBe('BAD_REQUEST');
+      expect(body.error.message).toContain('malformed JSON');
+    } finally {
+      if (hadToken === undefined) delete process.env.DATA_API_TOKEN;
+      else process.env.DATA_API_TOKEN = hadToken;
+      if (hadTriggers === undefined) delete process.env.MARKET_API_PUBLIC_TRIGGERS;
+      else process.env.MARKET_API_PUBLIC_TRIGGERS = hadTriggers;
+    }
+  });
+
+  test('GET /api/data/health with non-allowlisted symbol → 400 (was silent empty data)', async () => {
+    const hadToken = process.env.DATA_API_TOKEN;
+    const hadReads = process.env.MARKET_API_PUBLIC_READS;
+    delete process.env.DATA_API_TOKEN;
+    process.env.MARKET_API_PUBLIC_READS = 'true';
+    try {
+      const { GET } = await import('@/app/api/data/health/route');
+      const res = await GET(req('/api/data/health?symbol=EURUSDm'));
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { ok: boolean; error: { code: string; message?: string } };
+      expect(body.ok).toBe(false);
+      expect(body.error.code).toBe('BAD_REQUEST');
+      expect(body.error.message).toContain('allowlist');
+    } finally {
+      if (hadToken === undefined) delete process.env.DATA_API_TOKEN;
+      else process.env.DATA_API_TOKEN = hadToken;
+      if (hadReads === undefined) delete process.env.MARKET_API_PUBLIC_READS;
+      else process.env.MARKET_API_PUBLIC_READS = hadReads;
+    }
+  });
+
+  test('GET /api/audit/environment with non-allowlisted symbol → 400 (was silent fallback)', async () => {
+    const hadToken = process.env.DATA_API_TOKEN;
+    const hadReads = process.env.MARKET_API_PUBLIC_READS;
+    delete process.env.DATA_API_TOKEN;
+    process.env.MARKET_API_PUBLIC_READS = 'true';
+    try {
+      const { GET } = await import('@/app/api/audit/environment/route');
+      const res = await GET(req('/api/audit/environment?symbol=GBPUSDm'));
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { ok: boolean; error: { code: string; message?: string } };
+      expect(body.ok).toBe(false);
+      expect(body.error.code).toBe('BAD_REQUEST');
+      expect(body.error.message).toContain('allowlist');
+    } finally {
+      if (hadToken === undefined) delete process.env.DATA_API_TOKEN;
+      else process.env.DATA_API_TOKEN = hadToken;
+      if (hadReads === undefined) delete process.env.MARKET_API_PUBLIC_READS;
+      else process.env.MARKET_API_PUBLIC_READS = hadReads;
+    }
+  });
+});
+
 // UI-02 hermeticity fix: file-level cleanup so seeded candles/sync rows never
 // leak into other test files sharing this process (bun file order is
 // readdir/inode order, not alphabetical).

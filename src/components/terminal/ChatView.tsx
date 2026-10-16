@@ -53,7 +53,6 @@ export function ChatView({
   variant?: 'page' | 'sheet';
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
   // Auto-scroll to the newest message.
   useEffect(() => {
@@ -209,12 +208,13 @@ export function ChatView({
           </label>
           <textarea
             id="chat-input"
-            ref={inputRef}
             rows={1}
             value={input}
             onChange={(e) => onInputChange(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
+              // Master-audit fix (IME): Bengali IME users press Enter to
+              // COMMIT a composition — that must not send the message.
+              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault();
                 if (canSend) onSubmit();
               }
@@ -223,7 +223,7 @@ export function ChatView({
             placeholder="যেমন: এখন XAUUSDm-এর বাজারের অবস্থা কী?"
             maxLength={2000}
             data-testid="chat-input"
-            className="custom-scrollbar max-h-24 min-h-[44px] flex-1 resize-y rounded-lg border border-zinc-800 bg-zinc-950/70 px-3 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-amber-500/50 focus:outline-none"
+            className="custom-scrollbar max-h-24 min-h-[44px] flex-1 resize-y rounded-lg border border-zinc-800 bg-zinc-950/70 px-3 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-amber-500/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/40"
           />
           <Button
             type="submit"
@@ -237,7 +237,7 @@ export function ChatView({
             <span className="hidden sm:inline">পাঠান</span>
           </Button>
         </div>
-        <p className="mt-1.5 text-[10px] leading-relaxed text-zinc-600">
+        <p className="mt-1.5 text-[10px] leading-relaxed text-zinc-400">
           Enter = পাঠান · Shift+Enter = নতুন লাইন · এজেন্ট কখনো দাম বানিয়ে বলবে না — প্রতিটি উত্তরে টুল-প্রমাণ ও টাইমস্ট্যাম্প থাকে।
         </p>
       </form>

@@ -6,10 +6,18 @@
  *   2. Bengali response (Chat Agent feasibility)
  *   3. Full tool-calling loop: model → allowlist check → tool executes →
  *      result fed back → final answer
- * Results are persisted to the SystemEvent audit trail. Rate-limited.
+ * Results are persisted to the SystemEvent audit trail.
+ *
+ * GUARDED (2026-10-16, master audit fix A1): POST runs through
+ * guardDataApi(request, 'trigger') — the same contract as sync/analysis/
+ * signal. DATA_API_TOKEN always required when set; unset → 503 fail-closed
+ * unless the explicit MARKET_API_PUBLIC_TRIGGERS preview opt-in. The tight
+ * trigger rate-limit bucket (12/min/IP) applies on top of the in-process
+ * interval below. GET returns usage docs only (unguarded by convention).
  */
 import { NextResponse } from 'next/server';
 import ZAI from 'z-ai-web-dev-sdk';
+import { guardDataApi } from '@/lib/api-guard';
 import { config } from '@/lib/config';
 import { logEvent } from '@/lib/logger';
 import { executeTool, toolSpecs } from '@/lib/tools/registry';
@@ -233,6 +241,10 @@ async function runVerification() {
 }
 
 export async function POST(request: Request) {
+  // Guard FIRST — before any GLM quota is consumed or SystemEvent written.
+  const guard = guardDataApi(request, 'trigger');
+  if (!guard.ok) return guard.response;
+
   try {
     const now = Date.now();
     let force = false;

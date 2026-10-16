@@ -121,7 +121,7 @@ commit করবেন না (`.gitignore`-এ সুরক্ষিত, `.env.
 
 ## ডেটাবেস
 
-`prisma/schema.prisma` — ১২টি মডেল, প্রতিটির সাথে সক্রিয়-হওয়ার Phase চিহ্নিত। SQLite-এ Prisma
+`prisma/schema.prisma` — ১৬টি মডেল, প্রতিটির সাথে সক্রিয়-হওয়ার Phase চিহ্নিত। SQLite-এ Prisma
 `Json` টাইপ নেই, তাই JSON পে-লোড `String` হিসেবে থাকে (প্রতিটি মডেলে কমেন্টে ব্যাখ্যা)।
 
 ---
@@ -167,7 +167,7 @@ Phase 3 টেবিল: `MarketCandle`, `MarketLatestTick`, `SymbolSpec`, `Data
 | `MARKET_STALE_M5_SEC` … | ৩×tf | প্রতি-টাইমফ্রেম freshness সীমা (configurable) |
 | `MARKET_SYNC_INTERVAL_MS` | `0` (বন্ধ) | শিডিউল করা সিঙ্ক; >0 + ব্রিজ সেট থাকলেই চালু |
 | `MARKET_INGEST_DEMO` | `false` | ব্রিজের লেবেল-করা ডেমো ফিড ডিফল্টে skip হয় (SOURCE_DEMO) |
-| `DATA_API_TOKEN` | unset | সেট করলে সব `/api/data/*`-এ `Authorization: Bearer` লাগবে |
+| `DATA_API_TOKEN` | unset | সেট করলে সব গার্ডেড রুটে (`/api/data/*`, `/api/analysis/*`, `/api/signal/*`, `/api/backtest/*`, `/api/chat`, `/api/audit/*`) `Authorization: Bearer` লাগবে |
 
 ## ৩. Ingestion — কখন/কীভাবে চালবে
 

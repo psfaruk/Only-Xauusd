@@ -239,7 +239,7 @@ describe('audit v2 — report assembly + endpoint guard', () => {
     }
   });
 
-  test('POST route inventory is exactly the guarded trigger set (no execution route exists)', () => {
+  test('POST route inventory is exactly the guard-protected action set (no execution route exists)', () => {
     expect([...POST_ROUTE_INVENTORY].sort()).toEqual([
       '/api/ai/verify',
       '/api/analysis/run',

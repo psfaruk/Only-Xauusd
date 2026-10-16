@@ -604,7 +604,7 @@ export async function runCurrentChecks(symbol?: string, deps?: CurrentCheckDeps)
       category: 'security',
       description: 'No execution/order/trade/position capability on any programmatic surface (bridge client, tool registry, POST route inventory)',
       required: true,
-      expected: 'bridge client exposes only the 5 read-only methods; tool registry has no execution tool; POST route inventory contains only the 6 guarded trigger routes',
+      expected: 'bridge client exposes only the 5 read-only methods; tool registry has no execution tool; POST route inventory contains only the 6 guard-protected action routes (5 trigger + chat)',
       actual: null,
       evidenceType: 'STATIC',
       evidenceCommand: 'in-process structural inspection: Object.keys(bridgeClient) + TOOL_REGISTRY names + route inventory constant',
@@ -638,7 +638,7 @@ export async function runCurrentChecks(symbol?: string, deps?: CurrentCheckDeps)
       }
       return {
         status: 'PASS',
-        reason: 'The bridge client implements exactly the 5 read-only methods; no tool in the registry can execute anything; the complete POST inventory is 6 token-guarded trigger routes.',
+        reason: 'The bridge client implements exactly the 5 read-only methods; no tool in the registry can execute anything; the complete POST inventory is 6 guard-protected action routes (data/sync, analysis/run, signal/run, backtest/run, ai/verify behind the trigger guard; chat behind the read+chat guard).',
         actual: 'clean',
         evidence: `bridgeClient methods: ${bridgeMethods.join(', ')} · registry tools: ${toolNames.length} (none execution-capable) · POST routes: ${postRoutes.join(', ')}`,
       };

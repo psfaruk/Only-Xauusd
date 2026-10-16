@@ -202,6 +202,27 @@ export async function runSync(deps: SyncDeps, opts: SyncOptions): Promise<SyncOu
   }
   syncRunning = true;
 
+  // ---- 0b. Orphaned-run reaper (master-audit fix C-D4) -------------------
+  // A hard crash mid-sync used to leave `status:'running'` rows forever
+  // (verified: 0 today, but nothing prevented it). A running row older than
+  // 15 minutes cannot belong to this process's in-flight sync (the overlap
+  // guard above refuses concurrency), so it is demoted to failed with an
+  // explicit code — dashboards/history never show a phantom running sync.
+  await deps.db.syncRun
+    .updateMany({
+      where: {
+        status: 'running',
+        startedAtUtc: { lt: new Date(nowMs() - 15 * 60_000) },
+      },
+      data: {
+        status: 'failed',
+        endedAtUtc: new Date(nowMs()),
+        errorCode: 'ORPHANED_SYNC_RUN',
+        errorMessage: 'Run exceeded 15 minutes without completing — marked failed by the orphan reaper (process crash or hang).',
+      },
+    })
+    .catch(() => undefined);
+
   try {
     // ---- 1. Allowlists (defense in depth; the API layer validates first) --
     if (!config.market.symbols.includes(opts.symbol)) {
@@ -555,27 +576,40 @@ export async function runSync(deps: SyncDeps, opts: SyncOptions): Promise<SyncOu
     // ---- 8. SymbolSpec — verified fields ONLY ------------------------------
     if (verifiedDigits !== null) {
       const pointText = toCanonicalPrice(Math.pow(10, -verifiedDigits), verifiedDigits).text;
-      await deps.db.symbolSpec.upsert({
-        where: { symbol: opts.symbol },
-        create: {
-          symbol: opts.symbol,
-          digits: verifiedDigits,
-          point: pointText,
-          source: `bridge-${feedSource}`,
-          verifiedFields: JSON.stringify(['digits']),
-          meta: JSON.stringify({
-            note: 'digits verified from bridge /api/candles response. point is DERIVED as 10^-digits (mathematical definition) — NOT broker-reported; tick/volume specs unavailable from the current bridge contract.',
-          }),
-          lastVerifiedAt: receivedAt,
-        },
-        update: {
-          digits: verifiedDigits,
-          point: pointText,
-          source: `bridge-${feedSource}`,
-          verifiedFields: JSON.stringify(['digits']),
-          lastVerifiedAt: receivedAt,
-        },
-      }).catch(() => undefined);
+      await deps.db.symbolSpec
+        .upsert({
+          where: { symbol: opts.symbol },
+          create: {
+            symbol: opts.symbol,
+            digits: verifiedDigits,
+            point: pointText,
+            source: `bridge-${feedSource}`,
+            verifiedFields: JSON.stringify(['digits']),
+            meta: JSON.stringify({
+              note: 'digits verified from bridge /api/candles response. point is DERIVED as 10^-digits (mathematical definition) — NOT broker-reported; tick/volume specs unavailable from the current bridge contract.',
+            }),
+            lastVerifiedAt: receivedAt,
+          },
+          update: {
+            digits: verifiedDigits,
+            point: pointText,
+            source: `bridge-${feedSource}`,
+            verifiedFields: JSON.stringify(['digits']),
+            lastVerifiedAt: receivedAt,
+          },
+        })
+        .catch(async (e: unknown) => {
+          // Master-audit fix C-D3: this failure used to be swallowed with no
+          // trace. The downstream gates honestly report SPEC_MISSING, but the
+          // operator needs the write failure itself in the audit trail.
+          await logEvent({
+            level: 'warn',
+            category: 'market',
+            code: 'SYMBOL_SPEC_UPSERT_FAILED',
+            message: `SymbolSpec upsert failed for ${opts.symbol}: ${e instanceof Error ? e.message : String(e)}`,
+            meta: { symbol: opts.symbol },
+          }).catch(() => undefined);
+        });
     } else {
       allIssues.push({
         code: ErrorCode.SPEC_MISSING,

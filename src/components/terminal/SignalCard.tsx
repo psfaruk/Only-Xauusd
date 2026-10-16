@@ -131,7 +131,7 @@ export function SignalCard({
                   </li>
                 ))}
                 {compact && s.reasonCodes.length > 3 && (
-                  <li className="text-[10px] text-zinc-600">+{s.reasonCodes.length - 3}টি কোড — সিগন্যাল ভিউতে সম্পূর্ণ তালিকা</li>
+                  <li className="text-[10px] text-zinc-400">+{s.reasonCodes.length - 3}টি কোড — সিগন্যাল ভিউতে সম্পূর্ণ তালিকা</li>
                 )}
               </ul>
             )}
@@ -173,7 +173,7 @@ export function SignalCard({
           {signalRunning ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <Zap className="h-3.5 w-3.5" aria-hidden />}
           এখনই মূল্যায়ন চালান
         </Button>
-        <p className="mt-1.5 text-center text-[10px] leading-relaxed text-zinc-600">
+        <p className="mt-1.5 text-center text-[10px] leading-relaxed text-zinc-400">
           টোকেন-সুরক্ষিত ট্রিগার (fail-closed) · শিডিউলার প্রতি ৫ মিনিটে স্বয়ংক্রিয়ভাবে মূল্যায়ন করে
         </p>
       </div>

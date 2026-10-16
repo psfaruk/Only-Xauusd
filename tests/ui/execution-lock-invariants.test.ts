@@ -38,6 +38,19 @@ describe('execution locks (four-switch gate)', () => {
     expect(config.execution.switches.executionArmed).toBe(false);
     expect(config.execution.switches.allowExecution).toBe(false);
   });
+
+  test('phase label is truthful status, not roadmap progress (master audit B-D3)', () => {
+    // The old "Phase N of 12" presented a lock-gate value as a progress bar.
+    // The label must state the mode truthfully and never use "of N" framing.
+    expect(config.phaseLabel).not.toMatch(/of\s+\d+/i);
+    expect(config.phaseLabel).toContain(`Phase ${config.phase}`);
+    expect(config.phaseLabel.toLowerCase()).toContain(config.tradingMode === 'read_only' ? 'read-only' : config.tradingMode);
+    // The gate constant is exported once and consistently surfaced.
+    expect(config.executionGatePhase).toBe(11);
+    if (!config.execution.enabled) {
+      expect(config.execution.reason).toContain(`Phase ${config.executionGatePhase} gate`);
+    }
+  });
 });
 
 describe('no order-execution surface exists', () => {
@@ -76,5 +89,15 @@ describe('no order-execution surface exists', () => {
     const header = readFileSync(join(SRC, 'components', 'terminal', 'TerminalHeader.tsx'), 'utf8');
     expect(header).toContain('executionLocked'); // bound to /api/health payload
     expect(header).toContain('LOCKED');
+    // Master-audit fix B-D2: the badge label DERIVES from the flag (would
+    // flip to UNLOCKED if the backend ever unlocked) and exposes the state
+    // via data-execution-locked for E2E assertions.
+    expect(header).toContain("{locked ? 'LOCKED' : 'UNLOCKED'}");
+    expect(header).toContain('data-execution-locked');
+    // The footer states the SAME gate the lock logic uses (was a stale
+    // hardcoded "Phase 12" while the gate is Phase 11).
+    const page = readFileSync(join(SRC, 'app', 'page.tsx'), 'utf8');
+    expect(page).toContain('health?.executionGatePhase ?? 11');
+    expect(page).not.toContain('Phase 12 রিলিজ-গেট');
   });
 });

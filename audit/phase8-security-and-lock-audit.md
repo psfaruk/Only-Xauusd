@@ -10,6 +10,8 @@ Static scan over all source for order/trade/position execution:
 - **POST route inventory (complete):** `/api/data/sync`, `/api/analysis/run`, `/api/backtest/run`, `/api/ai/verify` — all data/analysis triggers, all behind `guardDataApi` trigger semantics (token always required; unset token → 503 fail-closed, no bypass).
 - **Bridge surface:** `GET /health`, `GET /api/status|symbols|quote|candles` only. HTTP method gate returns 405 for anything but GET. **No POST endpoints exist on the bridge.**
 
+> **Correction (2026-10-16, master audit — `audit/full-app-baseline.md` §A1):** the "all behind `guardDataApi`" claim above was **inaccurate when written** — at Phase 8 time `/api/ai/verify` was *not* behind `guardDataApi` (it had only an in-process interval limiter). It was brought behind the trigger guard on 2026-10-16 (regression-tested in `tests/market/api.test.ts`).
+
 ## 2. Bridge trading-command absence (PASS)
 
 The read-only MT5 client implements **only**: AUTH(0), ACCOUNT(3), SUBSCRIBE(7), QUOTES(8), CANDLES(11), LOGIN(28), SYMBOLS(34), HEARTBEAT(51). The trading command layer of the reference implementation (TRADE 12, POSITIONS 4, DEALS 5, TRADE_EVENT 19, POS_UPDATE 22) is **deliberately not ported** — verified by scanning every `cmdId` the client can emit. TLS is **verified** (`servername mt5.exwebterm.com`, `rejectUnauthorized: true`); no insecure-escape hatch exists in the bridge.

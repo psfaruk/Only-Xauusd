@@ -37,11 +37,15 @@ export function MarketSnapshot({
   dataHealth,
   priceSpec,
   loading,
+  marketError,
 }: {
   marketStatus: MarketStatusResponse | null;
   dataHealth: DataHealthResponse | null;
   priceSpec: PriceDisplaySpec;
   loading?: boolean;
+  /** Master-audit fix B-D1: API-outage code — rendered as an explicit
+   * unavailable banner, NEVER conflated with "no data yet". */
+  marketError?: string | null;
 }) {
   return (
     <section aria-label="মার্কেট স্ন্যাপশট" className="rounded-xl border border-zinc-800 bg-zinc-900/40" data-testid="market-snapshot">
@@ -55,7 +59,11 @@ export function MarketSnapshot({
         )}
       </div>
       <div className="space-y-3 p-3">
-        {marketStatus?.readiness.tick.bid ? (
+        {marketError && !marketStatus ? (
+          <p role="alert" className="rounded-lg border border-red-500/40 bg-red-500/10 p-2.5 text-xs text-red-300">
+            মার্কেট-স্ট্যাটাস API অনুপলব্ধ — <span className="font-mono">{marketError}</span>। এটি "টিক নেই"-এর মতো নয় (fail-closed); সংযোগ ফিরলে ৩০ সেকেন্ডে ডেটা আসবে।
+          </p>
+        ) : marketStatus?.readiness.tick.bid ? (
           <div className="grid grid-cols-3 gap-2">
             {(
               [
@@ -119,13 +127,19 @@ export function SystemMiniCards({
   health,
   marketStatus,
   loading,
+  marketError,
 }: {
   health: HealthReport | null;
   marketStatus: MarketStatusResponse | null;
   loading?: boolean;
+  /** Master-audit fix B-D1: when the status API is down the bridge card
+   * says "অজানা" instead of asserting "কনফিগার করা হয়নি" from a null
+   * payload (facts were never fetched, not proven absent). */
+  marketError?: string | null;
 }) {
   const bridge = marketStatus?.bridge;
   const bridgeConnected = bridge?.configured && bridge?.reachable && bridge.status?.connected === true;
+  const bridgeUnknown = !marketStatus && !!marketError;
 
   const cards = [
     {
@@ -147,10 +161,20 @@ export function SystemMiniCards({
       key: 'bridge',
       icon: Network,
       title: 'MT5 ব্রিজ',
-      value: bridgeConnected ? (bridge?.status?.server ?? 'সংযুক্ত') : bridge?.configured ? 'সংযোগ নেই' : 'কনফিগার করা হয়নি',
+      value: bridgeUnknown
+        ? 'অজানা (স্ট্যাটাস API ডাউন)'
+        : !marketStatus
+          ? '—'
+          : bridgeConnected
+            ? (bridge?.status?.server ?? 'সংযুক্ত')
+            : bridge?.configured
+              ? 'সংযোগ নেই'
+              : 'কনফিগার করা হয়নি',
       state: bridgeConnected
         ? { label: bridge?.status?.source === 'demo' ? 'ডেমো ফিড' : 'সংযুক্ত', cls: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400' }
-        : { label: 'বিচ্ছিন্ন', cls: 'border-amber-500/40 bg-amber-500/10 text-amber-400' },
+        : bridgeUnknown
+          ? { label: 'অজানা', cls: 'border-zinc-600/50 bg-zinc-700/20 text-zinc-400' }
+          : { label: marketStatus ? 'বিচ্ছিন্ন' : '—', cls: 'border-amber-500/40 bg-amber-500/10 text-amber-400' },
       lines: [
         bridge?.status?.latencyMs != null ? `লেটেন্সি ${bridge.status.latencyMs}ms` : 'লেটেন্সি —',
         `সিঙ্ক: ${marketStatus?.sync.lastRun ? syncStatusBn(marketStatus.sync.lastRun.status) : 'এখনো নেই'}${
@@ -173,8 +197,14 @@ export function SystemMiniCards({
       key: 'lock',
       icon: LockKeyhole,
       title: 'Order Execution',
-      value: 'Read-Only',
-      state: { label: 'LOCKED', cls: 'border-red-500/40 bg-red-500/10 text-red-400' },
+      // Master-audit fix B-D2: derived from the backend's own flag — the old
+      // card was a static string (could not reflect an abnormal unlock).
+      value: health ? (health.executionLocked ? 'Read-Only' : '(!) UNLOCKED') : '—',
+      state: health?.executionLocked
+        ? { label: 'LOCKED', cls: 'border-red-500/40 bg-red-500/10 text-red-400' }
+        : health
+          ? { label: 'UNLOCKED', cls: 'border-red-600/60 bg-red-600/20 text-red-300' }
+          : { label: '—', cls: 'border-zinc-600/50 bg-zinc-700/20 text-zinc-400' },
       lines: [health?.executionReason ?? 'Execution locked — read-only by design.'],
     },
   ];
@@ -220,6 +250,7 @@ export function DashboardView({
   onRunSignal,
   priceSpec,
   signalError,
+  marketError,
   loading,
 }: {
   health: HealthReport | null;
@@ -230,6 +261,7 @@ export function DashboardView({
   onRunSignal: () => void;
   priceSpec: PriceDisplaySpec;
   signalError?: string | null;
+  marketError?: string | null;
   loading?: boolean;
 }) {
   return (
@@ -251,8 +283,8 @@ export function DashboardView({
         error={signalError}
         loading={loading}
       />
-      <MarketSnapshot marketStatus={marketStatus} dataHealth={dataHealth} priceSpec={priceSpec} loading={loading} />
-      <SystemMiniCards health={health} marketStatus={marketStatus} loading={loading} />
+      <MarketSnapshot marketStatus={marketStatus} dataHealth={dataHealth} priceSpec={priceSpec} loading={loading} marketError={marketError} />
+      <SystemMiniCards health={health} marketStatus={marketStatus} loading={loading} marketError={marketError} />
 
       {marketStatus?.sync.lastRun && (
         <Card className="border-zinc-800 bg-zinc-900/40">

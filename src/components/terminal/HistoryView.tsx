@@ -115,7 +115,7 @@ export function HistoryView({
                   <p className="text-xs text-zinc-500">ইঞ্জিন / কৌশল</p>
                   <p className="mt-1 font-mono text-sm text-zinc-200">{s.engineVersion}</p>
                   <p className="font-mono text-xs text-zinc-500">{s.strategyVersion}</p>
-                  <p className="text-xs text-zinc-600">সিম্বল: <span className="font-mono">{s.symbol}</span> · M15</p>
+                  <p className="text-xs text-zinc-400">সিম্বল: <span className="font-mono">{s.symbol}</span> · M15</p>
                 </div>
                 <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
                   <p className="text-xs text-zinc-500">সিদ্ধান্ত ক্যান্ডেল (M15)</p>
@@ -129,17 +129,17 @@ export function HistoryView({
                   ) : (
                     <p className="mt-1 text-xs text-zinc-500">আঙ্গুলছাপ নেই (legacy/অ-শনাক্ত)</p>
                   )}
-                  <p className="text-xs text-zinc-600">একই লজিক্যাল সেটআপ = একই আঙ্গুলছাপ</p>
+                  <p className="text-xs text-zinc-400">একই লজিক্যাল সেটআপ = একই আঙ্গুলছাপ</p>
                 </div>
                 <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
                   <p className="text-xs text-zinc-500">ডেটাসেট ফিঙ্গারপ্রিন্ট</p>
                   <p className="mt-1 break-all font-mono text-xs text-zinc-300">{s.inputFingerprint ? s.inputFingerprint.slice(0, 16) : '—'}</p>
-                  <p className="text-xs text-zinc-600">dataset: {s.datasetFingerprint ? s.datasetFingerprint.slice(0, 12) : '—'}</p>
+                  <p className="text-xs text-zinc-400">dataset: {s.datasetFingerprint ? s.datasetFingerprint.slice(0, 12) : '—'}</p>
                 </div>
                 <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
                   <p className="text-xs text-zinc-500">এক্সিকিউশন লক</p>
                   <p className="mt-1 text-sm text-zinc-200">{s.executionLocked ? 'সক্রিয় (read-only)' : '—'}</p>
-                  <p className="text-xs text-zinc-600">
+                  <p className="text-xs text-zinc-400">
                     মেয়াদ: {s.expiryUtc ? (
                       <>{fmtDhaka(s.expiryUtc)}{new Date(s.expiryUtc).getTime() < Date.now() ? <span className="ml-1 text-amber-400">(মেয়াদোত্তীর্ণ)</span> : null}</>
                     ) : '—'}
@@ -202,7 +202,7 @@ export function HistoryView({
                       <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
                         <p className="text-xs text-zinc-500">Reward / Risk</p>
                         <p className="mt-1 font-mono text-sm text-zinc-200">1 : {lv.rewardRiskRatio.toFixed(2)}</p>
-                        <p className="text-xs text-zinc-600">
+                        <p className="text-xs text-zinc-400">
                           রেফারেন্স এন্ট্রি{' '}
                           <span className="font-mono" title={`raw: ${lvlRef.rawText}`}>
                             {lvlRef.text}{lvlRef.anomaly && <sup className="ml-0.5 text-amber-400" aria-label="precision anomaly">≈</sup>}
@@ -286,9 +286,9 @@ export function HistoryView({
                     <p className="flex flex-wrap items-center gap-2 text-xs font-semibold text-zinc-400">
                       নিয়ম-ম্যানিফেস্ট (এই মূল্যায়নে ব্যবহৃত)
                       <Badge variant="outline" className="border-zinc-700 bg-zinc-900 font-mono text-[10px] text-zinc-400">v{rs.rulesSnapshotVersion}</Badge>
-                      <span className="break-all font-mono text-[10px] text-zinc-600" title={rs.snapshotHash}>hash {rs.snapshotHash.slice(0, 12)}…</span>
+                      <span className="break-all font-mono text-[10px] text-zinc-400" title={rs.snapshotHash}>hash {rs.snapshotHash.slice(0, 12)}…</span>
                     </p>
-                    <p className="mt-1 text-[11px] leading-relaxed text-zinc-600">
+                    <p className="mt-1 text-[11px] leading-relaxed text-zinc-400">
                       সংরক্ষিত স্ন্যাপশট — পরে কনফিগ বদলালেও এই সারির মান বদলায় না।
                     </p>
                     <div className="custom-scrollbar mt-2 max-h-64 space-y-1 overflow-y-auto pr-1" role="region" aria-label="নিয়ম-ম্যানিফেস্ট তালিকা">
@@ -298,8 +298,8 @@ export function HistoryView({
                           <span className="font-mono text-zinc-200">
                             = {entry.value === null ? 'null' : Array.isArray(entry.value) ? entry.value.join('+') : String(entry.value)}
                           </span>
-                          <span className="text-zinc-600">{entry.unit}</span>
-                          <span className="ml-auto text-zinc-600" title={`source: ${entry.source}`}>{sourceBn[entry.source] ?? entry.source}</span>
+                          <span className="text-zinc-400">{entry.unit}</span>
+                          <span className="ml-auto text-zinc-400" title={`source: ${entry.source}`}>{sourceBn[entry.source] ?? entry.source}</span>
                         </div>
                       ))}
                     </div>
@@ -367,16 +367,16 @@ export function HistoryView({
                         ) : c.passed === false ? (
                           <XCircle className="h-3.5 w-3.5 shrink-0 self-center text-red-400" aria-hidden />
                         ) : (
-                          <Minus className="h-3.5 w-3.5 shrink-0 self-center text-zinc-600" aria-hidden />
+                          <Minus className="h-3.5 w-3.5 shrink-0 self-center text-zinc-400" aria-hidden />
                         )}
                         <span className="text-zinc-300">{c.labelBn}</span>
-                        <span className="ml-auto text-zinc-600">{c.category === 'data-quality' ? 'ডেটা' : 'কৌশল'}</span>
+                        <span className="ml-auto text-zinc-400">{c.category === 'data-quality' ? 'ডেটা' : 'কৌশল'}</span>
                         {c.detailBn && <span className="w-full text-zinc-500">{c.detailBn}</span>}
                       </div>
                     ))}
                   </div>
                 )}
-                <p className="mt-2 text-[11px] leading-relaxed text-zinc-600">
+                <p className="mt-2 text-[11px] leading-relaxed text-zinc-400">
                   ✓ পাস · ✗ ব্যর্থ · — পর্যায়ে পৌঁছায়নি (ইঞ্জিন আগের ব্যর্থ ধাপেই থেমে গেছে — সৎ অবস্থা, লুকানো নয়)।
                 </p>
                 {signalLatest.strategyVersions && (
@@ -420,7 +420,7 @@ export function HistoryView({
                   </p>
                 </div>
                 {bt.limitations.length > 0 && (
-                  <p className="mt-1.5 text-[10px] leading-relaxed text-zinc-600">{bt.limitations.join(' · ')}</p>
+                  <p className="mt-1.5 text-[10px] leading-relaxed text-zinc-400">{bt.limitations.join(' · ')}</p>
                 )}
               </div>
             );
@@ -478,11 +478,11 @@ export function HistoryView({
                     <span className="break-all font-mono text-[10px] text-zinc-500">{h.reasonCodes.join(', ')}</span>
                   )}
                   {h.setupFingerprint ? (
-                    <span className="ml-auto break-all font-mono text-[10px] text-zinc-600" title={h.setupFingerprint}>
+                    <span className="ml-auto break-all font-mono text-[10px] text-zinc-400" title={h.setupFingerprint}>
                       সেটআপ {h.setupFingerprint.slice(0, 10)}…
                     </span>
                   ) : (
-                    <span className="ml-auto text-[10px] text-zinc-600">আঙ্গুলছাপ নেই (legacy/অ-শনাক্ত)</span>
+                    <span className="ml-auto text-[10px] text-zinc-400">আঙ্গুলছাপ নেই (legacy/অ-শনাক্ত)</span>
                   )}
                   {h.rulesSnapshot.status === 'not-recorded' && (
                     <span className="text-[10px] text-amber-500/80" title="Not recorded for this evaluation">নিয়ম-রেকর্ড নেই</span>

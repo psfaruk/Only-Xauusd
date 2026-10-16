@@ -3,7 +3,8 @@
  * ----------------------------------------------------------------------------
  * Runs a historical backtest over VERIFIED persisted broker candles and
  * stores an honest BacktestRun row. Protected like the other triggers
- * (DATA_API_TOKEN ALWAYS — fail-closed 503 when unset).
+ * (DATA_API_TOKEN ALWAYS when set; unset → fail-closed 503 unless the
+ * explicit MARKET_API_PUBLIC_TRIGGERS=true preview opt-in — Phase 13).
  *
  * Body: { symbol?, timeframe?, strategy? }
  *   · strategy: 'structure-proxy' (Phase 8 single-TF proxy — default) or

@@ -61,7 +61,10 @@ export function TerminalHeader({
                 </h1>
               </div>
               <p className="hidden truncate text-[10px] text-zinc-500 sm:block">
-                ডিটারমিনিস্টিক ইঞ্জিন + GLM রিভিউ · Risk Gate সর্বোচ্চ কর্তৃত্ব
+                {/* Master-audit fix D-D1: GLM has NO signal-review layer — it is
+                 * chat commentary + a capability probe only. The deterministic
+                 * engine holds sole authority. */}
+                ডিটারমিনিস্টিক ইঞ্জিন সর্বোচ্চ কর্তৃত্ব · GLM শুধু ব্যাখ্যাকারী (চ্যাট)
               </p>
             </div>
           </div>
@@ -94,9 +97,10 @@ export function TerminalHeader({
                   : 'border-red-600/60 bg-red-600/20 text-red-300 animate-pulse'
               }`}
               title={health?.executionReason ?? 'Execution locked — read-only by design'}
+              data-execution-locked={locked ? 'true' : 'false'}
             >
               <LockKeyhole className="h-3 w-3" aria-hidden />
-              <span className="hidden sm:inline">Order Execution:</span> LOCKED
+              <span className="hidden sm:inline">Order Execution:</span> {locked ? 'LOCKED' : 'UNLOCKED'}
             </Badge>
             <span
               className="hidden font-mono text-xs tabular-nums text-zinc-400 md:inline"

@@ -34,7 +34,10 @@ export async function POST(request: Request) {
   try {
     body = await request.json();
   } catch {
-    body = {};
+    // Master-audit fix A5: malformed JSON used to be swallowed into `{}` and
+    // then validated as an empty body. Siblings (sync/analysis) reject with
+    // 400 — this route now does the same.
+    return jsonError(400, ErrorCode.BAD_REQUEST, 'Invalid request body: malformed JSON.');
   }
 
   const parsed = signalRunBodySchema.safeParse(body ?? {});

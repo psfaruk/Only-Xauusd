@@ -211,6 +211,17 @@ describe('readiness — demo source is never analysis-ready', () => {
     expect(r.errorCodes).toContain('SOURCE_DEMO');
     expect(r.ready).toBe(false);
   });
+
+  test('demo-sourced TICK alone (no candles) still marks SOURCE_DEMO — precedence-bug regression (master audit C-D1)', async () => {
+    // The old expression `(tickDemo || tfResults.length > 0) ? candleCheck : false`
+    // computed tickDemo and then DISCARDED it: with zero TF rows the whole
+    // condition collapsed to the candle check, so a demo tick + empty candles
+    // wrongly produced demoSourced=false. The tick check must count.
+    await seedTick(10, 'bridge-demo');
+    const r = await computeReadiness({ symbol: SYMBOL, now: () => FIXED_NOW_MS });
+    expect(r.errorCodes).toContain('SOURCE_DEMO');
+    expect(r.ready).toBe(false);
+  });
 });
 
 describe('getAnalysisReadiness — downstream fail-closed contract', () => {

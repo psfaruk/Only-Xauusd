@@ -105,6 +105,10 @@ export const databaseModels = [
   { name: 'AnalysisRun', purpose: 'Reproducible deterministic analysis runs', phase: 4, status: 'active' as const },
   { name: 'BacktestRun', purpose: 'Backtest simulations over verified candles', phase: 8, status: 'active' as const },
   { name: 'SignalEvaluation', purpose: 'Deterministic signal-engine evaluations (append-only)', phase: 9, status: 'active' as const },
+  // Master-audit fix E3: these two ACTIVE Phase-10 models were missing from
+  // the static inventory (the UI said "১৪টি মডেল"; the schema has 16).
+  { name: 'ValidationRun', purpose: 'Phase 10 validation-harness runs (dev/val/OOS splits)', phase: 10, status: 'active' as const },
+  { name: 'PaperSignalOutcome', purpose: 'Read-only forward paper tracking of setup evaluations', phase: 10, status: 'active' as const },
   { name: 'Signal', purpose: 'Legacy Phase-1 signal shape (0 rows — superseded by SignalEvaluation)', phase: 5, status: 'superseded' as const },
   { name: 'AiReview', purpose: 'GLM multi-agent reviews', phase: 6, status: 'planned' as const },
   { name: 'RiskCheck', purpose: 'Deterministic risk-gate results', phase: 7, status: 'planned' as const },

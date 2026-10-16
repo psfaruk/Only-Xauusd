@@ -76,12 +76,14 @@ export function SystemView({
   auditError,
   health,
   marketStatus,
+  marketError,
   marketQuality,
   qualityError,
   dataHealth,
   dhealthError,
   dataLatest,
   backtestLatest,
+  backtestError,
   analysisLatest,
   verifyResult,
   verifying,
@@ -96,12 +98,16 @@ export function SystemView({
   auditError?: string | null;
   health: HealthReport | null;
   marketStatus: MarketStatusResponse | null;
+  /** Master-audit fix B-D1: status-API outage code — explicit banner in the
+   * market tab; never conflated with "no data". */
+  marketError?: string | null;
   marketQuality: QualityResponse | null;
   qualityError?: string | null;
   dataHealth: DataHealthResponse | null;
   dhealthError?: string | null;
   dataLatest: DataLatestResponse | null;
   backtestLatest: BacktestLatestResponse | null;
+  backtestError?: string | null;
   analysisLatest: AnalysisLatestResponse | null;
   verifyResult: VerifyResponse | null;
   verifying: boolean;
@@ -273,6 +279,17 @@ export function SystemView({
 
         {/* ------------------------------------------------- market */}
         <TabsContent value="market" className="space-y-4">
+          {marketError && !marketStatus && (
+            <div role="alert" className="flex items-start gap-3 rounded-xl border border-red-500/40 bg-red-500/10 p-4">
+              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-400" aria-hidden />
+              <div>
+                <p className="text-sm font-semibold text-red-200">মার্কেট-স্ট্যাটাস API অনুপলব্ধ</p>
+                <p className="mt-0.5 text-xs leading-relaxed text-zinc-400">
+                  কোড <span className="font-mono text-red-300">{marketError}</span> — নিচের '—' চিহ্নগুলো ডেটা নেই-এর প্রমাণ নয়, স্ট্যাটাস আনা যায়নি (fail-closed)। রিফ্রেশ লুপ ৩০ সেকেন্ডে আবার চেষ্টা করে।
+                </p>
+              </div>
+            </div>
+          )}
           {marketStatus && (!marketStatus.bridge.configured || !marketStatus.bridge.reachable || !marketStatus.bridge.status?.connected) && (
             <div role="alert" className="flex flex-col gap-2 rounded-xl border border-red-500/40 bg-red-500/10 p-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-start gap-3">
@@ -488,7 +505,8 @@ export function SystemView({
                 ))}
                 <Button
                   onClick={onRunSync}
-                  disabled={syncing || !marketStatus}
+                  disabled={syncing}
+                  title={marketError && !marketStatus ? 'স্ট্যাটাস API ডাউন থাকলেও সিঙ্ক স্বাধীনভাবে চলে — ফল সৎভাবে দেখানো হবে' : undefined}
                   className="w-full gap-2 bg-amber-500/15 text-amber-300 hover:bg-amber-500/25"
                   variant="outline"
                 >
@@ -704,7 +722,32 @@ export function SystemView({
 
         {/* ------------------------------------------------- GLM */}
         <TabsContent value="glm" className="space-y-4">
-          {/* F-03 fix: three-state capability badges — unknown when audit unavailable */}
+          {/* Master-audit fix B-D4: the runtime-derived last verification
+           * event (persisted SystemEvent) — previously returned by the API
+           * but never rendered, while static Phase-1 constants appeared as
+           * current facts. */}
+          {audit?.glm.liveStatus ? (
+            <div
+              role="status"
+              className={`flex flex-wrap items-center gap-2 rounded-xl border p-3 text-xs ${
+                audit.glm.liveStatus.code === 'GLM_VERIFY_OK'
+                  ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+                  : 'border-amber-500/40 bg-amber-500/10 text-amber-300'
+              }`}
+            >
+              <span className="font-semibold">সর্বশেষ লাইভ যাচাই (রানটাইম):</span>
+              <span className="font-mono">{audit.glm.liveStatus.code}</span>
+              {audit.glm.liveStatus.at ? <span>· {fmtDhaka(audit.glm.liveStatus.at)} (ঢাকা)</span> : <span>· সময় অজানা</span>}
+              {audit.glm.liveStatus.message ? <span className="w-full text-zinc-400">{audit.glm.liveStatus.message}</span> : null}
+            </div>
+          ) : (
+            <p className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-3 text-xs text-zinc-500">
+              এখনো কোনো লাইভ যাচাই-ইভেন্ট সংরক্ষিত হয়নি — নিচের বাটন দিয়ে এখনই চালানো যায়।
+            </p>
+          )}
+          {/* F-03 fix: three-state capability badges — unknown when audit unavailable.
+           * B-D4: badges now carry their evidence timestamp (static Phase-1
+           * proof, not a live claim). */}
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
             {[
               { icon: Zap, title: 'Chat Completion', ok: audit?.glm.capabilities.chatCompletion ?? null, detail: 'ইংরেজি টোকেন-টেস্ট রাউন্ড-ট্রিপ' },
@@ -728,6 +771,11 @@ export function SystemView({
                       )}
                     </div>
                     <p className="mt-1 text-xs leading-relaxed text-zinc-400">{cap.detail}</p>
+                    {/* B-D4: time-stamp the static evidence — a Phase-1 proof,
+                     * not a claim about the current minute. */}
+                    {audit?.glm.verifiedAt && (
+                      <p className="mt-0.5 text-[10px] text-zinc-500">প্রমাণ-সময়: {fmtDhaka(audit.glm.verifiedAt)} (ঐতিহাসিক)</p>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -854,7 +902,11 @@ export function SystemView({
             <CardHeader className="pb-3">
               <CardTitle className="text-base">ডেটা মডেল (SQLite · Prisma)</CardTitle>
               <p className="text-xs text-zinc-500">
-                ১৪টি মডেল — ৯টি সচল, ১টি অবচিত (Signal → SignalEvaluation), ২টি পরিকল্পিত, ২টি Phase 11 পর্যন্ত তালাবদ্ধ।
+                {/* Master-audit fix E3: derived from the payload (the old static
+                    "১৪টি মডেল — ৯টি সচল" copy was stale; schema has 16). */}
+                {audit
+                  ? `${audit.database.models.length}টি মডেল — সচল ${audit.database.models.filter((m) => m.status === 'active').length}, অবচিত ${audit.database.models.filter((m) => m.status === 'superseded').length} (Signal → SignalEvaluation), পরিকল্পিত ${audit.database.models.filter((m) => m.status === 'planned').length} (AiReview, RiskCheck), তালাবদ্ধ ${audit.database.models.filter((m) => m.status === 'locked').length} (Phase 11 পর্যন্ত)।`
+                  : 'মডেল-তালিকা অনুপলব্ধ — সংযোগ ফিরলে দেখানো হবে।'}
               </p>
             </CardHeader>
             <CardContent className="p-0">

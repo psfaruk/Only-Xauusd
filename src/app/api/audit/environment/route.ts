@@ -30,7 +30,8 @@ import {
   acceptanceChecklist,
 } from '@/lib/audit/static-audit';
 import { TOOL_REGISTRY } from '@/lib/tools/registry';
-import { guardDataApi } from '@/lib/api-guard';
+import { guardDataApi, parseQuery } from '@/lib/api-guard';
+import { StatusQuerySchema } from '@/lib/market/schemas';
 import { recentEvents } from '@/lib/logger';
 
 export const dynamic = 'force-dynamic';
@@ -41,8 +42,15 @@ export async function GET(req: Request) {
   if (!guard.ok) return guard.response;
 
   try {
-    const symbolParam = new URL(req.url).searchParams.get('symbol') ?? undefined;
-    const report = await buildEnvironmentAuditReport(symbolParam ?? undefined);
+    // Master-audit fix A5: the symbol used to fall back to the allowlist
+    // silently when invalid. Now it follows the shared allowlist contract
+    // (400 with the zod message) instead of quietly auditing a different
+    // symbol than the caller asked for.
+    const query = parseQuery(StatusQuerySchema, {
+      symbol: new URL(req.url).searchParams.get('symbol') ?? undefined,
+    });
+    if (!query.ok) return query.response;
+    const report = await buildEnvironmentAuditReport(query.data.symbol ?? undefined);
     const events = await recentEvents(config.limits.maxEventsReturned);
 
     return NextResponse.json({

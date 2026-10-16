@@ -158,8 +158,12 @@ export async function computeReadiness(opts: ReadinessOptions): Promise<Readines
   }
 
   // ---- Demo-source policy: demo data is NEVER analysis-ready -----------------
-  const demoSourced =
-    (tickRow?.source ?? '').includes('demo') ||
+  // (Master-audit fix C-D1: the old expression had an operator-precedence bug
+  // — `tickDemo || tfResults.length > 0 ? candleDemo : false` discarded the
+  // tick-source check entirely. Intent: demo if EITHER the latest tick OR the
+  // latest candle is demo-sourced.)
+  const tickDemo = (tickRow?.source ?? '').includes('demo');
+  const latestCandleDemo =
     tfResults.length > 0
       ? (
           await db.marketCandle
@@ -171,6 +175,7 @@ export async function computeReadiness(opts: ReadinessOptions): Promise<Readines
             .catch(() => null)
         )?.source.includes('demo') ?? false
       : false;
+  const demoSourced = tickDemo || latestCandleDemo;
 
   const qualityState = worstQualityState([
     tick.state,

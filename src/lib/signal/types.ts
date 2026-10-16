@@ -41,6 +41,7 @@ export type SignalReasonCode =
   | 'NOT_AUTHENTICATED'
   | 'QUOTE_STALE'
   | 'QUOTE_UNAVAILABLE'
+  | 'TICK_STALE'
   | 'TICK_INVALID'
   | 'SPREAD_INVALID'
   | 'DATA_MISSING'

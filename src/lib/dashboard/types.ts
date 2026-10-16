@@ -17,6 +17,8 @@ export interface HealthReport {
   version: string;
   phase: number;
   phaseLabel: string;
+  /** Phase at which execution MAY be considered (all four switches must pass). */
+  executionGatePhase: number;
   tradingMode: string;
   executionLocked: boolean;
   executionReason: string;

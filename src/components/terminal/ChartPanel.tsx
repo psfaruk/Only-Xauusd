@@ -35,7 +35,7 @@ import {
   type Time,
   type UTCTimestamp,
 } from 'lightweight-charts';
-import { AlertTriangle, LineChart, RefreshCw, WifiOff } from 'lucide-react';
+import { AlertTriangle, LineChart, Loader2, RefreshCw, WifiOff } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -99,6 +99,9 @@ export function ChartPanel({
       try {
         const res = await fetch(`/api/data/chart?symbol=${encodeURIComponent(symbol)}&tf=${timeframe}&limit=300`, {
           cache: 'no-store',
+          // Master-audit fix: a network blackhole must not leave the chart in
+          // an endless "loading" frame — bounded client-side timeout.
+          signal: AbortSignal.timeout(20_000),
         });
         if (!res.ok) {
           const body = (await res.json().catch(() => null)) as { error?: { code?: string } } | null;
@@ -338,7 +341,7 @@ export function ChartPanel({
               aria-selected={tf === t}
               data-testid={`tf-${t}`}
               onClick={() => setTf(t)}
-              className={`min-w-[44px] px-2.5 py-1.5 font-mono text-xs font-semibold transition-colors ${
+              className={`min-h-[24px] min-w-[44px] px-2.5 py-1 font-mono text-xs font-semibold transition-colors ${
                 tf === t
                   ? 'bg-amber-500/20 text-amber-300'
                   : 'bg-zinc-900/60 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
@@ -359,7 +362,7 @@ export function ChartPanel({
               aria-pressed={e.show}
               disabled={!e.pts}
               title={e.pts ? `${e.label} দেখান/লুকান` : `${e.label}: পর্যাপ্ত ইতিহাস নেই (সৎ অবস্থা)`}
-              className={`rounded-full border px-2 py-0.5 font-mono text-[10px] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+              className={`min-h-[24px] rounded-full border px-2 py-0.5 font-mono text-[10px] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
                 e.show && e.pts
                   ? 'border-zinc-600 bg-zinc-800/80 text-zinc-200'
                   : 'border-zinc-800 bg-transparent text-zinc-600'
@@ -414,6 +417,18 @@ export function ChartPanel({
           <div className="absolute inset-0 flex items-center justify-center bg-zinc-950/70">
             <Skeleton className="h-full w-full rounded-none" />
             <span className="absolute text-xs text-zinc-400">ব্রোকার-যাচাইকৃত ক্যান্ডেল লোড হচ্ছে…</span>
+          </div>
+        )}
+
+        {/* Master-audit fix (TF-switch stale frame): while RE-loading with a
+         * previous TF's chart still on screen, dim it + spinner so the frame
+         * is never mistaken for the newly-selected timeframe's data. */}
+        {loading && data !== null && (
+          <div className="absolute inset-0 flex items-center justify-center bg-zinc-950/60" role="status" aria-label="নতুন টাইমফ্রেম লোড হচ্ছে">
+            <span className="flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900/90 px-3 py-2 text-xs text-zinc-300">
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-400" aria-hidden />
+              {tf} ডেটা লোড হচ্ছে…
+            </span>
           </div>
         )}
 
@@ -496,7 +511,7 @@ export function ChartPanel({
               S/R লো <PriceLevelText value={data.levels.lastSwingLow.price} spec={priceSpec} className="font-mono text-zinc-300" />
             </span>
           )}
-          <span className="ml-auto text-zinc-600">
+          <span className="ml-auto text-zinc-400">
             {data.meta.closedCount} বন্ধ ক্যান্ডেল{data.meta.formingIncluded ? ' + ১টি ফর্মিং' : ''}
             {data.meta.insufficient.length > 0 && (
               <span className="ml-1 text-amber-500/80" title="পর্যাপ্ত ইতিহাস নেই — সৎ অবস্থা">
@@ -527,7 +542,7 @@ function ToggleChip({
       onClick={onClick}
       aria-pressed={active}
       data-testid={dataTestId}
-      className={`rounded-full border px-2 py-0.5 text-[10px] transition-colors ${
+      className={`min-h-[24px] rounded-full border px-2 py-0.5 text-[10px] transition-colors ${
         active
           ? 'border-zinc-600 bg-zinc-800/80 text-zinc-200'
           : 'border-zinc-800 bg-transparent text-zinc-600'

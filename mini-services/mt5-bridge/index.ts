@@ -115,12 +115,22 @@ const server = Bun.serve({
           detail: "no verified quote for symbol (not subscribed, or no live tick received yet)",
         });
       }
+      // Broker→UTC normalization (master-audit fix C-D2): the manager measures
+      // brokerOffsetSec live from every quote (broker time − local UTC). The
+      // app-side contract (src/lib/market/types.ts) says the bridge serves
+      // UTC-normalized timestamps — subtract the measured offset so a broker
+      // running on a shifted server clock (e.g. GMT+2/+3) can never silently
+      // skew the app timeline. Verified today: Exness-MT5Trial6 offset ≈ 0,
+      // so served values are unchanged; the fix only matters if the broker
+      // clock shifts (then a positive shift would have failed closed anyway,
+      // and a small negative shift would have silently skewed — now neither).
+      const utcTs = q.brokerTimeSec - snapshot().brokerOffsetSec;
       return json(null, 200, {
         symbol: q.symbol,
         bid: q.bid,
         ask: q.ask,
         mid: q.mid,
-        ts: q.brokerTimeSec - 0, // broker time == UTC (offset applied when verified)
+        ts: utcTs,
         spread: q.spread,
         // Phase 8 integrity extras:
         digits: q.digits,
@@ -142,11 +152,16 @@ const server = Bun.serve({
       }
       try {
         const fetched = await fetchCandles(symbol, tf, limit);
+        // Broker→UTC normalization (master-audit fix C-D2): same rule as the
+        // quote endpoint — candle bar-open times are broker times; subtract
+        // the live-measured brokerOffsetSec before serving. With the current
+        // Exness-MT5Trial6 feed (offset ≈ 0) served values are unchanged.
+        const offsetSec = snapshot().brokerOffsetSec;
         const bars = fetched.bars.map((b, i) => {
           const last = i === fetched.bars.length - 1;
           const forming = last && fetched.formingCount > 0 && b.time === fetched.bars[fetched.bars.length - 1].time;
           return {
-            t: b.time,           // broker/UTC seconds (offset-verified by manager)
+            t: b.time - offsetSec, // UTC-normalized bar open
             o: b.open, h: b.high, l: b.low, c: b.close,
             v: b.tickVolume,
             f: forming ? 1 : 0,

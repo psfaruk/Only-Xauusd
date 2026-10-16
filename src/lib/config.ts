@@ -43,9 +43,16 @@ function clampNum(name: string, fallback: number, min: number, max: number): num
 // ---------------------------------------------------------------------------
 // Trading safety gate — the single most important rule of Phase 1.
 // Order execution can only ever be enabled when ALL conditions hold:
-//   phase >= 11  AND  EXECUTION_ARMED  AND  ALLOW_EXECUTION  AND  mode != read_only
+//   phase >= EXECUTION_GATE_PHASE  AND  EXECUTION_ARMED  AND  ALLOW_EXECUTION
+//   AND  mode != read_only
 // Until then `executionEnabled` is false and every execution path is dead.
 // ---------------------------------------------------------------------------
+
+/** The phase at which execution MAY be considered (all four switches must
+ * still pass). Exported so the UI/health surface states the SAME gate the
+ * lock logic uses (master-audit fix B-D3 — the footer previously hardcoded
+ * a different, stale gate number). */
+export const EXECUTION_GATE_PHASE = 11;
 
 const phase = Math.max(1, Math.floor(num('TRADING_PHASE', 1)));
 const requestedMode = str('TRADING_MODE', 'read_only');
@@ -55,14 +62,18 @@ const allowExecution = bool('ALLOW_EXECUTION', false);
 const validModes = new Set(['read_only', 'demo', 'live']);
 const tradingMode = validModes.has(requestedMode) ? requestedMode : 'read_only';
 
-const phaseGatePassed = phase >= 11;
+const phaseGatePassed = phase >= EXECUTION_GATE_PHASE;
 const executionEnabled =
   phaseGatePassed && executionArmed && allowExecution && tradingMode !== 'read_only';
 
 export const config = {
   version: VERSION,
   phase,
-  phaseLabel: `Phase ${phase} of 12`,
+  /** Truthful status label (master-audit fix B-D3). The phase number is a
+   * LOCK-GATE value, not roadmap progress — the old "Phase N of 12" framing
+   * presented it as a progress bar it never was. */
+  phaseLabel: `Phase ${phase} — ${tradingMode === 'read_only' ? 'Read-Only Research' : `${tradingMode} mode`}`,
+  executionGatePhase: EXECUTION_GATE_PHASE,
   tradingMode,
   execution: {
     enabled: executionEnabled,
@@ -78,7 +89,7 @@ export const config = {
       ? 'Execution enabled (phase gate passed).'
       : phaseGatePassed
         ? 'Execution locked: arm switches (EXECUTION_ARMED / ALLOW_EXECUTION) are off.'
-        : `Execution locked: Phase ${phase} is read-only by design (Phase 11 gate required).`,
+        : `Execution locked: Phase ${phase} is read-only by design (Phase ${EXECUTION_GATE_PHASE} gate required).`,
   },
   symbol: str('TRADING_SYMBOL', 'XAUUSD'),
   glm: {

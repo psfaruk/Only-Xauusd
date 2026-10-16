@@ -12,8 +12,9 @@
 
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { guardDataApi } from '@/lib/api-guard';
+import { guardDataApi, parseQuery } from '@/lib/api-guard';
 import { quoteIntegrity, auditCandleHistory } from '@/lib/market/integrity';
+import { StatusQuerySchema } from '@/lib/market/schemas';
 import { config } from '@/lib/config';
 
 export const dynamic = 'force-dynamic';
@@ -23,7 +24,14 @@ export async function GET(req: Request) {
   if (!guard.ok) return guard.response;
 
   try {
-    const symbol = new URL(req.url).searchParams.get('symbol') ?? config.market.symbols[0] ?? 'XAUUSDm';
+    // Master-audit fix A5: the symbol used to be accepted unvalidated (an
+    // arbitrary symbol silently produced empty data). Now it follows the same
+    // allowlist contract as every sibling data route (400 SYMBOL_NOT_ALLOWED).
+    const query = parseQuery(StatusQuerySchema, {
+      symbol: new URL(req.url).searchParams.get('symbol') ?? undefined,
+    });
+    if (!query.ok) return query.response;
+    const symbol = query.data.symbol ?? config.market.symbols[0] ?? 'XAUUSDm';
 
     const [quote, history] = await Promise.all([
       quoteIntegrity(symbol),

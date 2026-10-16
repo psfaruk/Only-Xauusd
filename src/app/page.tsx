@@ -19,7 +19,7 @@
  * MT5 bridge stays read-only. All data is real or honestly absent.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { BarChart3, Home, MessageCircle, ShieldCheck, Activity } from 'lucide-react';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -105,24 +105,25 @@ export default function TradingTerminal() {
   const [chatSheetOpen, setChatSheetOpen] = useState(false);
   /** bumped by the refresh loop so the chart refetches too. */
   const [refreshTick, setRefreshTick] = useState(0);
-  const viewRef = useRef<TerminalView>('dashboard');
-  viewRef.current = view;
 
   // ---- Refresh loop (same 12 endpoints as before + error codes) ----------------
+  // Master-audit fix: every fetch is bounded by a client-side timeout so a
+  // network blackhole can never wedge the 30s refresh loop (each promise
+  // settles as a rejection → honest NETWORK_ERROR code, next tick retries).
   const refresh = useCallback(async () => {
     try {
       const results = await Promise.allSettled([
-        fetch('/api/health', { cache: 'no-store' }),
-        fetch('/api/audit/environment', { cache: 'no-store' }),
-        fetch('/api/data/status', { cache: 'no-store' }),
-        fetch('/api/data/quality', { cache: 'no-store' }),
-        fetch('/api/analysis/latest', { cache: 'no-store' }),
-        fetch('/api/data/health?symbol=XAUUSDm', { cache: 'no-store' }),
-        fetch('/api/backtest/latest?symbol=XAUUSDm', { cache: 'no-store' }),
-        fetch('/api/signal/latest?symbol=XAUUSDm', { cache: 'no-store' }),
-        fetch('/api/validation/latest?symbol=XAUUSDm', { cache: 'no-store' }),
-        fetch('/api/data/latest?symbol=XAUUSDm', { cache: 'no-store' }),
-        fetch('/api/signal/history?symbol=XAUUSDm&limit=20', { cache: 'no-store' }),
+        fetch('/api/health', { cache: 'no-store', signal: AbortSignal.timeout(20_000) }),
+        fetch('/api/audit/environment', { cache: 'no-store', signal: AbortSignal.timeout(20_000) }),
+        fetch('/api/data/status', { cache: 'no-store', signal: AbortSignal.timeout(20_000) }),
+        fetch('/api/data/quality', { cache: 'no-store', signal: AbortSignal.timeout(20_000) }),
+        fetch('/api/analysis/latest', { cache: 'no-store', signal: AbortSignal.timeout(20_000) }),
+        fetch('/api/data/health?symbol=XAUUSDm', { cache: 'no-store', signal: AbortSignal.timeout(20_000) }),
+        fetch('/api/backtest/latest?symbol=XAUUSDm', { cache: 'no-store', signal: AbortSignal.timeout(20_000) }),
+        fetch('/api/signal/latest?symbol=XAUUSDm', { cache: 'no-store', signal: AbortSignal.timeout(20_000) }),
+        fetch('/api/validation/latest?symbol=XAUUSDm', { cache: 'no-store', signal: AbortSignal.timeout(20_000) }),
+        fetch('/api/data/latest?symbol=XAUUSDm', { cache: 'no-store', signal: AbortSignal.timeout(20_000) }),
+        fetch('/api/signal/history?symbol=XAUUSDm&limit=20', { cache: 'no-store', signal: AbortSignal.timeout(20_000) }),
       ]);
       const resOf = (i: number): Response | null =>
         results[i].status === 'fulfilled' ? results[i].value : null;
@@ -211,6 +212,7 @@ export default function TradingTerminal() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ force: true }),
+        signal: AbortSignal.timeout(90_000),
       });
       if (res.status === 429) {
         const body = (await res.json()) as { message?: string };
@@ -240,6 +242,7 @@ export default function TradingTerminal() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ symbol, mode: 'manual' }),
+        signal: AbortSignal.timeout(90_000),
       });
       const body = (await res.json()) as {
         ok: boolean;
@@ -282,6 +285,7 @@ export default function TradingTerminal() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ symbol, mode: 'manual' }),
+        signal: AbortSignal.timeout(90_000),
       });
     } catch {
       // network-level failure — the subsequent evaluation shows the honest state
@@ -297,6 +301,7 @@ export default function TradingTerminal() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ symbol }),
+        signal: AbortSignal.timeout(120_000),
       });
       const body = (await res.json()) as {
         ok: boolean;
@@ -338,6 +343,7 @@ export default function TradingTerminal() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ symbol }),
+        signal: AbortSignal.timeout(120_000),
       });
       const body = (await res.json()) as {
         ok: boolean;
@@ -385,6 +391,9 @@ export default function TradingTerminal() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ message, history }),
+          // Master-audit fix: bounded client timeout — a hung request can no
+          // longer leave chatSending=true forever (send button stuck).
+          signal: AbortSignal.timeout(120_000),
         });
         const body = (await res.json().catch(() => null)) as ChatResponse | null;
         if (res.ok && body?.ok) {
@@ -446,6 +455,7 @@ export default function TradingTerminal() {
       validationLatest={validationLatest}
       validationError={apiErrors.validation ?? null}
       backtestLatest={backtestLatest}
+      backtestError={apiErrors.backtest ?? null}
       signalHistory={signalHistory}
       priceSpec={priceSpec}
       loading={loading}
@@ -457,12 +467,14 @@ export default function TradingTerminal() {
       auditError={apiErrors.audit ?? null}
       health={health}
       marketStatus={marketStatus}
+      marketError={apiErrors.market ?? null}
       marketQuality={marketQuality}
       qualityError={apiErrors.quality ?? null}
       dataHealth={dataHealth}
       dhealthError={apiErrors.dhealth ?? null}
       dataLatest={dataLatest}
       backtestLatest={backtestLatest}
+      backtestError={apiErrors.backtest ?? null}
       analysisLatest={analysisLatest}
       verifyResult={verifyResult}
       verifying={verifying}
@@ -531,11 +543,12 @@ export default function TradingTerminal() {
                   dataHealth={dataHealth}
                   priceSpec={priceSpec}
                   loading={loading}
+                  marketError={apiErrors.market ?? null}
                 />
               </div>
             </div>
 
-            <SystemMiniCards health={health} marketStatus={marketStatus} loading={loading} />
+            <SystemMiniCards health={health} marketStatus={marketStatus} loading={loading} marketError={apiErrors.market ?? null} />
 
             <Tabs defaultValue="history" className="space-y-4">
               <TabsList className="h-auto w-full max-w-full flex-nowrap bg-zinc-900/60 p-1">
@@ -570,6 +583,7 @@ export default function TradingTerminal() {
                 onRunSignal={() => void runSignalNow()}
                 priceSpec={priceSpec}
                 signalError={apiErrors.signal ?? null}
+                marketError={apiErrors.market ?? null}
                 loading={loading}
               />
             )}
@@ -582,7 +596,7 @@ export default function TradingTerminal() {
                   refreshKey={refreshTick}
                   heightClass="h-[58vh] min-h-[340px]"
                 />
-                <SystemMiniCards health={health} marketStatus={marketStatus} loading={loading} />
+                <SystemMiniCards health={health} marketStatus={marketStatus} loading={loading} marketError={apiErrors.market ?? null} />
               </div>
             )}
             {view === 'chat' && <div className="h-[calc(100dvh-11.5rem)] min-h-[420px]">{chatView}</div>}
@@ -597,6 +611,7 @@ export default function TradingTerminal() {
                   validationLatest={validationLatest}
                   validationError={apiErrors.validation ?? null}
                   backtestLatest={backtestLatest}
+                  backtestError={apiErrors.backtest ?? null}
                   signalHistory={signalHistory}
                   priceSpec={priceSpec}
                   loading={loading}
@@ -632,10 +647,13 @@ export default function TradingTerminal() {
             <ShieldCheck className="h-3.5 w-3.5 text-red-400" aria-hidden />
             XAUUSD AI Trading Agent · {health?.phaseLabel ?? 'Phase —'} · Read-Only — কোনো অর্ডার পাঠানো হবে না
           </p>
-          <p className="font-mono text-[11px] text-zinc-600">
+          <p className="font-mono text-[11px] text-zinc-400">
             Next.js 16 · TypeScript · Prisma/SQLite · z-ai-web-dev-sdk (glm-4-plus)
           </p>
-          <p className="text-zinc-600">Live Trading: Phase 12 রিলিজ-গেটের আগে চালু হবে না</p>
+          {/* Master-audit fix B-D3: the gate number is now derived from the
+           * backend's OWN gate constant (was a stale hardcoded "Phase 12
+           * while the lock logic gates at Phase 11"). */}
+          <p className="text-zinc-400">Live Trading: Phase {health?.executionGatePhase ?? 11} রিলিজ-গেটের আগে চালু হবে না</p>
         </div>
       </footer>
 

@@ -8,6 +8,8 @@
 - **Bridge surface unchanged:** GET-only REST (:3031, 405 otherwise), x-trader-key auth, no trading command ids in the WS client (AUTH/LOGIN/ACCOUNT/SYMBOLS/SUBSCRIBE/QUOTES/CANDLES/HEARTBEAT only).
 - **Signal engine:** no lot size, no order type, no position management — research outputs only; every persisted row records `executionLocked: true`.
 
+> **Correction (2026-10-16, master audit — `audit/full-app-baseline.md` §A1):** "all … behind `guardDataApi`" was **not true for `/api/ai/verify` at Phase 9 time** (it was unguarded apart from an in-process interval). Guarded on 2026-10-16 with regression tests; the inventory list itself was and remains correct.
+
 ## 2. Four-switch execution lock — INTACT (PASS)
 
 | Switch | Value | Source |

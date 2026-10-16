@@ -208,24 +208,24 @@ export async function runSignalEvaluation(opts: RunSignalOptions = {}): Promise<
               return 'DATA_INVALID';
           }
         });
-      const blocked = await blockedOutcome(codes.length ? codes : ['DATA_INVALID'], minimalQuote);
+      const blocked = await blockedOutcome(codes.length ? codes : ['DATA_INVALID'], minimalQuote, digits);
       return { ...blocked, quoteReport };
     }
 
     // ── Gate 5: load closed-candle windows (Phase 4 loader semantics) ─────
     const windows = await loadSignalWindows(db, symbol, rules, nowUtcSec);
     if (windows.demoRows) {
-      return { ...(await blockedOutcome(['SOURCE_DEMO', 'SOURCE_NOT_BROKER'], minimalQuote)), quoteReport };
+      return { ...(await blockedOutcome(['SOURCE_DEMO', 'SOURCE_NOT_BROKER'], minimalQuote, digits)), quoteReport };
     }
     if (windows.windowGapsSuspicious > 0) {
-      return { ...(await blockedOutcome(['GAP_IN_WINDOW', 'DATA_INVALID'], minimalQuote)), quoteReport };
+      return { ...(await blockedOutcome(['GAP_IN_WINDOW', 'DATA_INVALID'], minimalQuote, digits)), quoteReport };
     }
 
     // ── Deterministic core evaluation ─────────────────────────────────────
     const bid = quoteReport.bid !== null ? Number(quoteReport.bid) : null;
     const ask = quoteReport.ask !== null ? Number(quoteReport.ask) : null;
     if (bid === null || ask === null) {
-      return { ...(await blockedOutcome(['QUOTE_UNAVAILABLE'], minimalQuote)), quoteReport };
+      return { ...(await blockedOutcome(['QUOTE_UNAVAILABLE'], minimalQuote, digits)), quoteReport };
     }
     const mid = (bid + ask) / 2;
     const spread = Number(quoteReport.spread ?? (ask - bid));

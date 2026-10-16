@@ -1,3 +1,9 @@
+/**
+ * DB status diagnostic — read-only counts + latest rows for quick health
+ * checks (renamed from the throwaway tmp-audit-db.ts; master-audit fix E6).
+ *
+ * Usage: bun run scripts/db-status.ts
+ */
 import { db } from '../src/lib/db';
 
 async function main() {

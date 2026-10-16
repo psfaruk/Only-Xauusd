@@ -21,6 +21,9 @@ export interface HealthReport {
   version: string;
   phase: number;
   phaseLabel: string;
+  /** The phase at which execution MAY be considered (four switches must all
+   * pass) — exposed so UI copy states the same gate the lock logic uses. */
+  executionGatePhase: number;
   tradingMode: string;
   executionLocked: boolean;
   executionReason: string;
@@ -102,6 +105,7 @@ export async function collectHealth(): Promise<HealthReport> {
     version: config.version,
     phase: config.phase,
     phaseLabel: config.phaseLabel,
+    executionGatePhase: config.executionGatePhase,
     tradingMode: config.tradingMode,
     executionLocked,
     executionReason: config.execution.reason,
