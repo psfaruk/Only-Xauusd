@@ -15,8 +15,11 @@
 // Timeframes
 // ---------------------------------------------------------------------------
 
-/** Supported timeframes → bar duration in seconds. */
+/** Supported timeframes → bar duration in seconds.
+ *  M1 added in the M1/M5 sell-miss fix (bridge already served M1 — the app
+ *  never asked; this is the missing integration, not a new pipeline). */
 export const TIMEFRAME_SECONDS = {
+  M1: 60,
   M5: 300,
   M15: 900,
   H1: 3_600,
@@ -25,7 +28,7 @@ export const TIMEFRAME_SECONDS = {
 
 export type Timeframe = keyof typeof TIMEFRAME_SECONDS;
 
-export const ALL_TIMEFRAMES: readonly Timeframe[] = ['M5', 'M15', 'H1', 'H4'];
+export const ALL_TIMEFRAMES: readonly Timeframe[] = ['M1', 'M5', 'M15', 'H1', 'H4'];
 
 export function isTimeframe(v: unknown): v is Timeframe {
   return typeof v === 'string' && Object.prototype.hasOwnProperty.call(TIMEFRAME_SECONDS, v);
@@ -164,6 +167,16 @@ export interface BridgeStatus {
   offsetSec?: number;
   reason?: string | null;
   symbols?: number;
+  /** Live tick-stream observability (bridge /api/status Phase 8 extras —
+   *  served by the bridge; older consumers ignore them). Used by the SSE
+   *  stream + diagnostics panel to show GENUINE tick counts. */
+  authenticated?: boolean;
+  quoteCount?: number;
+  lastQuoteAtMs?: number;
+  reconnects?: number;
+  lastError?: string | null;
+  lastErrorAtMs?: number | null;
+  uptimeMs?: number;
 }
 
 export interface BridgeQuote {
