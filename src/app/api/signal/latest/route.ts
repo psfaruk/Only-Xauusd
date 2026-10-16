@@ -13,6 +13,8 @@ import { db } from '@/lib/db';
 import { guardDataApi, parseQuery } from '@/lib/api-guard';
 import { getLatestSignalEvaluation } from '@/lib/signal/persistence';
 import { SIGNAL_STRATEGY_VERSION } from '@/lib/signal/types';
+import { deriveConditionReport } from '@/lib/signal/conditions';
+import { CANDIDATE_STRATEGY_VERSION } from '@/lib/signal/candidate/types';
 import { config } from '@/lib/config';
 import { signalLatestQuerySchema } from '@/lib/signal/schemas';
 
@@ -61,6 +63,16 @@ export async function GET(req: Request) {
       symbol,
       signal,
       backtestComparison,
+      // Phase 11 (section I): read-time derived condition checklist — WHY the
+      // latest evaluation did (or did not) produce a signal, per condition,
+      // with the strategy-logic vs data-quality split. Derived from the
+      // persisted evaluation only (the engine core is untouched).
+      conditions: deriveConditionReport(signal ?? null),
+      strategyVersions: {
+        activeLive: SIGNAL_STRATEGY_VERSION,
+        researchCandidate: CANDIDATE_STRATEGY_VERSION,
+        candidateStatus: 'offline-research-only (not wired into live evaluation, persistence, or paper tracking; activation gated by audit/phase11-candidate-forward-protocol.md)',
+      },
       notes: [
         'Signals are research/decision support only — nothing is ever executed.',
         'The comparison block is the latest backtest run of the CURRENT signal-engine strategy version only.',

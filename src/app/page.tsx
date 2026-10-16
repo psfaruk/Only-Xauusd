@@ -15,6 +15,7 @@ import {
   AlertTriangle,
   Bot,
   CheckCircle2,
+  Minus,
   ChevronDown,
   Circle,
   Cpu,
@@ -34,6 +35,8 @@ import {
   XCircle,
   Zap,
 } from 'lucide-react';
+import { SIGNAL_STRATEGY_VERSION } from '@/lib/signal/types';
+import { CANDIDATE_STRATEGY_VERSION } from '@/lib/signal/candidate/types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -283,6 +286,15 @@ interface SignalLatestResponse {
     executionLocked: boolean;
     quote: Record<string, unknown> | null;
   } | null;
+  /** Phase 11 — read-time derived condition checklist (why / why not a signal). */
+  conditions: {
+    source: 'evaluation' | 'none';
+    headlineBn: string;
+    category: 'data-quality' | 'strategy-logic' | null;
+    checks: Array<{ id: string; labelBn: string; category: 'data-quality' | 'strategy-logic'; passed: boolean | null; detailBn: string | null }>;
+  } | null;
+  /** Phase 11 — strategy version surface (baseline live; candidate offline research). */
+  strategyVersions: { activeLive: string; researchCandidate: string; candidateStatus: string } | null;
   backtestComparison: {
     runId: string;
     createdAt: string;
@@ -2667,6 +2679,76 @@ export default function Phase1Dashboard() {
                           </div>
                         )}
                       </>
+                    );
+                  })()}
+
+                  {/* Phase 11 — condition checklist: WHY (not) a signal, per condition.
+                      Honest fallback: with the API unreachable (fail-closed) or no
+                      evaluation stored, the reason surface still renders — never a
+                      generic blank, never blamed on the strategy. */}
+                  {!signalLatest && (
+                    <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3" role="region" aria-label="শর্ত-বাই-শর্ত বিশ্লেষণ">
+                      <p className="flex flex-wrap items-center gap-2 text-xs font-semibold text-zinc-400">
+                        শর্ত-বাই-শর্ত বিশ্লেষণ — কেন সিগন্যাল হলো / হলো না
+                        <Badge variant="outline" className="border-amber-500/40 bg-amber-500/10 text-amber-300">ডেটা-গুণমান (কৌশলের দোষ নয়)</Badge>
+                      </p>
+                      <p className="mt-1 text-xs leading-relaxed text-zinc-300">
+                        কোনো মূল্যায়ন ডেটা এখন অনুপলব্ধ (API fail-closed / ব্রিজ বিচ্ছিন্ন) — কোনো মূল্যায়ন সংরক্ষিত নেই। এটি কৌশলগত ব্যর্থতা নয়: সংযোগ ছাড়া ইঞ্জিন মূল্যায়নই করে না (fail-closed)।
+                      </p>
+                      <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+                        সক্রিয় লাইভ কৌশল: <span className="font-mono text-zinc-400">{SIGNAL_STRATEGY_VERSION}</span> · গবেষণা ক্যান্ডিডেট:{' '}
+                        <span className="font-mono text-zinc-400">{CANDIDATE_STRATEGY_VERSION}</span>{' '}
+                        (অফলাইন — লাইভ মূল্যায়ন/পেপার ট্র্যাকিংয়ে সংযুক্ত নয়; সক্রিয়করণ প্রি-রেজিস্টার্ড প্রোটোকলের শর্তে)
+                      </p>
+                    </div>
+                  )}
+                  {signalLatest?.conditions && (() => {
+                    const cond = signalLatest.conditions;
+                    const catBn = cond.category === 'data-quality'
+                      ? 'ডেটা-গুণমান (কৌশলের দোষ নয়)'
+                      : cond.category === 'strategy-logic'
+                        ? 'কৌশল-লজিক'
+                        : null;
+                    return (
+                      <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3" role="region" aria-label="শর্ত-বাই-শর্ত বিশ্লেষণ">
+                        <p className="flex flex-wrap items-center gap-2 text-xs font-semibold text-zinc-400">
+                          শর্ত-বাই-শর্ত বিশ্লেষণ — কেন সিগন্যাল হলো / হলো না
+                          {catBn && (
+                            <Badge variant="outline" className={cond.category === 'data-quality' ? 'border-amber-500/40 bg-amber-500/10 text-amber-300' : 'border-zinc-700 bg-zinc-900 text-zinc-400'}>
+                              {catBn}
+                            </Badge>
+                          )}
+                        </p>
+                        <p className="mt-1 text-xs leading-relaxed text-zinc-300">{cond.headlineBn}</p>
+                        {cond.checks.length > 0 && (
+                          <div className="mt-2 space-y-1">
+                            {cond.checks.map((c) => (
+                              <div key={c.id} className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 rounded border border-zinc-800/60 bg-zinc-900/60 px-2 py-1 text-[11px]">
+                                {c.passed === true ? (
+                                  <CheckCircle2 className="h-3.5 w-3.5 shrink-0 self-center text-emerald-400" aria-hidden />
+                                ) : c.passed === false ? (
+                                  <XCircle className="h-3.5 w-3.5 shrink-0 self-center text-red-400" aria-hidden />
+                                ) : (
+                                  <Minus className="h-3.5 w-3.5 shrink-0 self-center text-zinc-600" aria-hidden />
+                                )}
+                                <span className="text-zinc-300">{c.labelBn}</span>
+                                <span className="ml-auto text-zinc-600">{c.category === 'data-quality' ? 'ডেটা' : 'কৌশল'}</span>
+                                {c.detailBn && <span className="w-full text-zinc-500">{c.detailBn}</span>}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        <p className="mt-2 text-[11px] leading-relaxed text-zinc-600">
+                          ✓ পাস · ✗ ব্যর্থ · — পর্যায়ে পৌঁছায়নি (ইঞ্জিন আগের ব্যর্থ ধাপেই থেমে গেছে — সৎ অবস্থা, লুকানো নয়)। ইঞ্জিন কোর অপরিবর্তিত; এটি সংরক্ষিত মূল্যায়ন থেকে পাঠ-কালীন উপস্থাপনা মাত্র।
+                        </p>
+                        {signalLatest.strategyVersions && (
+                          <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+                            সক্রিয় লাইভ কৌশল: <span className="font-mono text-zinc-400">{signalLatest.strategyVersions.activeLive}</span> · গবেষণা ক্যান্ডিডেট:{' '}
+                            <span className="font-mono text-zinc-400">{signalLatest.strategyVersions.researchCandidate}</span>{' '}
+                            (অফলাইন — লাইভ মূল্যায়ন/পেপার ট্র্যাকিংয়ে সংযুক্ত নয়; সক্রিয়করণ প্রি-রেজিস্টার্ড প্রোটোকলের শর্তে)
+                          </p>
+                        )}
+                      </div>
                     );
                   })()}
 
