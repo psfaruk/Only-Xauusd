@@ -7,7 +7,7 @@
  * never real broker data. No bridge is contacted at any point.
  */
 import '../market/helpers/setup';
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
 
 import { db } from '@/lib/db';
 import { runAnalysisService } from '@/lib/analysis/service';
@@ -122,6 +122,19 @@ async function seedSpec() {
 }
 
 beforeEach(async () => {
+  await db.marketCandle.deleteMany();
+  await db.marketLatestTick.deleteMany();
+  await db.symbolSpec.deleteMany();
+  await db.dataQualityIssue.deleteMany();
+  await db.syncRun.deleteMany();
+  await db.analysisRun.deleteMany();
+  await db.systemEvent.deleteMany({ where: { category: 'analysis' } });
+});
+
+// UI-02 hermeticity fix: file-level cleanup so seeded rows never leak into
+// other test files sharing this process (bun file order = readdir/inode
+// order, not alphabetical — see tests/market/quality.test.ts note).
+afterAll(async () => {
   await db.marketCandle.deleteMany();
   await db.marketLatestTick.deleteMany();
   await db.symbolSpec.deleteMany();

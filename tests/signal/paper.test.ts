@@ -16,7 +16,7 @@
  *   · summary aggregation stays consistent with the stored rows
  */
 
-import { describe, expect, test } from 'bun:test';
+import { afterAll, describe, expect, test } from 'bun:test';
 import '../market/helpers/setup';
 import { db } from '@/lib/db';
 import {
@@ -368,4 +368,13 @@ describe('paper tracking pipeline — DB integration (synthetic rows, isolated t
       );
     }
   });
+});
+
+// UI-02 hermeticity fix: file-level cleanup — bun runs multiple test files in
+// ONE process in readdir/inode order (not alphabetical), so seeded rows used
+// to survive into later files and break their window/row-count assertions.
+afterAll(async () => {
+  await db.marketCandle.deleteMany();
+  await db.signalEvaluation.deleteMany();
+  await db.paperSignalOutcome.deleteMany();
 });

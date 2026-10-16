@@ -15,9 +15,9 @@ const codeMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "XAUUSD AI Trading Agent — Phase 1 Audit",
+  title: "XAUUSD AI Trading Agent — Trading Terminal",
   description:
-    "GLM-চালিত XAUUSD ট্রেডিং অ্যানালিসিস সিস্টেম — Phase 1: Environment Audit & Foundation. Read-only, no order execution.",
+    "GLM-চালিত XAUUSD ট্রেডিং টার্মিনাল — ডিটারমিনিস্টিক মার্কেট-স্ট্রাকচার ইঞ্জিন, লাইভ MT5 ডেটা ও বাংলা AI চ্যাট। Read-only, no order execution.",
   keywords: [
     "XAUUSD",
     "GLM",

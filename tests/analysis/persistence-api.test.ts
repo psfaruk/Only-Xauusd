@@ -6,7 +6,7 @@
  * synchronously-throwing function — a real fault path, not a mocked verdict.
  */
 import '../market/helpers/setup';
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -73,6 +73,19 @@ async function seedReady(tf: Timeframe = 'M5') {
 }
 
 beforeEach(async () => {
+  await db.marketCandle.deleteMany();
+  await db.marketLatestTick.deleteMany();
+  await db.symbolSpec.deleteMany();
+  await db.dataQualityIssue.deleteMany();
+  await db.syncRun.deleteMany();
+  await db.analysisRun.deleteMany();
+  await db.systemEvent.deleteMany({ where: { category: 'analysis' } });
+});
+
+// UI-02 hermeticity fix: file-level cleanup so seeded rows never leak into
+// other test files sharing this process (bun file order = readdir/inode
+// order, not alphabetical — see tests/market/quality.test.ts note).
+afterAll(async () => {
   await db.marketCandle.deleteMany();
   await db.marketLatestTick.deleteMany();
   await db.symbolSpec.deleteMany();

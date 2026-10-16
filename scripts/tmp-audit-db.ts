@@ -20,8 +20,8 @@ async function main() {
   const latest = await db.signalEvaluation.findFirst({ orderBy: { createdAt: 'desc' } });
   if (latest) {
     console.log('LATEST_EVAL:', JSON.stringify({
-      id: latest.id, createdAt: latest.createdAt, status: latest.status,
-      reasonCode: latest.reasonCode, strategyVersion: latest.strategyVersion,
+      id: latest.id, createdAt: latest.createdAt, outcome: latest.outcome,
+      reasonCodes: latest.reasonCodes, strategyVersion: latest.strategyVersion,
       symbol: latest.symbol
     }));
   } else {

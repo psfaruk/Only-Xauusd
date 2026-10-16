@@ -19,7 +19,7 @@
  * Scenario numbering T1..T10 mirrors the user's Phase 10.3-B test list.
  */
 
-import { describe, expect, test } from 'bun:test';
+import { afterAll, describe, expect, test } from 'bun:test';
 import '../market/helpers/setup';
 import { db } from '@/lib/db';
 import { resolvePaperOutcome, trackPaperSignals } from '@/lib/signal/paper';
@@ -596,4 +596,13 @@ describe('T10 (DB) — legacy rows (per-evaluation path) & Phase 10.2 aggregatio
     expect(counted.length).toBe(1); // S1 opens the position
     expect(repeats.length).toBe(2); // S2 + S3 are repeats while S1 is open
   });
+});
+
+// UI-02 hermeticity fix: file-level cleanup — bun runs multiple test files in
+// ONE process in readdir/inode order (not alphabetical), so seeded rows used
+// to survive into later files and break their window/row-count assertions.
+afterAll(async () => {
+  await db.marketCandle.deleteMany();
+  await db.signalEvaluation.deleteMany();
+  await db.paperSignalOutcome.deleteMany();
 });

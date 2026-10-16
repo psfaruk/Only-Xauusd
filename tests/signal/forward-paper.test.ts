@@ -17,7 +17,7 @@
  */
 
 import '../market/helpers/setup';
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
 
 import { db } from '@/lib/db';
 import { getForwardPaperStatus } from '@/lib/signal/forward';
@@ -195,4 +195,9 @@ describe('GET /api/validation/latest — forwardPaper section', () => {
     expect(body.forwardPaper.progress.countedCompleted).toBe(1);
     expect(body.forwardPaper.progress.repeatObservations).toBe(1);
   });
+});
+
+// UI-02 hermeticity fix: file-level cleanup (see paper-chronology note).
+afterAll(async () => {
+  await db.paperSignalOutcome.deleteMany();
 });

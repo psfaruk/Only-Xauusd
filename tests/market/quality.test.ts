@@ -6,7 +6,7 @@
  * getAnalysisReadiness contract. Mock/synthetic data only.
  */
 import './helpers/setup';
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
 
 import { db } from '@/lib/db';
 import { computeReadiness, getAnalysisReadiness } from '@/lib/market/quality';
@@ -69,6 +69,19 @@ async function seedTick(ageSec: number, source = 'bridge-mt5') {
 }
 
 beforeEach(async () => {
+  await db.marketCandle.deleteMany();
+  await db.marketLatestTick.deleteMany();
+  await db.symbolSpec.deleteMany();
+  await db.dataQualityIssue.deleteMany();
+});
+
+// UI-02 hermeticity fix: bun runs multiple test FILES in one process and the
+// execution order follows readdir/inode order (NOT alphabetical) — after a
+// sandbox rebuild this file can run BEFORE the signal/paper tests. The
+// beforeEach above only cleans between THIS file's tests, so seeded candles
+// used to survive into later files' window queries and broke them. Clean the
+// shared test DB when this FILE finishes so no rows leak either way.
+afterAll(async () => {
   await db.marketCandle.deleteMany();
   await db.marketLatestTick.deleteMany();
   await db.symbolSpec.deleteMany();

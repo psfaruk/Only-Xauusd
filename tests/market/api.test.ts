@@ -9,7 +9,7 @@
  * fail-closed path (bridge not configured in the test environment).
  */
 import './helpers/setup';
-import { describe, expect, test } from 'bun:test';
+import { afterAll, describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -358,4 +358,14 @@ describe('case 18 — NO trading/order endpoints exist (static guarantee)', () =
     // No tool name may even suggest execution.
     expect(active.find((n) => /order|execute|position|deal|close|modify/i.test(n))).toBeUndefined();
   });
+});
+
+// UI-02 hermeticity fix: file-level cleanup so seeded candles/sync rows never
+// leak into other test files sharing this process (bun file order is
+// readdir/inode order, not alphabetical).
+afterAll(async () => {
+  await db.marketCandle.deleteMany();
+  await db.marketLatestTick.deleteMany();
+  await db.symbolSpec.deleteMany();
+  await db.syncRun.deleteMany();
 });
