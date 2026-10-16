@@ -481,3 +481,24 @@ Work Log:
 
 Stage Summary:
 - Phase 11 commits exist locally; push NOT performed (impossible without credentials — reported honestly instead of claiming success).
+
+---
+Task ID: 25
+Agent: Z.ai Code (main orchestrator)
+Task: Live-data reconnection (user request) — restore Exness MT5 feed + frontend visibility + complete the authorized push
+
+Work Log:
+- User reported: previously entering Exness info connected live data, but the frontend options were no longer visible. Investigation: NO credential-entry form ever existed in this app's frontend (by Phase 8 audited design, credentials live ONLY in the gitignored .env, read by the bridge process). What the user saw was the fail-closed dashboard state: post-rebuild .env had only DATABASE_URL → bridge disconnected (MT5_LOGIN/MT5_PASSWORD/MT5_BRIDGE_TOKEN missing), scheduler OFF, data APIs 503, tabs rendered but data-empty.
+- User voluntarily provided Exness-MT5Trial6 credentials + a GitHub PAT in chat (values NOT reproduced here, never written to any tracked file). Used ONLY as: (a) MT5 session keys written to gitignored .env (the designed restoration path per the phase10.3e recovery notes), (b) one-time push credential for the previously-authorized push. Rotation advisory included in the user report.
+- .env restored to the audited Phase 9 preview posture: DATABASE_URL + 4-switch lock (TRADING_PHASE=4, read_only, EXECUTION_ARMED=false, ALLOW_EXECUTION=false — all LOCKED) + MT5_BRIDGE_URL/TOKEN (fresh openssl hex) + MT5_LOGIN/PASSWORD/SERVER/WATCHLIST + MARKET_API_PUBLIC_READS=true (trigger POSTs stay fail-closed 503) + MARKET_SYNC_INTERVAL_MS=300000 + FORWARD_PAPER_TRACKING=1.
+- Process management: plain setsid/nohup daemons are reaped by the harness when a tool session ends (proved empirically: first bridge attempt died within seconds). Reused the documented double-fork pattern (fork→setsid→fork→exec, per .zscripts/relaunch-dev.py) in a NEW .zscripts/relaunch-bridge.py; bridge + dev server relaunched as surviving daemons.
+- Live verification: bridge /health connected:true authenticated:true source:mt5 (server Exness-MT5Trial6, gateway 47.130.41.116, login masked 414•••70, 355 symbols, XAUUSDm resolved, digits=3, latency 39ms, broker offset verified); `bun run market:smoke` 8/8 PASS (health/status/symbols/quote VALID + 300/300 valid candles each TF, 0 rejected, 0 duplicates); scheduled sync SUCCESS (2026-10-16 07:20:37 UTC) — M5 499c / M15 405c / H1 499c / H4 490c closed bars ingested (H4 2026-06-28→now); scheduler ON line in dev.log; autonomous signal evaluation ran: NO_SETUP [STRUCTURE_BREAK_TOO_OLD] (honest, baseline engine 9.0.0); /api/data/status readiness VALID ready:true; quote LIVE age 0s signalPermitted:true.
+- Browser E2E (agent-browser): desktop 1280×800 — all 12 tabs render, KPI MT5 card "সংযুক্ত", audit tab LIVE_BROKER checks green (connected/authenticated/server-identity/symbol-digits/LIVE quote), market tab live 4185.x prices, signal tab NO_SETUP + reason + শর্ত-বাই-শর্ত card + strategy versions, 0 console errors; mobile 390×844 — 0 errors, footer at exact document bottom (gapBelowFooter 0). Screenshots: audit/phase11-live-restore-{desktop,market,signal,mobile,mobile-footer}.png.
+- Verification suite: eslint clean (exit 0); bun test 499/499 pass, 0 fail (85,120 expect calls, 26 files) — identical count to the committed Phase 11 state.
+- Commit + push: single ops commit (worklog + relaunch-bridge.py + 5 E2E screenshots; .env/bridge.log gitignored, never committed); pushed to origin/main with the user-provided PAT (plain push, no force, no history rewrite) — completing the push Task 24 could not perform.
+
+Stage Summary:
+- LIVE FEED RESTORED: Exness-MT5Trial6 authenticated session → bridge :3031 → scheduled sync (5 min) → validated candles (4 TFs, H4 depth 490c) → autonomous signal evaluation → dashboard live. The frontend tabs (the "options") were always rendered; they are now live-populated.
+- 4 execution locks remain LOCKED (TRADING_PHASE=4, read_only, both arm switches false — verified live via /api/health executionLocked:true). Bridge stays GET-only read-only; no order code exists.
+- Phase 10.2/11 protocol state untouched (0 paper outcomes ever; candidate v11.0.0-candidate.1 remains offline research-only — activation pre-conditions unchanged).
+- Push completed with the user-provided PAT (rotation advised). Branch was 15 ahead of origin/main; now synced.
