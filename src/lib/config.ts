@@ -213,6 +213,32 @@ export const config = {
     /** Stricter per-IP rate limit for the (costlier) chat endpoint. */
     rateLimitPerMin: Math.min(Math.max(3, num('CHAT_RATE_LIMIT_PER_MIN', 12)), 60),
   },
+  risk: {
+    /** Phase 7 deterministic risk gate (src/lib/risk/engine.ts). All values
+     *  are clamped so a misconfigured env can never silently disable a limit.
+     *  These are SAFETY limits, not strategy thresholds — the LLM can never
+     *  see or change them (deterministic engine config only). */
+    /** Percent of equity risked per trade (0.1–5, default 1.0). */
+    percentPerTrade: clampNum('RISK_PERCENT_PER_TRADE', 1.0, 0.1, 5),
+    /** Hard cap on lot size (0.01–10, default 0.10). */
+    maxLots: clampNum('RISK_MAX_LOTS', 0.10, 0.01, 10),
+    /** Lot floor — computed lots below this FAIL the gate (default 0.01). */
+    minLots: clampNum('RISK_MIN_LOTS', 0.01, 0.001, 10),
+    /** Max simultaneous open positions (1–10, default 2). */
+    maxOpenPositions: clampNum('RISK_MAX_OPEN_POSITIONS', 2, 1, 10),
+    /** Max pending approvals awaiting the user (1–10, default 3). */
+    maxPendingApprovals: clampNum('RISK_MAX_PENDING_APPROVALS', 3, 1, 10),
+    /** Max approved orders per UTC day (1–50, default 6). */
+    maxOrdersPerDay: clampNum('RISK_MAX_ORDERS_PER_DAY', 6, 1, 50),
+    /** Max accepted spread in PRICE units — deliberately a SEPARATE env from
+     *  SIGNAL_MAX_SPREAD so the risk gate stays independent of strategy
+     *  tuning (0.1–5, default 0.6). */
+    maxSpreadPrice: clampNum('RISK_MAX_SPREAD_PRICE', 0.6, 0.1, 5),
+    /** Minimum account equity (0–100000, default 0 = no floor). */
+    minEquity: clampNum('RISK_MIN_EQUITY', 0, 0, 100_000),
+    /** Lot granularity for flooring computed size (default 0.01). */
+    lotStep: clampNum('RISK_LOT_STEP', 0.01, 0.001, 1),
+  },
   limits: {
     maxEventsReturned: Math.min(Math.max(1, num('MAX_EVENTS_RETURNED', 100)), 500),
   },
@@ -255,6 +281,17 @@ export function configSnapshot() {
       publicReads: config.dataApi.publicReads,
       publicTriggers: config.dataApi.publicTriggers,
       rateLimitPerMin: config.dataApi.rateLimitPerMin,
+    },
+    risk: {
+      percentPerTrade: config.risk.percentPerTrade,
+      maxLots: config.risk.maxLots,
+      minLots: config.risk.minLots,
+      maxOpenPositions: config.risk.maxOpenPositions,
+      maxPendingApprovals: config.risk.maxPendingApprovals,
+      maxOrdersPerDay: config.risk.maxOrdersPerDay,
+      maxSpreadPrice: config.risk.maxSpreadPrice,
+      minEquity: config.risk.minEquity,
+      lotStep: config.risk.lotStep,
     },
     limits: { maxEventsReturned: config.limits.maxEventsReturned },
   };

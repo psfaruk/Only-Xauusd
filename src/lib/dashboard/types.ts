@@ -896,3 +896,127 @@ export interface ChartDataResponse {
     note: string;
   };
 }
+
+// ---------------------------------------------------------------------------
+// Phase 6 — GLM multi-agent review (advisory, never changes the signal)
+// ---------------------------------------------------------------------------
+
+export interface AiReviewAgent {
+  agent: string;
+  verdict: 'approve' | 'reject' | 'wait' | string;
+  reasoning: string;
+  createdAtUtc: string;
+  modelOk: boolean | null;
+}
+
+export interface AiReviewLatestResponse {
+  ok: true;
+  symbol: string;
+  review: {
+    batchId: string;
+    evaluationId: string | null;
+    evaluationOutcome: string | null;
+    ranAtUtc: string;
+    degraded: boolean | null;
+    agents: AiReviewAgent[];
+    orchestrator: AiReviewAgent | null;
+  } | null;
+  note?: string;
+  generatedAtUtc: string;
+}
+
+export interface AiReviewRunResponse {
+  ok: boolean;
+  ran: boolean;
+  reason: string;
+  review: {
+    batchId: string;
+    evaluationOutcome: string;
+    degraded: boolean;
+    orchestrator: { verdict: string; reasoning: string };
+    agents: Array<{ agent: string; verdict: string; reasoning: string; modelOk: boolean }>;
+  } | null;
+  generatedAtUtc: string;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 11 — approval-based execution state
+// ---------------------------------------------------------------------------
+
+export interface ExecutionApproval {
+  id: string;
+  signalId: string;
+  status: string;
+  note: string | null;
+  createdAtUtc: string;
+  decidedAtUtc: string | null;
+  expiresAtUtc: string | null;
+  direction: 'BUY' | 'SELL' | null;
+  lots: number | null;
+  entry: number | null;
+  stopLoss: number | null;
+  takeProfit: number | null;
+  riskPassed: boolean | null;
+}
+
+export interface ExecutionPosition {
+  positionId: string;
+  orderId: string;
+  timeCreateUtcSec: number;
+  symbol: string;
+  direction: 'BUY' | 'SELL';
+  lots: number;
+  priceOpen: number;
+  sl: number;
+  tp: number;
+  profit: number;
+  commission: number;
+  swap: number;
+}
+
+export interface ExecutionLogEntry {
+  id: string;
+  signalId: string;
+  status: string;
+  createdAtUtc: string;
+  request: Record<string, unknown>;
+  result: Record<string, unknown>;
+}
+
+export interface ExecutionStateResponse {
+  ok: true;
+  state: {
+    executionEnabled: boolean;
+    executionReason: string;
+    switches: {
+      phaseGatePassed: boolean;
+      executionArmed: boolean;
+      allowExecution: boolean;
+      tradingMode: string;
+    };
+    bridge: {
+      reachable: boolean;
+      connected: boolean;
+      authenticated: boolean;
+      ordersEnabled: boolean;
+      accountEquity: number | null;
+      accountBalance: number | null;
+      accountCurrency: string | null;
+      server: string | null;
+    };
+    approvals: ExecutionApproval[];
+    positions: ExecutionPosition[];
+    positionsError: string | null;
+    logs: ExecutionLogEntry[];
+    approvalTtlMin: number;
+    generatedAtUtc: string;
+  };
+}
+
+export interface ExecutionDecisionResponse {
+  ok: boolean;
+  code: string;
+  message: string;
+  executionLogId: string | null;
+  generatedAtUtc: string;
+}

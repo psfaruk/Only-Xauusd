@@ -38,6 +38,30 @@ delete process.env.MT5_SERVER;
 // The same is why MT5_BRIDGE_URL/TOKEN are set to '' above rather than deleted.
 process.env.DATA_API_TOKEN = '';
 
+// Phase 7 (Task 30-a): pin the risk-gate env to its DEFAULTS so the
+// deterministic engine tests (tests/risk/) can never become dependent on a
+// developer .env that might later carry tuned RISK_* values. Same hermeticity
+// rule as MT5_BRIDGE_URL/DATA_API_TOKEN above — set (not deleted) so the
+// prisma/dotenv merge leaves these keys alone.
+process.env.RISK_PERCENT_PER_TRADE = '1.0';
+process.env.RISK_MAX_LOTS = '0.10';
+process.env.RISK_MIN_LOTS = '0.01';
+process.env.RISK_MAX_OPEN_POSITIONS = '2';
+process.env.RISK_MAX_PENDING_APPROVALS = '3';
+process.env.RISK_MAX_ORDERS_PER_DAY = '6';
+process.env.RISK_MAX_SPREAD_PRICE = '0.6';
+process.env.RISK_MIN_EQUITY = '0';
+process.env.RISK_LOT_STEP = '0.01';
+
+// Phase 11: pin the four-switch execution lock to the LOCKED posture so the
+// lock-invariant tests stay hermetic regardless of the developer's .env
+// (which may now deliberately arm the Phase 11 demo gate). Same set-not-delete
+// rule as above (prisma/dotenv merge semantics).
+process.env.TRADING_PHASE = '4';
+process.env.TRADING_MODE = 'read_only';
+process.env.EXECUTION_ARMED = 'false';
+process.env.ALLOW_EXECUTION = 'false';
+
 const g = globalThis as unknown as { __marketTestPrepared?: boolean };
 
 if (!g.__marketTestPrepared) {

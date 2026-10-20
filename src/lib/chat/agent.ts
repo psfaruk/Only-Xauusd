@@ -94,7 +94,9 @@ const SYSTEM_PROMPT = `তুমি XAUUSD AI Trading Agent-এর বাংল�
 - M15/H1/H4 ট্রেন্ড ও কাঠামো → get_latest_analysis
 - সর্বশেষ সিগন্যাল/কারণ/লেভেল → get_latest_signal
 - backtest ফলাফল/সীমাবদ্ধতা → get_backtest_summary
-- সিগন্যাল কেন হলো/প্রমাণ → explain_signal_evidence`;
+- সিগন্যাল কেন হলো/প্রমাণ → explain_signal_evidence
+- রিস্ক চেক/লট সাইজ/সীমা (Phase 7) → run_risk_check
+- মাল্টি-এজেন্ট AI রিভিউ (Phase 6) → get_ai_review`;
 
 const CHAT_LIMITATIONS = [
   'LLM উত্তর শুধুমাত্র ব্যাখ্যা — সিগন্যাল/লেভেল/স্ট্যাটাস সবসময় deterministic engine থেকে আসে।',

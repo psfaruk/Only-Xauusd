@@ -39,6 +39,7 @@ import {
   retryTextFor,
 } from '@/lib/dashboard/chat-logic';
 import type {
+  AiReviewLatestResponse,
   AnalysisLatestResponse,
   AuditResponse,
   BacktestLatestResponse,
@@ -46,6 +47,7 @@ import type {
   ChatResponse,
   DataHealthResponse,
   DataLatestResponse,
+  ExecutionStateResponse,
   HealthReport,
   MarketStatusResponse,
   QualityResponse,
@@ -63,6 +65,7 @@ import { ChatView } from '@/components/terminal/ChatView';
 import { HistoryView } from '@/components/terminal/HistoryView';
 import { AnalysisView } from '@/components/terminal/AnalysisView';
 import { SystemView } from '@/components/terminal/SystemView';
+import { AiReviewPanel, ExecutionPanel } from '@/components/terminal/ExecutionPanel';
 
 const SYMBOL = 'XAUUSDm';
 
@@ -92,6 +95,13 @@ export default function TradingTerminal() {
   const [signalHistory, setSignalHistory] = useState<SignalHistoryResponse | null>(null);
   const [validationLatest, setValidationLatest] = useState<ValidationLatestResponse | null>(null);
   const [dataLatest, setDataLatest] = useState<DataLatestResponse | null>(null);
+
+  // ---- Phase 6/11 state (AI review + approval-based execution) -----------------
+  const [aiReview, setAiReview] = useState<AiReviewLatestResponse | null>(null);
+  const [aiReviewRunning, setAiReviewRunning] = useState(false);
+  const [executionState, setExecutionState] = useState<ExecutionStateResponse | null>(null);
+  const [deciding, setDeciding] = useState(false);
+  const [closingPositionId, setClosingPositionId] = useState<string | null>(null);
 
   /** Per-endpoint unavailability codes (F-04 fix: unavailable ≠ empty). */
   const [apiErrors, setApiErrors] = useState<Record<string, string | null>>({});
@@ -128,6 +138,8 @@ export default function TradingTerminal() {
         fetch('/api/validation/latest?symbol=XAUUSDm', { cache: 'no-store', signal: AbortSignal.timeout(20_000) }),
         fetch('/api/data/latest?symbol=XAUUSDm', { cache: 'no-store', signal: AbortSignal.timeout(20_000) }),
         fetch('/api/signal/history?symbol=XAUUSDm&limit=20', { cache: 'no-store', signal: AbortSignal.timeout(20_000) }),
+        fetch('/api/ai/review/latest?symbol=XAUUSDm', { cache: 'no-store', signal: AbortSignal.timeout(20_000) }),
+        fetch('/api/execution/state', { cache: 'no-store', signal: AbortSignal.timeout(20_000) }),
       ]);
       const resOf = (i: number): Response | null =>
         results[i].status === 'fulfilled' ? results[i].value : null;
@@ -183,6 +195,10 @@ export default function TradingTerminal() {
       setApiError('dataLatest', await errCode(9));
       setSignalHistory((await body<SignalHistoryResponse>(10)) ?? null);
       setApiError('history', await errCode(10));
+      setAiReview((await body<AiReviewLatestResponse>(11)) ?? null);
+      setApiError('aiReview', await errCode(11));
+      setExecutionState((await body<ExecutionStateResponse>(12)) ?? null);
+      setApiError('execution', await errCode(12));
 
       setLoadError(null);
     } catch (e) {
@@ -436,6 +452,89 @@ export default function TradingTerminal() {
 
   const onChatInputChange = useCallback((v: string) => setChatInput(clampChatInput(v)), []);
 
+  // ---- Phase 6 — AI multi-agent review trigger ---------------------------------
+  const runAiReview = useCallback(async () => {
+    setAiReviewRunning(true);
+    try {
+      const res = await fetch('/api/ai/review', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbol: marketStatus?.symbol ?? SYMBOL, force: true }),
+        signal: AbortSignal.timeout(180_000),
+      });
+      const body = (await res.json().catch(() => null)) as { ok?: boolean; ran?: boolean; reason?: string; review?: { orchestrator?: { verdict?: string } } | null } | null;
+      if (res.status === 429) {
+        toast({ title: 'রেট লিমিট', description: 'কিছুক্ষণ পরে আবার চেষ্টা করুন।', variant: 'destructive' });
+      } else if (body?.ran && body.review?.orchestrator) {
+        toast({
+          title: 'মাল্টি-এজেন্ট রিভিউ সম্পন্ন',
+          description: `সমন্বয়কের রায়: ${body.review.orchestrator.verdict === 'approve' ? 'সম্মত' : body.review.orchestrator.verdict === 'reject' ? 'আপত্তি' : 'অপেক্ষা'}`,
+        });
+      } else {
+        toast({ title: 'রিভিউ চালানো যায়নি', description: body?.reason ?? 'অজানা কারণ।', variant: 'destructive' });
+      }
+      await refresh();
+    } catch (e) {
+      toast({ title: 'রিভিউ চালানো যায়নি', description: e instanceof Error ? e.message : 'unknown error', variant: 'destructive' });
+    } finally {
+      setAiReviewRunning(false);
+    }
+  }, [marketStatus?.symbol, refresh, toast]);
+
+  // ---- Phase 11 — approval decision (the human gate) ---------------------------
+  const decideApproval = useCallback(
+    async (approvalId: string, decision: 'approve' | 'reject') => {
+      setDeciding(true);
+      try {
+        const res = await fetch('/api/execution/decide', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ approvalId, decision }),
+          signal: AbortSignal.timeout(60_000),
+        });
+        const body = (await res.json().catch(() => null)) as { ok?: boolean; message?: string; code?: string } | null;
+        if (body?.ok) {
+          toast({ title: decision === 'approve' ? 'অর্ডার কার্যকর' : 'অনুমোদন বাতিল', description: body.message ?? '' });
+        } else {
+          toast({ title: 'সিদ্ধান্ত নেওয়া যায়নি', description: body?.message ?? bnForCode(body?.code ?? '') ?? 'অজানা ত্রুটি।', variant: 'destructive' });
+        }
+        await refresh();
+      } catch (e) {
+        toast({ title: 'সিদ্ধান্ত নেওয়া যায়নি', description: e instanceof Error ? e.message : 'unknown error', variant: 'destructive' });
+      } finally {
+        setDeciding(false);
+      }
+    },
+    [refresh, toast],
+  );
+
+  // ---- Phase 11 — manual position close ------------------------------------------
+  const closePosition = useCallback(
+    async (positionId: string) => {
+      setClosingPositionId(positionId);
+      try {
+        const res = await fetch('/api/execution/close', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ positionId }),
+          signal: AbortSignal.timeout(60_000),
+        });
+        const body = (await res.json().catch(() => null)) as { ok?: boolean; message?: string } | null;
+        if (body?.ok) {
+          toast({ title: 'পজিশন ক্লোজ সম্পন্ন', description: body.message ?? '' });
+        } else {
+          toast({ title: 'ক্লোজ করা যায়নি', description: body?.message ?? 'অজানা ত্রুটি।', variant: 'destructive' });
+        }
+        await refresh();
+      } catch (e) {
+        toast({ title: 'ক্লোজ করা যায়নি', description: e instanceof Error ? e.message : 'unknown error', variant: 'destructive' });
+      } finally {
+        setClosingPositionId(null);
+      }
+    },
+    [refresh, toast],
+  );
+
   // ---- Shared view fragments -----------------------------------------------------
 
   const historyView = (
@@ -448,6 +547,24 @@ export default function TradingTerminal() {
       signalError={apiErrors.signal ?? null}
       historyError={apiErrors.history ?? null}
       loading={loading}
+      below={
+        <>
+          <AiReviewPanel
+            review={aiReview}
+            running={aiReviewRunning}
+            onRun={() => void runAiReview()}
+            error={apiErrors.aiReview ?? null}
+          />
+          <ExecutionPanel
+            state={executionState}
+            deciding={deciding}
+            closingId={closingPositionId}
+            onDecide={(id, d) => void decideApproval(id, d)}
+            onClose={(pid) => void closePosition(pid)}
+            error={apiErrors.execution ?? null}
+          />
+        </>
+      }
     />
   );
   const analysisView = (

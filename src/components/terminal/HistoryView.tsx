@@ -40,6 +40,7 @@ export function HistoryView({
   signalError,
   historyError,
   loading,
+  below,
 }: {
   signalLatest: SignalLatestResponse | null;
   signalHistory: SignalHistoryResponse | null;
@@ -49,6 +50,9 @@ export function HistoryView({
   signalError?: string | null;
   historyError?: string | null;
   loading?: boolean;
+  /** Phase 6/7/11 panels (AI review + risk + execution) rendered under the
+   *  signal surfaces — passed from page.tsx to keep this view focused. */
+  below?: React.ReactNode;
 }) {
   const s = signalLatest?.signal ?? null;
 
@@ -496,6 +500,7 @@ export function HistoryView({
           )}
         </CardContent>
       </Card>
+      {below}
     </div>
   );
 }

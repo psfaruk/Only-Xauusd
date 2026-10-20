@@ -49,7 +49,22 @@ export async function POST(request: Request) {
     );
   }
 
-  const outcome = await runSignalEvaluation({ symbol: parsed.data.symbol });
+  const symbol = parsed.data.symbol ?? 'XAUUSDm';
+  const outcome = await runSignalEvaluation({ symbol });
+
+  // Phase 11 — after an ACTIONABLE outcome: run the deterministic risk gate
+  // and (only when the 4-switch lock is armed) create a pending TradeApproval
+  // for the human decision. Fire-and-forget, error-isolated — it can never
+  // affect the returned verdict. NO order is ever placed here (approvals are
+  // decided by POST /api/execution/decide, never automatically).
+  if (outcome.outcome === 'BUY_SETUP' || outcome.outcome === 'SELL_SETUP') {
+    try {
+      const { processActionableSignal } = await import('@/lib/execution/service');
+      void processActionableSignal(symbol).catch(() => undefined);
+    } catch {
+      // the approval pipeline must never break the signal run
+    }
+  }
 
   if (outcome.outcome === 'FAILED') {
     return Response.json(

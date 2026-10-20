@@ -47,10 +47,11 @@ afterAll(() => {
 // ---------------------------------------------------------------------------
 
 describe('chat tools — allowlist security', () => {
-  test('the registry contains exactly the 8 read-only active tools (no execution tool exists)', () => {
+  test('the registry contains exactly the 10 read-only active tools (no execution tool exists)', () => {
     const active = TOOL_REGISTRY.filter((t) => t.status === 'active').map((t) => t.name);
     expect(active.sort()).toEqual([
       'explain_signal_evidence',
+      'get_ai_review',
       'get_backtest_summary',
       'get_candle_coverage',
       'get_latest_analysis',
@@ -58,9 +59,14 @@ describe('chat tools — allowlist security', () => {
       'get_latest_signal',
       'get_market_health',
       'get_system_health',
+      'run_risk_check',
     ]);
     // Nothing even named like an execution capability.
     expect(active.some((n) => /order|execute|position|deal|close|modify|submit/i.test(n))).toBe(false);
+    // Phase 7 (Task 30-a): run_risk_check is ACTIVE — every registry entry is
+    // currently active (no planned tools remain; the refusal machinery stays
+    // in place for future phases).
+    expect(TOOL_REGISTRY.every((t) => t.status === 'active')).toBe(true);
   });
 
   test('arbitrary tool names are rejected (not in allowlist)', async () => {
@@ -70,10 +76,16 @@ describe('chat tools — allowlist security', () => {
     expect((await executeTool('place_order', { symbol: 'XAUUSDm' })).ok).toBe(false);
   });
 
-  test('planned tools are refused at runtime', async () => {
-    const r = await executeTool('run_risk_check', { setupId: 'x' });
-    expect(r.ok).toBe(false);
-    expect(r.error).toContain('planned for phase');
+  test('run_risk_check is ACTIVE (Phase 7): with no actionable setup it returns the honest skip note — never a fabricated verdict', async () => {
+    // Hermetic: remove directional setups possibly seeded by other test files
+    // in this shared process (bun file order is not alphabetical).
+    await db.signalEvaluation.deleteMany({ where: { outcome: { in: ['BUY_SETUP', 'SELL_SETUP'] } } });
+    const riskChecksBefore = await db.riskCheck.count();
+    const r = await executeTool('run_risk_check', {});
+    expect(r.ok).toBe(true);
+    expect(String(r.result?.note)).toBe('কোনো অ্যাকশনেবল সিগন্যাল নেই — রিস্ক চেক প্রযোজ্য নয়');
+    // A skipped (not-applicable) check writes NO audit row — only real checks do.
+    expect(await db.riskCheck.count()).toBe(riskChecksBefore);
   });
 
   test('malformed arguments are rejected (unknown arg / wrong type)', async () => {
@@ -145,6 +157,60 @@ describe('chat tools — honest data', () => {
     const r = await executeTool('get_backtest_summary', { symbol: 'XAUUSDm' });
     expect(r.ok).toBe(true);
     expect(String(r.result?.disclaimer)).toContain('প্রমাণ নয়');
+  });
+
+  test('run_risk_check on a persisted BUY_SETUP → full 9-rule verdict, persisted as a RiskCheck audit row (equity honestly unavailable)', async () => {
+    bridge.state.quote = { bid: 4150.1, ask: 4150.34, ts: Math.floor(Date.now() / 1000) };
+    bridge.state.quoteAgeMs = 0;
+    await db.signalEvaluation.deleteMany({ where: { outcome: { in: ['BUY_SETUP', 'SELL_SETUP'] } } });
+    await db.riskCheck.deleteMany();
+    await db.signalEvaluation.create({
+      data: {
+        engineVersion: '9.0.0',
+        strategyVersion: 'hybrid-structure-retest/9.0.0',
+        symbol: 'XAUUSDm',
+        outcome: 'BUY_SETUP',
+        reasonCodes: JSON.stringify([]),
+        inputFingerprint: 'risk-test',
+        inputSnapshot: '{}',
+        evidence: '{}',
+        levels: JSON.stringify({
+          direction: 'BUY',
+          entryZoneLow: 4149,
+          entryZoneHigh: 4151,
+          entryReference: 4150,
+          stopLoss: 4140,
+          target: 4170,
+          riskPrice: 10,
+          rewardPrice: 20,
+          rewardRiskRatio: 2,
+        }),
+        quote: '{}',
+        executionLocked: true,
+      },
+    });
+    const r = await executeTool('run_risk_check', {});
+    expect(r.ok).toBe(true);
+    expect(r.result?.passed).toBe(false); // fail-closed: bridge contract has no account endpoint
+    expect(r.result?.checks).toHaveLength(9);
+    const equity = (r.result?.checks as Array<{ rule: string; passed: boolean; detail: string }>).find(
+      (c) => c.rule === 'EQUITY_AVAILABLE',
+    );
+    expect(equity?.passed).toBe(false);
+    expect(equity?.detail).toContain('ইকুইটি তথ্য অনুপলব্ধ');
+    expect(r.result?.lotSize).toBeNull();
+    expect(r.result?.stopDistance).toBe(10);
+    // persisted as an append-only audit row + SystemEvent trail
+    expect(await db.riskCheck.count()).toBe(1);
+    const audit = await db.systemEvent.findFirst({
+      where: { category: 'risk', code: 'RISK_CHECK_FAILED' },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(audit).not.toBeNull();
+    // cleanup (hermeticity for the other files in this shared process)
+    await db.signalEvaluation.deleteMany({ where: { outcome: { in: ['BUY_SETUP', 'SELL_SETUP'] } } });
+    await db.riskCheck.deleteMany();
+    await db.systemEvent.deleteMany({ where: { category: 'risk' } });
   });
 });
 
@@ -286,7 +352,8 @@ describe('chat agent — tool loop (injected fake model)', () => {
 
   test('toolSpecs exposes ONLY active tools to the model context (planned excluded)', () => {
     const names = toolSpecs(false).map((t) => t.function.name);
-    expect(names).not.toContain('run_risk_check');
-    expect(names).toHaveLength(8);
+    expect(names).toContain('run_risk_check'); // active since Phase 7 (Task 30-a)
+    expect(names).toContain('get_ai_review'); // active since Phase 6 (Task 30)
+    expect(names).toHaveLength(10);
   });
 });

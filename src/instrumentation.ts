@@ -66,7 +66,7 @@ export async function register() {
           try {
             const { runSignalEvaluation } = await import('@/lib/signal/service');
             void runSignalEvaluation({ symbol })
-              .then((r) => {
+              .then(async (r) => {
                 if (
                   r.outcome === 'BUY_SETUP' ||
                   r.outcome === 'SELL_SETUP' ||
@@ -77,6 +77,31 @@ export async function register() {
                       r.evaluation.reasonCodes.length ? ` [${r.evaluation.reasonCodes.join(',')}]` : ''
                     }`,
                   );
+                }
+                // Phase 6 — autonomous multi-agent review on ACTIONABLE setups
+                // only (4 GLM calls each; NO_SETUP/WAIT would burn the budget
+                // every 5 minutes). Fire-and-forget, error-isolated, deduped
+                // by evaluation id inside the review module. ADVISORY ONLY —
+                // it never changes the deterministic outcome.
+                if (r.runId && (r.outcome === 'BUY_SETUP' || r.outcome === 'SELL_SETUP')) {
+                  try {
+                    const { runReviewForLatestEvaluation } = await import('@/lib/ai/multi-agent');
+                    void runReviewForLatestEvaluation(symbol).catch(() => undefined);
+                  } catch {
+                    // the review must never break the scheduler
+                  }
+                }
+                // Phase 11 — risk gate + (lock-permitting) pending approval
+                // for the human decision. Fire-and-forget, error-isolated,
+                // idempotent by signal id. NO order is ever placed here —
+                // approvals are decided exclusively by the human operator.
+                if (r.outcome === 'BUY_SETUP' || r.outcome === 'SELL_SETUP') {
+                  try {
+                    const { processActionableSignal } = await import('@/lib/execution/service');
+                    void processActionableSignal(symbol).catch(() => undefined);
+                  } catch {
+                    // the approval pipeline must never break the scheduler
+                  }
                 }
               })
               .catch(() => undefined);

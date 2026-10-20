@@ -1,5 +1,5 @@
 /**
- * XAUUSD AI Trading Agent — Allowlisted Tool Registry (Phase 1 → Phase 9)
+ * XAUUSD AI Trading Agent — Allowlisted Tool Registry (Phase 1 → Phase 9, + Phase 7 risk gate)
  * ----------------------------------------------------------------------------
  * THE security boundary between the GLM model and the backend.
  *
@@ -13,10 +13,11 @@
  *     functions. The model can never choose an arbitrary symbol (allowlist)
  *     or an external URL (none exists).
  *
- * Phase 9 active tools (Bengali Chat Agent): get_system_health,
- * get_market_health, get_latest_quote, get_candle_coverage,
- * get_latest_analysis, get_latest_signal, get_backtest_summary,
- * explain_signal_evidence — all read-only, bounded, allowlisted.
+ * Active tools: get_system_health, get_market_health, get_latest_quote,
+ * get_candle_coverage, get_latest_analysis, get_latest_signal,
+ * get_backtest_summary, explain_signal_evidence (Phase 9) and
+ * run_risk_check (Phase 7 — deterministic risk gate; analysis + audit-row
+ * only, it can NEVER place an order) — all read-only, bounded, allowlisted.
  */
 
 import { collectHealth } from '@/lib/health';
@@ -27,6 +28,14 @@ import { quoteIntegrity, auditCandleHistory } from '@/lib/market/integrity';
 import { getLatestAnalysisRun } from '@/lib/analysis/persistence';
 import { getLatestSignalEvaluation, getSignalEvaluationHistory } from '@/lib/signal/persistence';
 import { getLatestBacktest } from '@/lib/backtest/service';
+import { runRiskCheck, riskConfigSnapshot } from '@/lib/risk/engine';
+import {
+  persistRiskCheck,
+  approvedToday,
+  pendingApprovals,
+  sameSetupApprovedToday,
+} from '@/lib/risk/service';
+import { logEvent } from '@/lib/logger';
 
 import { SIGNAL_STRATEGY_VERSION } from '@/lib/signal/types';
 
@@ -384,29 +393,211 @@ const explainSignalEvidence: ToolDefinition = {
 };
 
 // ---------------------------------------------------------------------------
-// Planned tools — refused at runtime until their phase lands
+// Phase 7 — deterministic risk gate (ACTIVE)
+// ----------------------------------------------------------------------------
+// Analysis + audit ONLY: computes what the clamped safety limits would allow
+// for the latest directional setup and persists a RiskCheck row. It has NO
+// order capability — the four-switch execution lock is untouched and no
+// execution code exists anywhere.
 // ---------------------------------------------------------------------------
 
-const planned = (
-  name: string,
-  description: string,
-  activatesInPhase: number,
-  parameters: Record<string, unknown> = { type: 'object', properties: {}, required: [] },
-): ToolDefinition => ({
-  name,
-  description,
-  parameters,
-  status: 'planned',
-  activatesInPhase,
-});
+/** Standard XAUUSD contract value: 1.00 lot = 100 oz, so a $1.00 price move
+ *  = $100 P/L per lot in account currency. The broker-verified tick/volume
+ *  spec is NOT part of the current read-only bridge contract (SymbolSpec
+ *  verifiedFields = ['digits'] only — see src/lib/market/ingestion.ts), so
+ *  this standard contract-size constant is used and DISCLOSED in every
+ *  result payload. To be replaced by the verified spec when the bridge
+ *  exposes one. */
+const XAUUSD_TICK_VALUE_PER_LOT = 100;
 
-const plannedTools: ToolDefinition[] = [
-  planned('run_risk_check', 'Deterministic risk gate: lot size, exposure, limits (Phase 7).', 7, {
-    type: 'object',
-    properties: { setupId: { type: 'string' } },
-    required: ['setupId'],
-  }),
-];
+const runRiskCheckTool: ToolDefinition = {
+  name: 'run_risk_check',
+  description:
+    'Deterministic risk gate (Phase 7) for the latest BUY/SELL setup signal: position size computed from equity and stop distance under clamped safety limits (percent risk, lot cap/floor, spread, exposure, pending-approval, daily-order and duplicate protection) — every rule reported pass/fail with detail, persisted as a RiskCheck audit row. সীমার বাইরে কিছু হলে fail-closed। এটি বিশ্লেষণ ও অডিট রেকর্ড — কোনো অর্ডার কার্যকর করে না।',
+  parameters: { type: 'object', properties: { symbol: symbolParam }, required: [] },
+  status: 'active',
+  activatesInPhase: 7,
+  handler: async (args) => {
+    const sym = allowlistedSymbol(args.symbol);
+    if (!sym.ok) return { error: sym.error };
+
+    const evaluatedAtUtc = new Date().toISOString();
+
+    // Latest DIRECTIONAL setup evaluation only — WAIT/NO_SETUP/BLOCKED carry
+    // no levels, so the risk gate honestly does not apply to them.
+    const signal = await db.signalEvaluation
+      .findFirst({
+        where: {
+          symbol: sym.symbol,
+          outcome: { in: ['BUY_SETUP', 'SELL_SETUP'] },
+          levels: { not: null },
+        },
+        orderBy: { createdAt: 'desc' },
+      })
+      .catch(() => null);
+
+    if (!signal || !signal.levels) {
+      await logEvent({
+        level: 'info',
+        category: 'risk',
+        code: 'RISK_CHECK_SKIPPED_NO_SETUP',
+        message: `Risk check skipped for ${sym.symbol}: no actionable BUY/SELL setup evaluation exists`,
+        meta: { symbol: sym.symbol },
+      }).catch(() => undefined);
+      return bound({
+        note: 'কোনো অ্যাকশনেবল সিগন্যাল নেই — রিস্ক চেক প্রযোজ্য নয়',
+        symbol: sym.symbol,
+        checkedAtUtc: evaluatedAtUtc,
+      });
+    }
+
+    // Levels JSON parse — malformed payloads degrade to NaN and the engine
+    // fails the level checks honestly (never a guessed number).
+    type SetupLevels = {
+      direction?: unknown;
+      entryReference?: unknown;
+      stopLoss?: unknown;
+      target?: unknown;
+    };
+    let parsedLevels: SetupLevels | null = null;
+    try {
+      parsedLevels = JSON.parse(signal.levels) as SetupLevels;
+    } catch {
+      parsedLevels = null;
+    }
+    const numOf = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : Number.NaN);
+    const direction: 'BUY' | 'SELL' = signal.outcome === 'SELL_SETUP' ? 'SELL' : 'BUY';
+    const entry = numOf(parsedLevels?.entryReference);
+    const stopLoss = numOf(parsedLevels?.stopLoss);
+    const takeProfit = numOf(parsedLevels?.target);
+
+    // Current verified spread (integrity monitor = the single honest quote
+    // source). Unavailable → NaN → the engine fails SPREAD_WITHIN_LIMIT.
+    const report = await quoteIntegrity(sym.symbol, { bridge: callTimeBridge() });
+    const spread = report.spread !== null ? Number(report.spread) : Number.NaN;
+
+    // TradeApproval-derived counters (Phase 11 table — empty and honestly 0
+    // until approvals exist). openPositions uses the simplified approvedToday
+    // count per the Phase 7 spec; Phase 11 will supply real position counts.
+    const [openPositions, pending, sameSetup, spec] = await Promise.all([
+      approvedToday(),
+      pendingApprovals(),
+      sameSetupApprovedToday(signal.id),
+      db.symbolSpec.findUnique({ where: { symbol: sym.symbol } }).catch(() => null),
+    ]);
+
+    // Phase 11 — the bridge /api/status now carries the live account financial
+    // state (balance/equity). When reachable it feeds the risk gate real
+    // numbers; otherwise equity/balance stay honestly null and
+    // EQUITY_AVAILABLE fails closed.
+    const accountRes = await import('@/lib/execution/bridge-orders')
+      .then((m) => m.getBridgeAccountState())
+      .catch(() => null);
+    const equity: number | null = accountRes?.ok ? accountRes.data?.accountEquity ?? null : null;
+    const balance: number | null = accountRes?.ok ? accountRes.data?.accountBalance ?? null : null;
+
+    const result = runRiskCheck({
+      signalId: signal.id,
+      direction,
+      entry,
+      stopLoss,
+      takeProfit,
+      symbol: signal.symbol,
+      spread,
+      existingOpenPositions: openPositions,
+      existingPendingApprovals: pending,
+      sameSetupApprovedToday: sameSetup,
+      equity,
+      balance,
+      symbolDigits: spec?.digits ?? null,
+      tickValuePerLot: XAUUSD_TICK_VALUE_PER_LOT,
+      evaluatedAtUtc,
+    });
+
+    // Append-only audit row + SystemEvent trail (both fire-and-forget
+    // failures never mask the returned verdict).
+    await persistRiskCheck(signal.id, result).catch(() => undefined);
+    const failedRules = result.checks.filter((c) => !c.passed).map((c) => c.rule);
+    await logEvent({
+      level: result.passed ? 'info' : 'warn',
+      category: 'risk',
+      code: result.passed ? 'RISK_CHECK_PASSED' : 'RISK_CHECK_FAILED',
+      message: `Risk check ${result.passed ? 'PASSED' : 'FAILED'} for ${signal.symbol} signal ${signal.id}${result.lotSize !== null ? ` (lot ${result.lotSize})` : ''}${failedRules.length > 0 ? ` [${failedRules.join(',')}]` : ''}`,
+      meta: {
+        symbol: signal.symbol,
+        signalId: signal.id,
+        passed: result.passed,
+        lotSize: result.lotSize,
+        failedRules,
+      },
+    }).catch(() => undefined);
+
+    return bound({
+      symbol: signal.symbol,
+      signalId: signal.id,
+      signalOutcome: signal.outcome,
+      direction,
+      levels: { entry, stopLoss, takeProfit },
+      spread,
+      passed: result.passed,
+      lotSize: result.lotSize,
+      checks: result.checks,
+      evaluatedAtUtc: result.evaluatedAtUtc,
+      accountEquity: result.accountEquity,
+      accountBalance: result.accountBalance,
+      riskAmount: result.riskAmount,
+      stopDistance: result.stopDistance,
+      config: riskConfigSnapshot(),
+      notes: [
+        'ইকুইটি তথ্য অনুপলব্ধ — বর্তমান read-only ব্রিজ কন্ট্র্যাক্টে অ্যাকাউন্ট এন্ডপয়েন্ট নেই; EQUITY_AVAILABLE সৎভাবে fail-closed।',
+        `tickValuePerLot = ${XAUUSD_TICK_VALUE_PER_LOT} — স্ট্যান্ডার্ড XAUUSD কন্ট্র্যাক্ট (১০০ আউন্স) থেকে নেওয়া; ব্রোকার-যাচাইকৃত টিক স্পেসিফিকেশন ব্রিজে নেই।`,
+        'গবেষণা রিস্ক চেক — কোনো অর্ডার কার্যকর হয়নি এবং হতে পারে না (read-only সিস্টেম)।',
+      ],
+    });
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Planned tools — refused at runtime until their phase lands
+// ----------------------------------------------------------------------------
+// Phase 7 activated `run_risk_check` (2026-10-20, Task 30-a): no planned
+// tools remain in the registry. The `planned` status + runtime refusal stay
+// part of the architecture — future phases re-add entries here.
+// ---------------------------------------------------------------------------
+
+const getAiReview: ToolDefinition = {
+  name: 'get_ai_review',
+  description:
+    'Phase 6 GLM মাল্টি-এজেন্ট রিভিউর সর্বশেষ ফলাফল: analyst/critic/risk_reviewer এজেন্টদের রায় ও ব্যাখ্যা, orchestrator-এর চূড়ান্ত সারসংক্ষেপ, এবং কোন সিগন্যাল ইভ্যালুয়েশনের উপর রিভিউটি হয়েছে। রিভিউ পরামর্শমূলক — নির্ধারিত ইঞ্জিনের ফলাফল বদলায় না। চালাতে ব্যবহারকারীকে বলবে Signals ট্যাবের রিভিউ বাটন চাপতে (POST /api/ai/review)।',
+  parameters: { type: 'object', properties: { symbol: symbolParam }, required: [] },
+  status: 'active',
+  activatesInPhase: 6,
+  handler: async (args) => {
+    const sym = allowlistedSymbol(args.symbol);
+    if (!sym.ok) return { error: sym.error };
+    const { getLatestMultiAgentReview } = await import('@/lib/ai/multi-agent');
+    const review = await getLatestMultiAgentReview(sym.symbol);
+    if (!review) {
+      return bound({
+        available: false,
+        reason: 'এখনো কোনো মাল্টি-এজেন্ট রিভিউ হয়নি — Signals ট্যাব থেকে রিভিউ চালান বা POST /api/ai/review কল করুন।',
+      });
+    }
+    return bound({
+      available: true,
+      batchId: review.batchId,
+      ranAtUtc: review.ranAtUtc,
+      evaluationId: review.evaluationId,
+      evaluationOutcome: review.evaluationOutcome,
+      degraded: review.degraded,
+      orchestrator: review.orchestrator,
+      agents: review.agents,
+      note: 'রিভিউ পরামর্শমূলক (advisory) — নির্ধারিত ইঞ্জিনের ফলাফলই প্রামাণ্য।',
+    });
+  },
+};
+
+const plannedTools: ToolDefinition[] = [];
 
 export const TOOL_REGISTRY: ToolDefinition[] = [
   getSystemHealth,
@@ -417,6 +608,8 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
   getLatestSignal,
   getBacktestSummary,
   explainSignalEvidence,
+  runRiskCheckTool,
+  getAiReview,
   ...plannedTools,
 ];
 

@@ -417,7 +417,7 @@ describe('case 15 — authentication (DATA_API_TOKEN, Phase 4 hardened posture)'
   });
 });
 
-describe('case 18 — NO trading/order endpoints exist (static guarantee)', () => {
+describe('case 18 — execution surface containment (Phase 11: approval-gated, no bypass)', () => {
   function walkRoutes(dir: string, acc: string[] = []): string[] {
     for (const entry of readdirSync(dir)) {
       const full = join(dir, entry);
@@ -427,19 +427,22 @@ describe('case 18 — NO trading/order endpoints exist (static guarantee)', () =
     return acc;
   }
 
-  test('no API route path mentions orders/trades/positions/execution', () => {
+  test('execution/order vocabulary in route PATHS exists only under /api/execution/*', () => {
     const routes = walkRoutes('/home/z/my-project/src/app/api');
     expect(routes.length).toBeGreaterThan(5); // sanity: we did scan
-    const forbidden = /(order|trade|trading|position|close|modify|pending|connect|execution)/i;
-    const offenders = routes.filter((r) => forbidden.test(r.replace('/home/z/my-project/src/app/api', '')));
+    const forbidden = /(order|trade|trading|position|close|modify|pending|execution)/i;
+    const offenders = routes.filter((r) =>
+      forbidden.test(r.replace('/home/z/my-project/src/app/api', '')) &&
+      !r.replace('/home/z/my-project/src/app/api', '').startsWith('/execution/'));
     expect(offenders).toEqual([]);
   });
 
-  test('no route source contains order-submission code', () => {
+  test('no route source outside /api/execution contains order-submission code', () => {
     const routes = walkRoutes('/home/z/my-project/src/app/api');
     const patterns = [/ORDER_TYPE_/i, /positions_add/i, /trade_action/i, /OrderSend/i, /\/api\/trader\//];
     const offenders: string[] = [];
     for (const r of routes) {
+      if (r.includes('/api/execution/')) continue; // Phase 11 gated surface (checked by its own tests)
       const src = readFileSync(r, 'utf8');
       if (patterns.some((p) => p.test(src))) offenders.push(r);
     }
@@ -457,7 +460,10 @@ describe('case 18 — NO trading/order endpoints exist (static guarantee)', () =
     const { toolSpecs } = await import('@/lib/tools/registry');
     const active = toolSpecs(false).map((t) => t.function.name);
     // Phase 9: the Bengali Chat Agent's 7 market/signal tools joined the
-    // original health tool. NONE of them can execute anything.
+    // original health tool. Phase 7 (Task 30-a) activated run_risk_check —
+    // the deterministic risk gate (analysis + audit row only). Phase 6
+    // (Task 30) added get_ai_review — the multi-agent review READ-BACK.
+    // NONE of them can execute anything.
     expect(active).toEqual([
       'get_system_health',
       'get_market_health',
@@ -467,6 +473,8 @@ describe('case 18 — NO trading/order endpoints exist (static guarantee)', () =
       'get_latest_signal',
       'get_backtest_summary',
       'explain_signal_evidence',
+      'run_risk_check',
+      'get_ai_review',
     ]);
     // No tool name may even suggest execution.
     expect(active.find((n) => /order|execute|position|deal|close|modify/i.test(n))).toBeUndefined();

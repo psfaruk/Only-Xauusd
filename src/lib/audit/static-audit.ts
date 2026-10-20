@@ -111,7 +111,7 @@ export const databaseModels = [
   { name: 'PaperSignalOutcome', purpose: 'Read-only forward paper tracking of setup evaluations', phase: 10, status: 'active' as const },
   { name: 'Signal', purpose: 'Legacy Phase-1 signal shape (0 rows — superseded by SignalEvaluation)', phase: 5, status: 'superseded' as const },
   { name: 'AiReview', purpose: 'GLM multi-agent reviews', phase: 6, status: 'planned' as const },
-  { name: 'RiskCheck', purpose: 'Deterministic risk-gate results', phase: 7, status: 'planned' as const },
+  { name: 'RiskCheck', purpose: 'Deterministic risk-gate results (Phase 7 engine — append-only audit rows)', phase: 7, status: 'active' as const },
   { name: 'TradeApproval', purpose: 'User approval records (locked until Phase 11)', phase: 11, status: 'locked' as const },
   { name: 'ExecutionLog', purpose: 'Order request/result audit (locked until Phase 11)', phase: 11, status: 'locked' as const },
 ];
@@ -189,15 +189,15 @@ export const architectureLayers = [
     id: 'tools',
     title: 'Allowlisted Tool Registry',
     tech: 'src/lib/tools/registry.ts',
-    detail: 'JSON-schema validated function calls. Active: get_system_health + 7 Phase 9 market/signal/backtest read-only tools. No execution tool exists.',
-    phase: '1 → 9 (active)',
+    detail: 'JSON-schema validated function calls. Active: get_system_health + 7 Phase 9 market/signal/backtest read-only tools + run_risk_check (Phase 7 deterministic risk gate — analysis/audit only). No execution tool exists.',
+    phase: '1 → 9 (active; risk gate Phase 7)',
   },
   {
     id: 'engines',
     title: 'Deterministic Engines (TypeScript)',
-    tech: 'src/lib/{analysis,signal,backtest}',
-    detail: 'Market structure (swings/BOS/CHoCH), indicators (EMA/RSI/ATR/ADX), SIGNAL ENGINE (setup outcomes, entry/SL/target, fail-closed gates), backtest simulator. AI reviews them; AI can never override them.',
-    phase: '4 → 9 (active)',
+    tech: 'src/lib/{analysis,signal,backtest,risk}',
+    detail: 'Market structure (swings/BOS/CHoCH), indicators (EMA/RSI/ATR/ADX), SIGNAL ENGINE (setup outcomes, entry/SL/target, fail-closed gates), backtest simulator, RISK GATE (position sizing + clamped safety limits). AI reviews them; AI can never override them.',
+    phase: '4 → 9 (active; risk gate Phase 7)',
   },
   {
     id: 'integrity',
@@ -216,8 +216,8 @@ export const architectureLayers = [
   {
     id: 'data',
     title: 'SQLite + Prisma',
-    tech: 'db/custom.db · 14 models (9 active, 2 planned, 1 superseded, 2 locked)',
-    detail: 'SystemEvent, MarketCandle, MarketLatestTick, SymbolSpec, DataQualityIssue, SyncRun, AnalysisRun, BacktestRun, SignalEvaluation active. TradeApproval/ExecutionLog locked until Phase 11.',
+    tech: 'db/custom.db · 16 models (12 active, 1 planned, 1 superseded, 2 locked)',
+    detail: 'SystemEvent, MarketCandle, MarketLatestTick, SymbolSpec, DataQualityIssue, SyncRun, AnalysisRun, BacktestRun, SignalEvaluation, ValidationRun, PaperSignalOutcome, RiskCheck active. TradeApproval/ExecutionLog locked until Phase 11.',
     phase: '1 → 11',
   },
 ];
