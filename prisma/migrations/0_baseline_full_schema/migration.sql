@@ -216,6 +216,44 @@ CREATE TABLE "ValidationRun" (
 );
 
 -- CreateTable
+CREATE TABLE "PaperCandidateOutcome" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "candidateEvaluationId" TEXT NOT NULL,
+    "symbol" TEXT NOT NULL,
+    "model" TEXT NOT NULL,
+    "candidateVersion" TEXT NOT NULL,
+    "direction" TEXT NOT NULL,
+    "signalCreatedAtUtc" DATETIME NOT NULL,
+    "decisionCandleTimeUtc" DATETIME NOT NULL,
+    "setupKnownAtUtc" DATETIME NOT NULL,
+    "expiryUtc" DATETIME NOT NULL,
+    "datasetFingerprint" TEXT,
+    "inputFingerprint" TEXT NOT NULL,
+    "setupFingerprint" TEXT NOT NULL,
+    "sourceCandleRange" TEXT NOT NULL,
+    "entryReference" REAL NOT NULL,
+    "stopLoss" REAL NOT NULL,
+    "target" REAL NOT NULL,
+    "invalidationLevel" REAL NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'open',
+    "outcome" TEXT,
+    "resolvedAtUtc" DATETIME,
+    "resolutionBarTimeUtc" DATETIME,
+    "exitPrice" REAL,
+    "observations" INTEGER NOT NULL DEFAULT 0,
+    "lastCheckedBarTimeUtc" DATETIME,
+    "modeledCostsPrice" REAL NOT NULL,
+    "grossPnlPrice" REAL,
+    "netPnlPrice" REAL,
+    "rMultiple" REAL,
+    "details" TEXT,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "PaperCandidateOutcome_candidateEvaluationId_key" UNIQUE ("candidateEvaluationId"),
+    CONSTRAINT "PaperCandidateOutcome_setupFingerprint_key" UNIQUE ("setupFingerprint")
+);
+
+-- CreateTable
 CREATE TABLE "PaperSignalOutcome" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "signalEvaluationId" TEXT NOT NULL,
@@ -329,6 +367,18 @@ CREATE INDEX "SignalEvaluation_createdAt_idx" ON "SignalEvaluation"("createdAt")
 
 -- CreateIndex
 CREATE INDEX "ValidationRun_symbol_createdAt_idx" ON "ValidationRun"("symbol", "createdAt");
+
+-- CreateIndex
+CREATE INDEX "PaperCandidateOutcome_symbol_status_idx" ON "PaperCandidateOutcome"("symbol", "status");
+
+-- CreateIndex
+CREATE INDEX "PaperCandidateOutcome_symbol_outcome_idx" ON "PaperCandidateOutcome"("symbol", "outcome");
+
+-- CreateIndex
+CREATE INDEX "PaperCandidateOutcome_status_idx" ON "PaperCandidateOutcome"("status");
+
+-- CreateIndex
+CREATE INDEX "PaperCandidateOutcome_candidateVersion_idx" ON "PaperCandidateOutcome"("candidateVersion");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "PaperSignalOutcome_signalEvaluationId_key" ON "PaperSignalOutcome"("signalEvaluationId");

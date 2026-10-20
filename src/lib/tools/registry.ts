@@ -425,10 +425,13 @@ const runRiskCheckTool: ToolDefinition = {
 
     // Latest DIRECTIONAL setup evaluation only — WAIT/NO_SETUP/BLOCKED carry
     // no levels, so the risk gate honestly does not apply to them.
+    // Phase 11-E isolation: strictly BASELINE-scoped — candidate setup rows
+    // (hybrid-multimodel-research/…) can never feed the risk gate.
     const signal = await db.signalEvaluation
       .findFirst({
         where: {
           symbol: sym.symbol,
+          strategyVersion: SIGNAL_STRATEGY_VERSION,
           outcome: { in: ['BUY_SETUP', 'SELL_SETUP'] },
           levels: { not: null },
         },

@@ -89,6 +89,11 @@ export async function POST(request: Request) {
         durationMs: outcome.durationMs,
       },
       evaluation: outcome.evaluation,
+      // Phase 11-E (additive): the CANDIDATE dual evaluation summary of this
+      // run — present only when the candidate step ran (baseline windows
+      // loaded + FORWARD_PAPER_TRACKING on); null otherwise. Research-only;
+      // never affects the baseline verdict above.
+      candidate: outcome.candidate ?? null,
       quote: outcome.quoteReport
         ? {
             freshness: outcome.quoteReport.freshness,

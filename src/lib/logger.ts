@@ -18,6 +18,7 @@ export type AuditCategory =
   | 'market'
   | 'analysis'
   | 'signal'
+  | 'candidate'
   | 'risk'
   | 'approval'
   | 'execution'

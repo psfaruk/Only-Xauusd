@@ -104,11 +104,12 @@ export const databaseModels = [
   { name: 'SyncRun', purpose: 'Honest bookkeeping of every ingestion run', phase: 3, status: 'active' as const },
   { name: 'AnalysisRun', purpose: 'Reproducible deterministic analysis runs', phase: 4, status: 'active' as const },
   { name: 'BacktestRun', purpose: 'Backtest simulations over verified candles', phase: 8, status: 'active' as const },
-  { name: 'SignalEvaluation', purpose: 'Deterministic signal-engine evaluations (append-only)', phase: 9, status: 'active' as const },
+  { name: 'SignalEvaluation', purpose: 'Deterministic signal-engine evaluations (append-only; baseline + candidate dual rows since Phase 11-E)', phase: 9, status: 'active' as const },
   // Master-audit fix E3: these two ACTIVE Phase-10 models were missing from
   // the static inventory (the UI said "১৪টি মডেল"; the schema has 16).
   { name: 'ValidationRun', purpose: 'Phase 10 validation-harness runs (dev/val/OOS splits)', phase: 10, status: 'active' as const },
-  { name: 'PaperSignalOutcome', purpose: 'Read-only forward paper tracking of setup evaluations', phase: 10, status: 'active' as const },
+  { name: 'PaperSignalOutcome', purpose: 'Read-only forward paper tracking of setup evaluations (baseline only)', phase: 10, status: 'active' as const },
+  { name: 'PaperCandidateOutcome', purpose: 'Candidate-strategy forward paper tracking (Phase 11-E activation — separate table/identity namespace, research-only)', phase: 11, status: 'active' as const },
   { name: 'Signal', purpose: 'Legacy Phase-1 signal shape (0 rows — superseded by SignalEvaluation)', phase: 5, status: 'superseded' as const },
   { name: 'AiReview', purpose: 'GLM multi-agent reviews', phase: 6, status: 'planned' as const },
   { name: 'RiskCheck', purpose: 'Deterministic risk-gate results (Phase 7 engine — append-only audit rows)', phase: 7, status: 'active' as const },
@@ -196,8 +197,8 @@ export const architectureLayers = [
     id: 'engines',
     title: 'Deterministic Engines (TypeScript)',
     tech: 'src/lib/{analysis,signal,backtest,risk}',
-    detail: 'Market structure (swings/BOS/CHoCH), indicators (EMA/RSI/ATR/ADX), SIGNAL ENGINE (setup outcomes, entry/SL/target, fail-closed gates), backtest simulator, RISK GATE (position sizing + clamped safety limits). AI reviews them; AI can never override them.',
-    phase: '4 → 9 (active; risk gate Phase 7)',
+    detail: 'Market structure (swings/BOS/CHoCH), indicators (EMA/RSI/ATR/ADX), SIGNAL ENGINE (setup outcomes, entry/SL/target, fail-closed gates), backtest simulator, RISK GATE (position sizing + clamped safety limits), CANDIDATE dual evaluation + forward paper observation (hybrid-multimodel-research/11.0.0-candidate.1 — research-only, separate table). AI reviews them; AI can never override them.',
+    phase: '4 → 11 (active; risk gate Phase 7; candidate observation Phase 11-E)',
   },
   {
     id: 'integrity',
@@ -216,8 +217,8 @@ export const architectureLayers = [
   {
     id: 'data',
     title: 'SQLite + Prisma',
-    tech: 'db/custom.db · 16 models (12 active, 1 planned, 1 superseded, 2 locked)',
-    detail: 'SystemEvent, MarketCandle, MarketLatestTick, SymbolSpec, DataQualityIssue, SyncRun, AnalysisRun, BacktestRun, SignalEvaluation, ValidationRun, PaperSignalOutcome, RiskCheck active. TradeApproval/ExecutionLog locked until Phase 11.',
+    tech: 'db/custom.db · 17 models (13 active, 1 planned, 1 superseded, 2 locked)',
+    detail: 'SystemEvent, MarketCandle, MarketLatestTick, SymbolSpec, DataQualityIssue, SyncRun, AnalysisRun, BacktestRun, SignalEvaluation, ValidationRun, PaperSignalOutcome, RiskCheck, PaperCandidateOutcome active. TradeApproval/ExecutionLog locked until Phase 11.',
     phase: '1 → 11',
   },
 ];
@@ -231,7 +232,7 @@ export const repositoryTree = `xauusd-ai-trading-agent/
 ├── .gitignore              # .env*, db/*.db excluded; .env.example kept
 ├── README.md               # bilingual project guide
 ├── package.json            # dev / lint / test / db:* / market:* / bridge:dev
-├── prisma/schema.prisma    # 14 models, phase-tagged + migrations/
+├── prisma/schema.prisma    # 17 models, phase-tagged + migrations/
 ├── db/custom.db            # SQLite (git-untracked, re-syncable)
 ├── audit/                  # phase reports + evidence (phase1…phase9)
 ├── mini-services/

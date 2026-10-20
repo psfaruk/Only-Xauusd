@@ -15,6 +15,8 @@ import { getLatestSignalEvaluation } from '@/lib/signal/persistence';
 import { SIGNAL_STRATEGY_VERSION } from '@/lib/signal/types';
 import { deriveConditionReport } from '@/lib/signal/conditions';
 import { CANDIDATE_STRATEGY_VERSION } from '@/lib/signal/candidate/types';
+import { getLatestCandidateEvaluation } from '@/lib/signal/candidate-persistence';
+import { getCandidatePaperStats } from '@/lib/signal/candidate-paper';
 import { config } from '@/lib/config';
 import { signalLatestQuerySchema } from '@/lib/signal/schemas';
 
@@ -32,7 +34,13 @@ export async function GET(req: Request) {
   const symbol = parsed.data.symbol ?? config.market.symbols[0] ?? 'XAUUSDm';
 
   try {
-    const signal = await getLatestSignalEvaluation(db, symbol);
+    // Baseline fields stay byte-compatible: `signal` is the latest BASELINE
+    // evaluation (explicit baseline scope — Phase 11-E isolation), the
+    // candidate gets its own separately-labeled additive field below.
+    const [signal, candidateEval] = await Promise.all([
+      getLatestSignalEvaluation(db, symbol, SIGNAL_STRATEGY_VERSION),
+      getLatestCandidateEvaluation(db, symbol),
+    ]);
 
     // Latest backtest run OF THE SIGNAL ENGINE (strategy-version match only).
     const backtestRow = await db.backtestRun
@@ -58,6 +66,20 @@ export async function GET(req: Request) {
         }
       : null;
 
+    // Phase 11-E (additive): the candidate dual-evaluation card — present
+    // only when a candidate evaluation exists; null otherwise (honest
+    // absence, never fabricated). paperStats carries the counts by
+    // status/outcome from PaperCandidateOutcome + the pre-registered protocol
+    // verdict state (INCOMPLETE until ≥ 20 completed outcomes).
+    const candidate = candidateEval
+      ? {
+          evaluation: candidateEval,
+          levels: candidateEval.levels,
+          model: candidateEval.model,
+          paperStats: await getCandidatePaperStats(db, symbol),
+        }
+      : null;
+
     return NextResponse.json({
       ok: true,
       symbol,
@@ -68,14 +90,17 @@ export async function GET(req: Request) {
       // with the strategy-logic vs data-quality split. Derived from the
       // persisted evaluation only (the engine core is untouched).
       conditions: deriveConditionReport(signal ?? null),
+      candidate,
       strategyVersions: {
         activeLive: SIGNAL_STRATEGY_VERSION,
         researchCandidate: CANDIDATE_STRATEGY_VERSION,
-        candidateStatus: 'offline-research-only (not wired into live evaluation, persistence, or paper tracking; activation gated by audit/phase11-candidate-forward-protocol.md)',
+        candidateStatus:
+          'active-forward-observation (Phase 11-E activation 2026-10-20: dual evaluation live, research-only — separate table/identity namespace; four execution locks stay LOCKED; protocol audit/phase11-candidate-forward-protocol.md)',
       },
       notes: [
         'Signals are research/decision support only — nothing is ever executed.',
         'The comparison block is the latest backtest run of the CURRENT signal-engine strategy version only.',
+        'The candidate field is research-only forward observation under phase11-candidate-forward/1 — no execution, ever.',
       ],
     });
   } catch (e) {

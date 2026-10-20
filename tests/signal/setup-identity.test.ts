@@ -413,18 +413,28 @@ describe('S4 — new valid setup after invalidation', () => {
 // ---------------------------------------------------------------------------
 
 describe('S6 — strategy version change separates setup identity', () => {
-  test('the same event under a new strategyVersion gets its own paper row', async () => {
+  test('same event under a foreign strategyVersion is NOT tracked by the BASELINE tracker (Phase 11-E isolation); identity separation stays pure-proven', async () => {
     const evS6: EventSeed = { type: 'BOS', direction: 'bullish', level: 2725.5, breakSec: T0 };
     await seedSetupEval({ id: 's6-e1', event: evS6, side: 'BUY', decisionSec: X, createdAtSec: T0 + 1860, entryReference: 2650, stopLoss: 2640, target: 2670 });
     await seedSetupEval({ id: 's6-e2', event: evS6, side: 'BUY', decisionSec: X, createdAtSec: T0 + 2100, entryReference: 2650, stopLoss: 2640, target: 2670, strategyVersion: STRAT_V10 });
     const out = await track();
-    expect(out.newlyOpened).toBe(2); // different identity → both get rows
+    // Phase 11-E (protocol §4 cannot-mix): the BASELINE paper tracker is
+    // strictly baseline-scoped — the v10 row can NEVER enter
+    // PaperSignalOutcome, even with an identical structure event. (Before the
+    // candidate activation this test asserted BOTH rows were tracked; the
+    // isolation requirement supersedes that: candidate/foreign-version rows
+    // get their own separately-labeled tracking surfaces.)
+    expect(out.newlyOpened).toBe(1); // ONLY the baseline row
     expect(out.duplicatesSuppressed).toBe(0);
     const rows = await db.paperSignalOutcome.findMany({ where: { symbol: SYMBOL } });
-    expect(rows).toHaveLength(2);
-    expect(rows.find((r) => r.signalEvaluationId === 's6-e1')?.setupFingerprint).toBe(fpOf(evS6, STRAT_V9));
-    expect(rows.find((r) => r.signalEvaluationId === 's6-e2')?.setupFingerprint).toBe(fpOf(evS6, STRAT_V10));
-    expect(rows[0].setupFingerprint).not.toBe(rows[1].setupFingerprint);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].signalEvaluationId).toBe('s6-e1');
+    expect(rows[0].setupFingerprint).toBe(fpOf(evS6, STRAT_V9));
+    // The identity-separation property (S6's original point) remains proven:
+    // the same event under a different strategyVersion hashes differently —
+    // so when a future baseline version's OWN tracker picks it up, it can
+    // never collide with the v9 row (pure half pinned in D1 as well).
+    expect(fpOf(evS6, STRAT_V10)).not.toBe(fpOf(evS6, STRAT_V9));
   });
 });
 

@@ -59,6 +59,7 @@ import type {
 import { bnForCode, syncStatusBn } from '@/lib/dashboard/i18n';
 import { TerminalHeader } from '@/components/terminal/TerminalHeader';
 import { ChartPanel } from '@/components/terminal/ChartPanel';
+import { CandidateSignalCard } from '@/components/terminal/CandidateSignalCard';
 import { SignalCard } from '@/components/terminal/SignalCard';
 import { DashboardView, MarketSnapshot, SystemMiniCards } from '@/components/terminal/DashboardView';
 import { ChatView } from '@/components/terminal/ChatView';
@@ -93,6 +94,9 @@ export default function TradingTerminal() {
   const [signalLatest, setSignalLatest] = useState<SignalLatestResponse | null>(null);
   const [signalRunning, setSignalRunning] = useState(false);
   const [signalHistory, setSignalHistory] = useState<SignalHistoryResponse | null>(null);
+  // Phase 11-E — the candidate's own separately-labeled history surface
+  // (?strategy=candidate; never merged into the baseline history list).
+  const [candidateHistory, setCandidateHistory] = useState<SignalHistoryResponse | null>(null);
   const [validationLatest, setValidationLatest] = useState<ValidationLatestResponse | null>(null);
   const [dataLatest, setDataLatest] = useState<DataLatestResponse | null>(null);
 
@@ -138,6 +142,7 @@ export default function TradingTerminal() {
         fetch('/api/validation/latest?symbol=XAUUSDm', { cache: 'no-store', signal: AbortSignal.timeout(20_000) }),
         fetch('/api/data/latest?symbol=XAUUSDm', { cache: 'no-store', signal: AbortSignal.timeout(20_000) }),
         fetch('/api/signal/history?symbol=XAUUSDm&limit=20', { cache: 'no-store', signal: AbortSignal.timeout(20_000) }),
+        fetch('/api/signal/history?symbol=XAUUSDm&limit=20&strategy=candidate', { cache: 'no-store', signal: AbortSignal.timeout(20_000) }),
         fetch('/api/ai/review/latest?symbol=XAUUSDm', { cache: 'no-store', signal: AbortSignal.timeout(20_000) }),
         fetch('/api/execution/state', { cache: 'no-store', signal: AbortSignal.timeout(20_000) }),
       ]);
@@ -195,10 +200,12 @@ export default function TradingTerminal() {
       setApiError('dataLatest', await errCode(9));
       setSignalHistory((await body<SignalHistoryResponse>(10)) ?? null);
       setApiError('history', await errCode(10));
-      setAiReview((await body<AiReviewLatestResponse>(11)) ?? null);
-      setApiError('aiReview', await errCode(11));
-      setExecutionState((await body<ExecutionStateResponse>(12)) ?? null);
-      setApiError('execution', await errCode(12));
+      setCandidateHistory((await body<SignalHistoryResponse>(11)) ?? null);
+      setApiError('candidateHistory', await errCode(11));
+      setAiReview((await body<AiReviewLatestResponse>(12)) ?? null);
+      setApiError('aiReview', await errCode(12));
+      setExecutionState((await body<ExecutionStateResponse>(13)) ?? null);
+      setApiError('execution', await errCode(13));
 
       setLoadError(null);
     } catch (e) {
@@ -541,11 +548,13 @@ export default function TradingTerminal() {
     <HistoryView
       signalLatest={signalLatest}
       signalHistory={signalHistory}
+      candidateHistory={candidateHistory}
       signalRunning={signalRunning}
       onRunSignal={() => void runSignalNow()}
       priceSpec={priceSpec}
       signalError={apiErrors.signal ?? null}
       historyError={apiErrors.history ?? null}
+      candidateHistoryError={apiErrors.candidateHistory ?? null}
       loading={loading}
       below={
         <>
@@ -649,12 +658,22 @@ export default function TradingTerminal() {
                 marketStatus={marketStatus}
                 refreshKey={refreshTick}
                 heightClass="h-[540px]"
+                liveTick={tickStream.status === 'live' ? tickStream.tick : null}
               />
               <div className="space-y-4">
                 <SignalCard
                   signalLatest={signalLatest}
                   signalRunning={signalRunning}
                   onRunSignal={() => void runSignalNow()}
+                  priceSpec={priceSpec}
+                  error={apiErrors.signal ?? null}
+                  loading={loading}
+                  compact
+                />
+                {/* Phase 11-E — the research candidate card directly under the
+                 * baseline decision card (never merged into it). */}
+                <CandidateSignalCard
+                  signalLatest={signalLatest}
                   priceSpec={priceSpec}
                   error={apiErrors.signal ?? null}
                   loading={loading}
@@ -718,6 +737,7 @@ export default function TradingTerminal() {
                   marketStatus={marketStatus}
                   refreshKey={refreshTick}
                   heightClass="h-[58vh] min-h-[340px]"
+                  liveTick={tickStream.status === 'live' ? tickStream.tick : null}
                 />
                 <SystemMiniCards health={health} marketStatus={marketStatus} loading={loading} marketError={apiErrors.market ?? null} />
               </div>

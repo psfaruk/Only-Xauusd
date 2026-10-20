@@ -231,6 +231,92 @@ export interface SignalEvaluationView {
   quote: Record<string, unknown> | null;
 }
 
+// ---------------------------------------------------------------------------
+// /api/signal/latest — Phase 11-E additive candidate fields (research-only)
+// ----------------------------------------------------------------------------
+
+/** Candidate levels = baseline levels + the per-model walk invalidation level. */
+export interface CandidateLevelsView extends SignalLevelsView {
+  invalidationLevel: number;
+}
+
+/** Persisted per-model evidence behind a candidate evaluation row. */
+export interface CandidateModelEvidenceView {
+  modelA: { outcome: string; reasonCodes: string[] } | null;
+  modelB: { setup: boolean; stage: string | null } | null;
+  modelC: { setups: Array<'BUY' | 'SELL'>; stage: string | null } | null;
+  suppressedModels: string[];
+  conflict: boolean;
+}
+
+export interface CandidateEvaluationView {
+  id: string;
+  createdAt: string;
+  outcome: 'BUY_SETUP' | 'SELL_SETUP' | 'WAIT' | 'BLOCKED' | 'NO_SETUP' | 'FAILED';
+  reasonCodes: string[];
+  engineVersion: string;
+  strategyVersion: string;
+  symbol: string;
+  decisionCandleTimeUtc: string | null;
+  setupKnownAtUtc: string | null;
+  expiryUtc: string | null;
+  levels: CandidateLevelsView | null;
+  /** Winning model on setup outcomes; null otherwise. */
+  model: 'A' | 'B' | 'C' | null;
+  direction: 'BUY' | 'SELL' | null;
+  evidence: CandidateModelEvidenceView | null;
+  inputFingerprint: string;
+  datasetFingerprint: string | null;
+  setupFingerprint: string | null;
+  rulesSnapshot: RulesSnapshotView;
+  executionLocked: boolean;
+  quote: Record<string, unknown> | null;
+  durationMs: number | null;
+}
+
+/** Pre-registered forward-paper verdict (phase11-candidate-forward/1). */
+export interface CandidatePaperStatsView {
+  total: number;
+  open: number;
+  resolved: { stopped: number; targeted: number; invalidated: number; expired: number };
+  /** Resolved rows with OBSERVABLE net P/L (unobservable expiry disclosed separately). */
+  completedOutcomes: number;
+  unobservableExpired: number;
+  netPnlPrice: number | null;
+  sumR: number | null;
+  verdict: {
+    conclusion:
+      | 'INCOMPLETE'
+      | 'INCOMPLETE_TIMEOUT'
+      | 'NEGATIVE_AFTER_COSTS'
+      | 'INCONCLUSIVE_CONCENTRATION'
+      | 'INCONCLUSIVE_DRAWDOWN'
+      | 'CONTINUE_FORWARD_RESEARCH';
+    reasons: string[];
+    protocolId: string;
+    disclaimer: string;
+  };
+  /** Protocol §5.3 stopping condition state (operator-facing, not the verdict). */
+  stopCondition: { triggered: boolean; reason: string | null };
+  protocol: {
+    id: string;
+    candidateVersion: string;
+    activatedAtUtc: string;
+    deadlineUtc: string;
+    windowDays: number;
+    minCompleted: number;
+  };
+}
+
+/** The additive `candidate` block on /api/signal/latest (null = none yet). */
+export interface CandidateLatestView {
+  evaluation: CandidateEvaluationView;
+  /** Same object as evaluation.levels (null unless a setup fired). */
+  levels: CandidateLevelsView | null;
+  model: 'A' | 'B' | 'C' | null;
+  paperStats: CandidatePaperStatsView;
+}
+
 export interface SignalLatestResponse {
   ok: boolean;
   symbol: string;
@@ -242,6 +328,8 @@ export interface SignalLatestResponse {
     checks: Array<{ id: string; labelBn: string; category: 'data-quality' | 'strategy-logic'; passed: boolean | null; detailBn: string | null }>;
   } | null;
   strategyVersions: { activeLive: string; researchCandidate: string; candidateStatus: string } | null;
+  /** Phase 11-E research candidate (dual evaluation) — null before the first cycle. */
+  candidate: CandidateLatestView | null;
   backtestComparison: {
     runId: string;
     createdAt: string;
@@ -266,6 +354,11 @@ export interface SignalHistoryEntryView {
   reasonCodes: string[];
   engineVersion: string;
   strategyVersion: string;
+  /** Present on current rows (baseline + candidate); absent on legacy rows. */
+  decisionCandleTimeUtc?: string | null;
+  /** Candidate-only fields (null/absent on baseline rows). */
+  model?: 'A' | 'B' | 'C' | null;
+  direction?: 'BUY' | 'SELL' | null;
   setupFingerprint: string | null;
   rulesSnapshot: RulesSnapshotView;
   executionLocked: boolean;
@@ -274,10 +367,14 @@ export interface SignalHistoryEntryView {
 export interface SignalHistoryResponse {
   ok: boolean;
   symbol: string;
+  /** 'baseline' (default) or 'candidate' — the scope of every listed row. */
+  strategy?: 'baseline' | 'candidate' | string;
+  strategyVersion?: string;
   count: number;
   counts: { totalEvaluations: number; distinctSetups: number } | null;
   outcomeCounts: Record<string, number>;
   history: SignalHistoryEntryView[];
+  note?: string;
 }
 
 // ---------------------------------------------------------------------------

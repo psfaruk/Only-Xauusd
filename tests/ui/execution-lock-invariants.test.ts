@@ -20,6 +20,7 @@
  * therefore never depend on the developer's (possibly armed) .env.
  */
 import { describe, expect, test } from 'bun:test';
+import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import '../market/helpers/setup';
@@ -62,10 +63,9 @@ describe('execution locks (four-switch gate)', () => {
 function probeArmed(envOverride: Record<string, string>): boolean {
   // Config is a pure env reader — evaluate its gate logic in a fresh process
   // so the in-process pinned env cannot leak into the probe.
-  const { execFileSync } = require('node:child_process') as typeof import('node:child_process');
   const script = `const m = require('/home/z/my-project/src/lib/config.ts'); console.log(m.config.execution.enabled ? '1' : '0');`;
-  const env: Record<string, string> = {
-    ...(process.env as Record<string, string>),
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
     // strip every .env-sourced switch, then apply the override
     TRADING_PHASE: '',
     TRADING_MODE: '',
@@ -109,9 +109,8 @@ describe('Phase 11 arming — every one of the four switches is required', () =>
 
   test('live mode is NOT enabled by the demo arming (live requires its own explicit mode)', () => {
     // demo arming must never silently become live-capable
-    const { execFileSync } = require('node:child_process') as typeof import('node:child_process');
     const script = `const m = require('/home/z/my-project/src/lib/config.ts'); console.log(m.config.tradingMode);`;
-    const env = { ...(process.env as Record<string, string>), ...ARMED };
+    const env: NodeJS.ProcessEnv = { ...process.env, ...ARMED };
     const out = execFileSync('bun', ['-e', script], { env, encoding: 'utf8', timeout: 30_000 });
     expect(out.trim()).toBe('demo');
   });
@@ -132,7 +131,9 @@ describe('execution surface containment (Phase 11)', () => {
       .filter((d) => d.isDirectory())
       .map((d) => d.name);
     // The ONLY allowed execution-adjacent top-level dir is /api/execution.
-    expect(dirs.filter((d) => forbidden.test(d.name))).toEqual([]);
+    // (dirs is already the mapped name list — match the string itself; the
+    // pre-existing d.name access was always undefined, i.e. a vacuous pass.)
+    expect(dirs.filter((d) => forbidden.test(d))).toEqual([]);
     expect(dirs).toContain('execution');
     expect(existsSync(join(apiRoot, 'execution', 'state', 'route.ts'))).toBe(true);
     expect(existsSync(join(apiRoot, 'execution', 'decide', 'route.ts'))).toBe(true);

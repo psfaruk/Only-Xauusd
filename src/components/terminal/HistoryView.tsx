@@ -10,14 +10,17 @@
  * never conflated with "genuinely empty".
  */
 
-import { CheckCircle2, Minus, ShieldCheck, XCircle, Zap } from 'lucide-react';
+import { useState } from 'react';
+import { CheckCircle2, ChevronDown, FlaskConical, Minus, ShieldCheck, XCircle, Zap } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Skeleton } from '@/components/ui/skeleton';
 import { PriceLevelText, PriceQtyText } from './bits';
 import {
   bnForCode,
+  candidateModelBn,
   directionBn,
   fmtDhaka,
   fmtInd,
@@ -34,21 +37,29 @@ import { formatPriceLevel } from '@/lib/market/price-display';
 export function HistoryView({
   signalLatest,
   signalHistory,
+  candidateHistory,
   signalRunning,
   onRunSignal,
   priceSpec,
   signalError,
   historyError,
+  candidateHistoryError,
   loading,
   below,
 }: {
   signalLatest: SignalLatestResponse | null;
   signalHistory: SignalHistoryResponse | null;
+  /** Phase 11-E — the candidate's own research history (?strategy=candidate).
+   *  Rendered in a SEPARATE labeled section; never merged into the baseline
+   *  history list above. */
+  candidateHistory: SignalHistoryResponse | null;
   signalRunning: boolean;
   onRunSignal: () => void;
   priceSpec: PriceDisplaySpec;
   signalError?: string | null;
   historyError?: string | null;
+  /** Unavailability code for the candidate history endpoint (F-04 fix). */
+  candidateHistoryError?: string | null;
   loading?: boolean;
   /** Phase 6/7/11 panels (AI review + risk + execution) rendered under the
    *  signal surfaces — passed from page.tsx to keep this view focused. */
@@ -340,7 +351,7 @@ export function HistoryView({
               <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
                 সক্রিয় লাইভ কৌশল: <span className="font-mono text-zinc-400">{SIGNAL_STRATEGY_VERSION}</span> · গবেষণা ক্যান্ডিডেট:{' '}
                 <span className="font-mono text-zinc-400">{CANDIDATE_STRATEGY_VERSION}</span>{' '}
-                (অফলাইন — লাইভ মূল্যায়ন/পেপার ট্র্যাকিংয়ে সংযুক্ত নয়)
+                (লাইভ ফরোয়ার্ড পর্যবেক্ষণে সক্রিয় — প্রতি সাইকেলে বেসলাইনের পাশাপাশি মূল্যায়ন হয়; কখনো ট্রেড করে না)
               </p>
             </div>
           )}
@@ -387,7 +398,7 @@ export function HistoryView({
                   <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
                     সক্রিয় লাইভ কৌশল: <span className="font-mono text-zinc-400">{signalLatest.strategyVersions.activeLive}</span> · গবেষণা ক্যান্ডিডেট:{' '}
                     <span className="font-mono text-zinc-400">{signalLatest.strategyVersions.researchCandidate}</span>{' '}
-                    (অফলাইন — লাইভ মূল্যায়ন/পেপার ট্র্যাকিংয়ে সংযুক্ত নয়)
+                    (লাইভ ফরোয়ার্ড পর্যবেক্ষণে সক্রিয় — প্রতি সাইকেলে বেসলাইনের পাশাপাশি মূল্যায়ন হয়; কখনো ট্রেড করে না)
                   </p>
                 )}
               </div>
@@ -500,7 +511,134 @@ export function HistoryView({
           )}
         </CardContent>
       </Card>
+
+      {/* --------------------------------------------- Candidate history (research) */}
+      <CandidateHistoryCard candidateHistory={candidateHistory} error={candidateHistoryError} loading={loading} />
       {below}
     </div>
+  );
+}
+
+/**
+ * Phase 11-E — the candidate's own append-only history, in a clearly-labeled
+ * collapsible section SEPARATE from the baseline history card above. Rows come
+ * from /api/signal/history?strategy=candidate; every honest state is distinct
+ * (error ≠ not-loaded ≠ empty) and nothing is ever fabricated.
+ */
+function CandidateHistoryCard({
+  candidateHistory,
+  error,
+  loading,
+}: {
+  candidateHistory: SignalHistoryResponse | null;
+  error?: string | null;
+  loading?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const rows = candidateHistory?.history ?? [];
+  const strategyVersion = candidateHistory?.strategyVersion ?? CANDIDATE_STRATEGY_VERSION;
+
+  return (
+    <Card className="border-amber-500/25 bg-zinc-900/40" data-testid="candidate-history-card">
+      <Collapsible open={open} onOpenChange={setOpen}>
+        <CardHeader className="pb-3">
+          <CollapsibleTrigger asChild>
+            <button
+              type="button"
+              aria-expanded={open}
+              aria-controls="candidate-history-content"
+              data-testid="candidate-history-toggle"
+              className="flex min-h-[44px] w-full flex-wrap items-center gap-2 text-left"
+            >
+              <ChevronDown
+                className={`h-4 w-4 shrink-0 text-zinc-400 transition-transform ${open ? 'rotate-180' : ''}`}
+                aria-hidden
+              />
+              <CardTitle className="flex flex-wrap items-center gap-2 text-base">
+                ক্যান্ডিডেট ইতিহাস
+                <Badge variant="outline" className="border-amber-500/50 bg-amber-500/5 text-amber-300">
+                  গবেষণা
+                </Badge>
+              </CardTitle>
+              {candidateHistory?.counts && (
+                <span className="text-xs font-normal text-zinc-500">
+                  মোট <span className="font-mono text-zinc-300">{candidateHistory.counts.totalEvaluations}</span> মূল্যায়ন ·{' '}
+                  <span className="font-mono text-zinc-300">{candidateHistory.counts.distinctSetups}</span> স্বতন্ত্র সেটআপ
+                </span>
+              )}
+            </button>
+          </CollapsibleTrigger>
+          <p className="text-xs text-zinc-500">
+            শুধুমাত্র গবেষণা ক্যান্ডিডেট কৌশলের (<span className="font-mono">{strategyVersion}</span>) append-only মূল্যায়ন — উপরের
+            বেসলাইন ইতিহাসের থেকে সম্পূর্ণ আলাদা। ক্যান্ডিডেট কখনো ট্রেড করে না।
+          </p>
+          {candidateHistory?.outcomeCounts && Object.keys(candidateHistory.outcomeCounts).length > 0 && (
+            <span className="flex flex-wrap gap-1.5">
+              {Object.entries(candidateHistory.outcomeCounts).map(([k, v]) => (
+                <Badge key={k} variant="outline" className={`text-[10px] ${signalOutcomeBadgeClass(k)}`}>
+                  {signalOutcomeBn[k]?.split(' ')[0] ?? k}: {v}
+                </Badge>
+              ))}
+            </span>
+          )}
+        </CardHeader>
+        <CollapsibleContent id="candidate-history-content">
+          <CardContent>
+            {error ? (
+              <p className="rounded-lg border border-red-500/30 bg-red-500/5 p-3 text-xs text-zinc-400" role="alert">
+                ক্যান্ডিডেট-ইতিহাস API অনুপলব্ধ — <span className="font-mono text-red-300">{error}</span>। এটি খালি-ইতিহাস নয় (fail-closed)।
+              </p>
+            ) : loading && !candidateHistory ? (
+              <Skeleton className="h-16 w-full" />
+            ) : !candidateHistory ? (
+              <p className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3 text-xs text-zinc-500">
+                ক্যান্ডিডেট-ইতিহাস এখন লোড করা যায়নি (সৎ খালি)।
+              </p>
+            ) : rows.length === 0 ? (
+              <p className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3 text-xs text-zinc-500">
+                এখনো কোনো ক্যান্ডিডেট মূল্যায়ন সংরক্ষিত হয়নি — প্রথম মূল্যায়ন পরবর্তী সাইকেলে আসবে।
+              </p>
+            ) : (
+              <div
+                className="custom-scrollbar max-h-72 space-y-1.5 overflow-y-auto pr-1"
+                role="region"
+                aria-label="ক্যান্ডিডেট মূল্যায়ন তালিকা (গবেষণা)"
+                data-testid="candidate-history-list"
+              >
+                {rows.map((h) => (
+                  <div
+                    key={h.id}
+                    className="flex flex-wrap items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2 text-xs"
+                    data-testid="candidate-history-row"
+                  >
+                    <span className="text-zinc-400">{fmtDhaka(h.createdAt)}</span>
+                    <Badge variant="outline" className={signalOutcomeBadgeClass(h.outcome)}>
+                      {signalOutcomeBn[h.outcome] ?? h.outcome}
+                    </Badge>
+                    {h.model && (
+                      <Badge variant="outline" className="border-amber-500/40 bg-amber-500/10 text-amber-300">
+                        {candidateModelBn[h.model] ?? `মডেল ${h.model}`}
+                      </Badge>
+                    )}
+                    {h.reasonCodes.length > 0 && (
+                      <span className="w-full break-words text-[10px] leading-relaxed text-zinc-500">
+                        {h.reasonCodes.map((c) => (
+                          <span key={c}>
+                            <span className="font-mono text-amber-500/90">{c}</span> — {bnForCode(c)}{' '}
+                          </span>
+                        ))}
+                      </span>
+                    )}
+                    {h.decisionCandleTimeUtc && (
+                      <span className="ml-auto text-[10px] text-zinc-500">সিদ্ধান্ত ক্যান্ডেল: {fmtDhaka(h.decisionCandleTimeUtc)}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </CollapsibleContent>
+      </Collapsible>
+    </Card>
   );
 }

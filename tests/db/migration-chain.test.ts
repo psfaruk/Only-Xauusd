@@ -11,8 +11,11 @@
  * Fix under test: prisma/migrations now contains a single consolidated
  * baseline (0_baseline_full_schema) generated from the schema itself.
  *
+ * Phase 11-E (2026-10-20): PaperCandidateOutcome added ADDITIVELY to both the
+ * schema and the consolidated baseline — the pinned list is now 17 tables.
+ *
  * This test proves, on every run, that a brand-new database provisioned with
- * `prisma migrate deploy` receives EXACTLY the 16 application tables defined
+ * `prisma migrate deploy` receives EXACTLY the application tables defined
  * by prisma/schema.prisma. The runtime DB (db/custom.db) is never touched.
  */
 import { describe, expect, test } from 'bun:test';
@@ -35,6 +38,7 @@ const APP_TABLES = [
   'ExecutionLog',
   'MarketCandle',
   'MarketLatestTick',
+  'PaperCandidateOutcome',
   'PaperSignalOutcome',
   'RiskCheck',
   'Signal',

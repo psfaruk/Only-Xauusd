@@ -42,7 +42,10 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { CHART_TIMEFRAMES, classifyChartFreshness, type ChartTimeframe } from '@/lib/dashboard/nav';
 import { trendBn, directionBn, fmtDhaka } from '@/lib/dashboard/i18n';
+import { mergeTickIntoCandles, type ChartCandlePoint } from '@/lib/dashboard/live-candle';
+import { TIMEFRAME_SECONDS } from '@/lib/market/types';
 import type { ChartDataResponse, MarketStatusResponse } from '@/lib/dashboard/types';
+import type { TickStreamTick } from '@/hooks/use-tick-stream';
 import { PriceLevelText } from './bits';
 import type { PriceDisplaySpec } from '@/lib/market/price-display';
 
@@ -55,6 +58,7 @@ export function ChartPanel({
   refreshKey,
   heightClass = 'h-[420px] lg:h-[560px]',
   showSummary = true,
+  liveTick = null,
 }: {
   symbol: string;
   priceSpec: PriceDisplaySpec;
@@ -63,6 +67,10 @@ export function ChartPanel({
   refreshKey: number;
   heightClass?: string;
   showSummary?: boolean;
+  /** Live broker tick from the read-only tick-stream relay — updates the
+   *  forming candle in real time between syncs (presentation-layer only,
+   *  never persisted/analysed; server truth replaces it on every refetch). */
+  liveTick?: TickStreamTick | null;
 }) {
   const [tf, setTf] = useState<ChartTimeframe>('M15');
   const [data, setData] = useState<ChartDataResponse | null>(null);
@@ -86,6 +94,9 @@ export function ChartPanel({
   });
   const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
   const priceLinesRef = useRef<unknown[]>([]);
+  /** Task 31-d: the tick-merged last candle for the OHLC legend (client-side
+   *  view of the forming bar; reset to server truth on every refetch). */
+  const [liveLanded, setLiveLanded] = useState<ChartCandlePoint | null>(null);
 
   const disconnected =
     marketStatus !== null &&
@@ -123,8 +134,35 @@ export function ChartPanel({
 
   // Fetch on timeframe / parent-refresh change.
   useEffect(() => {
+    setLiveLanded(null); // server truth replaces any tick-merged view
     void load(tf);
   }, [tf, refreshKey, load]);
+
+  // ---- Task 31-d: LIVE forming candle (tick-stream merge) ---------------------
+  // A genuine broker tick (same Exness feed) updates the forming bar in real
+  // time: close follows the tick, high/low extend, and a bar-boundary tick
+  // rolls a fresh forming candle. PURE presentation — never persisted, never
+  // analysed; the 30s refetch + 5-min sync remain the source of truth.
+  useEffect(() => {
+    const series = candleRef.current;
+    if (!series || !data || !liveTick || liveTick.symbol !== symbol) return;
+    const tfSec = TIMEFRAME_SECONDS[tf === 'M1' ? 'M1' : tf === 'M5' ? 'M5' : tf === 'M15' ? 'M15' : tf === 'H1' ? 'H1' : 'H4'];
+    const res = mergeTickIntoCandles(
+      data.candles as ChartCandlePoint[],
+      liveTick.mid,
+      tfSec,
+      Date.parse(liveTick.receivedAtUtc) || Date.now(),
+    );
+    if (!res.landed) return; // out-of-order/invalid — never fabricated
+    series.update({
+      time: res.landed.t as UTCTimestamp,
+      open: res.landed.o,
+      high: res.landed.h,
+      low: res.landed.l,
+      close: res.landed.c,
+    });
+    setLiveLanded(res.landed);
+  }, [liveTick, data, tf, symbol]);
 
   // ---- Chart lifecycle (create once) ----------------------------------------
   useEffect(() => {
@@ -306,7 +344,7 @@ export function ChartPanel({
   }, [showEma20, showEma50, showEma200, data]);
 
   const freshness = classifyChartFreshness(data?.meta);
-  const lastCandle = data?.candles.length ? data.candles[data.candles.length - 1] : null;
+  const lastCandle = liveLanded ?? (data?.candles.length ? data.candles[data.candles.length - 1] : null);
   const prevCandle = data && data.candles.length > 1 ? data.candles[data.candles.length - 2] : null;
   const changeVsPrev =
     lastCandle && prevCandle ? lastCandle.c - prevCandle.c : null;
@@ -394,9 +432,18 @@ export function ChartPanel({
         </div>
       </div>
 
-      {/* OHLC legend row (real last candle) */}
+      {/* OHLC legend row (real last candle; tick-merged when the live stream is flowing) */}
       {lastCandle && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-1.5 font-mono text-[11px] text-zinc-400" data-testid="chart-legend">
+          {liveLanded && (
+            <span className="flex items-center gap-1 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-400" title="টিক-স্ট্রিম থেকে রিয়েল-টাইম আপডেট (শুধু প্রেজেন্টেশন — সার্ভার ডেটাই সত্য)">
+              <span className="relative inline-flex h-1.5 w-1.5">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
+              </span>
+              লাইভ
+            </span>
+          )}
           <span className="text-zinc-500">{new Date(lastCandle.t * 1000).toISOString().slice(0, 16).replace('T', ' ')} UTC{lastCandle.forming ? ' · ফর্মিং' : ''}</span>
           <span>O <span className="text-zinc-200">{lastCandle.o.toFixed(priceSpec.verified && data?.digits ? data.digits : 2)}</span></span>
           <span>H <span className="text-zinc-200">{lastCandle.h.toFixed(priceSpec.verified && data?.digits ? data.digits : 2)}</span></span>

@@ -572,7 +572,13 @@ describe('rules snapshot — persistence (integration)', () => {
         createdAt: new Date(NOW()),
       },
     });
-    const latest = await getLatestSignalEvaluation(db, SYMBOL);
+    // Phase 11-E: getLatestSignalEvaluation DEFAULTS to the baseline strategy
+    // version — the 8.8.8 row must NOT surface through the default (baseline
+    // isolation). The any-strategy read (explicit null) is the opt-in that
+    // still returns it, proving the STORED snapshot is the truth.
+    const baselineScoped = await getLatestSignalEvaluation(db, SYMBOL);
+    expect(baselineScoped?.id ?? null).not.toBe(row.id);
+    const latest = await getLatestSignalEvaluation(db, SYMBOL, null);
     expect(latest?.id).toBe(row.id);
     expect(latest?.rulesSnapshot.status).toBe('present');
     if (latest?.rulesSnapshot.status !== 'present') return;

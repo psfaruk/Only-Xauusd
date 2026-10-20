@@ -16,6 +16,13 @@
  * gates inside) so live setups are discovered and paper-tracked autonomously
  * for the pre-registered forward paper protocol. Disable with
  * FORWARD_PAPER_TRACKING=0.
+ *
+ * Phase 11-E — the same loop now also advances the CANDIDATE forward-paper
+ * tracking (hybrid-multimodel-research/11.0.0-candidate.1, pre-registered
+ * protocol audit/phase11-candidate-forward-protocol.md). The candidate dual
+ * evaluation itself runs INSIDE runSignalEvaluation (error-isolated); this
+ * scheduler only advances its read-only paper rows. The same
+ * FORWARD_PAPER_TRACKING switch governs the whole research loop.
  */
 
 export async function register() {
@@ -125,6 +132,20 @@ export async function register() {
             void trackPaperSignals(db, { symbol }).catch(() => undefined);
           } catch {
             // paper tracking must never break the sync scheduler
+          }
+        }
+        // Phase 11-E: advance the CANDIDATE forward-paper tracking alongside
+        // the baseline tracker (same fire-and-forget, error-isolated, Node-only
+        // discipline). It reuses the FORWARD_PAPER_TRACKING switch — one
+        // switch governs the whole forward-paper research loop (baseline +
+        // candidate); no new env switch was added. Research-only: the
+        // candidate tracker can never place an order (no such code exists).
+        if (process.env.FORWARD_PAPER_TRACKING !== '0' && process.env.NEXT_RUNTIME === 'nodejs') {
+          try {
+            const { trackCandidatePaperSignals } = await import('@/lib/signal/candidate-paper');
+            void trackCandidatePaperSignals(db, { symbol }).catch(() => undefined);
+          } catch {
+            // candidate paper tracking must never break the sync scheduler
           }
         }
       }

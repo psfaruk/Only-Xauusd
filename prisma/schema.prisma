@@ -364,6 +364,67 @@ model PaperSignalOutcome {
 }
 
 // ============================================================================
+// PHASE 11-E (ACTIVE) — candidate-strategy forward paper tracking
+// ----------------------------------------------------------------------------
+// PaperCandidateOutcome: READ-ONLY forward paper tracking of CANDIDATE setup
+// evaluations (hybrid-multimodel-research/11.0.0-candidate.1) under the
+// PRE-REGISTERED protocol audit/phase11-candidate-forward-protocol.md.
+//
+// CANNOT-MIX GUARANTEE (protocol §4): this table is COMPLETELY SEPARATE from
+// PaperSignalOutcome (baseline 9.0.0) — the Phase 10.2 aggregation reads
+// PaperSignalOutcome only and can never see candidate rows. Candidate setup
+// identities use the candidate-setup-identity/1 namespace, so cross-collision
+// with the baseline setup-identity/1 is impossible by construction.
+//
+// Exactly ONE row per candidate setup identity EVER (unique setupFingerprint
+// — open/counted/resolved all block re-creation; P2002 suppressed as the
+// concurrent-race guard). Resolved rows are immutable. Research only: no
+// order, no execution, no lock change — the four execution locks stay LOCKED.
+// ============================================================================
+
+model PaperCandidateOutcome {
+  id                    String    @id @default(cuid())
+  candidateEvaluationId String    @unique
+  symbol                String
+  /// The winning candidate model that emitted the setup: A | B | C.
+  model                 String
+  /// Always hybrid-multimodel-research/11.0.0-candidate.1 (pinned row provenance).
+  candidateVersion      String
+  direction             String // BUY | SELL
+  signalCreatedAtUtc    DateTime
+  decisionCandleTimeUtc DateTime
+  setupKnownAtUtc       DateTime
+  expiryUtc             DateTime
+  datasetFingerprint    String?
+  inputFingerprint      String
+  setupFingerprint      String  @unique // candidate-setup-identity/1 — ONE paper row per candidate setup EVER. Non-null: a tracked candidate setup ALWAYS carries its identity (unidentifiable rows are never tracked — fail-closed).
+  sourceCandleRange     String // JSON: execution/h1/h4/m5 window ranges at signal time
+  entryReference        Float
+  stopLoss              Float
+  target                Float
+  invalidationLevel     Float
+  status                String    @default("open") // open | resolved
+  outcome               String? // stopped | targeted | invalidated | expired
+  resolvedAtUtc         DateTime?
+  resolutionBarTimeUtc  DateTime?
+  exitPrice             Float?
+  observations          Int       @default(0)
+  lastCheckedBarTimeUtc DateTime?
+  modeledCostsPrice     Float
+  grossPnlPrice         Float?
+  netPnlPrice           Float?
+  rMultiple             Float?
+  details               String? // JSON: collision flags, resolution rule, cost labels, notes
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([symbol, status])
+  @@index([symbol, outcome])
+  @@index([status])
+  @@index([candidateVersion])
+}
+
+// ============================================================================
 // PHASE 7 (planned) — deterministic risk gate
 // ============================================================================
 

@@ -33,5 +33,12 @@ export const signalHistoryQuerySchema = z
   .object({
     symbol: signalSymbolSchema.optional(),
     limit: z.coerce.number().int().min(1).max(100).default(20),
+    /**
+     * Phase 11-E (additive): which strategy's evaluations to list.
+     * 'baseline' (default) → hybrid-structure-retest/9.0.0 — the default
+     * surface stays baseline-scoped (protocol §4). 'candidate' →
+     * hybrid-multimodel-research/11.0.0-candidate.1, returned labeled.
+     */
+    strategy: z.enum(['baseline', 'candidate']).default('baseline'),
   })
   .strict();

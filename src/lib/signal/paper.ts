@@ -44,9 +44,9 @@
 
 import type { PrismaClient } from '@prisma/client';
 import { baselineCostModel, roundTripCost, type CostModel } from '@/lib/backtest/cost-model';
+import { SIGNAL_STRATEGY_VERSION, type SignalEvaluation, type SignalLevels, type SignalEvidence } from './types';
 import { buildStrategyRules } from './rules';
 import { setupFingerprintFromEvidence } from './setup-identity';
-import type { SignalEvaluation, SignalLevels, SignalEvidence } from './types';
 
 const M15_SEC = 900;
 
@@ -329,6 +329,11 @@ export async function trackPaperSignals(
   const rows = await db.signalEvaluation.findMany({
     where: {
       ...(opts.symbol ? { symbol: opts.symbol } : {}),
+      // Phase 11-E isolation (protocol §4): the BASELINE tracker is strictly
+      // baseline-scoped — candidate setup rows (hybrid-multimodel-research/
+      // 11.0.0-candidate.1) can NEVER enter PaperSignalOutcome. Candidate
+      // forward tracking lives in candidate-paper.ts / PaperCandidateOutcome.
+      strategyVersion: SIGNAL_STRATEGY_VERSION,
       outcome: { in: ['BUY_SETUP', 'SELL_SETUP'] },
       levels: { not: null },
     },

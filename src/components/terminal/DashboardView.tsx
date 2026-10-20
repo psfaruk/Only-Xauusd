@@ -15,6 +15,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { PriceLevelText } from './bits';
+import { CandidateSignalCard } from './CandidateSignalCard';
 import { SignalCard } from './SignalCard';
 import {
   fmtAge,
@@ -311,6 +312,14 @@ export function DashboardView({
         signalLatest={signalLatest}
         signalRunning={signalRunning}
         onRunSignal={onRunSignal}
+        priceSpec={priceSpec}
+        error={signalError}
+        loading={loading}
+      />
+      {/* Phase 11-E — the research candidate card sits directly UNDER the
+       * baseline card, clearly labeled গবেষণা and never merged into it. */}
+      <CandidateSignalCard
+        signalLatest={signalLatest}
         priceSpec={priceSpec}
         error={signalError}
         loading={loading}

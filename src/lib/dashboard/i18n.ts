@@ -91,6 +91,18 @@ export const bnErrorText: Record<string, string> = {
   BLOCKED: 'ডেটা-গেটে বন্ধ — অবিশ্বস্ত ইনপুটে সিদ্ধান্ত হয় না (fail-closed)।',
   FAILED: 'মূল্যায়ন ব্যর্থ — বিস্তারিত সিস্টেম লগে।',
   SIGNAL_ERROR: 'সিগন্যাল ইঞ্জিনে অপ্রত্যাশিত ত্রুটি।',
+  // Phase 11-E — candidate-only reason codes
+  // (hybrid-multimodel-research/11.0.0-candidate.1). Same honesty contract:
+  // WAIT-family stages are HEALTHY strategy outcomes, not errors; the
+  // NO_SETUP-family kills are the pre-registered safety gates.
+  MODEL_CONFLICT: 'মডেলগুলো (A/B/C) দিক নিয়ে একমত নয় — দ্বন্দ্বে সতর্ক অপেক্ষা (স্বাভাবিক WAIT)।',
+  PULLBACK_CONTEXT_NOT_ALIGNED: 'EMA50-পুলব্যাক মডেলের প্রেক্ষাপট (কাঠামো/HTF/EMA-দিক) সজোঁ নয় (স্বাভাবিক WAIT)।',
+  PULLBACK_NO_TOUCH: 'দাম এখনো EMA50-পুলব্যাক জোন স্পর্শ করেনি — অপেক্ষায় (স্বাভাবিক WAIT)।',
+  PULLBACK_TOO_DEEP: 'পুলব্যাক EMA50-এর অনুমোদিত গভীরতার চেয়ে বেশি নেমেছে — সেটআপ বাতিল (স্বাভাবিক NO_SETUP)।',
+  M5_CONFIRMATION_PENDING: 'M5 টাইমফ্রেমের নিশ্চিতকরণ এখনো আসেনি — অপেক্ষায় (স্বাভাবিক WAIT)।',
+  RANGE_NOT_DETECTED: 'সাম্প্রতিক উইন্ডোতে কোনো বৈধ রেঞ্জ শনাক্ত হয়নি (স্বাভাবিক NO_SETUP)।',
+  RANGE_SWEEP_PENDING: 'রেঞ্জ-সুইপ মডেল: সীমানা ভেদের (sweep) অপেক্ষায় (স্বাভাবিক WAIT)।',
+  RANGE_RECLAIM_PENDING: 'রেঞ্জ-সুইপ মডেল: সুইপের পর দাম সীমানার ভেতরে ফেরার অপেক্ষায় (স্বাভাবিক WAIT)।',
 };
 
 export function bnForCode(code: string): string {
@@ -268,3 +280,24 @@ export function levelBadgeClass(level: string): string {
       return 'border-zinc-700 bg-zinc-800/50 text-zinc-500';
   }
 }
+
+// ---------------------------------------------------------------------------
+// Phase 11-E — candidate renderings (research card, forward paper strip)
+// ---------------------------------------------------------------------------
+
+/** Winning-model badge text (shown only when a candidate setup fired). */
+export const candidateModelBn: Record<string, string> = {
+  A: 'মডেল A (কাঠামো-রিটেস্ট)',
+  B: 'মডেল B (EMA50-পুলব্যাক)',
+  C: 'মডেল C (রেঞ্জ-সুইপ)',
+};
+
+/** Pre-registered forward-paper verdict conclusions (Bengali labels). */
+export const paperConclusionBn: Record<string, string> = {
+  INCOMPLETE: 'অসম্পূর্ণ — নমুনা-সীমা এখনো পূরণ হয়নি',
+  INCOMPLETE_TIMEOUT: 'সময়সীমা শেষ, তবু নমুনা-সীমা পূরণ হয়নি',
+  NEGATIVE_AFTER_COSTS: 'ব্যয়-হিসাবের পরে নেতিবাচক ফল',
+  INCONCLUSIVE_CONCENTRATION: 'অনির্ণেয় — লাভ অল্প কয়েকটি ফলাফলে কেন্দ্রীভূত',
+  INCONCLUSIVE_DRAWDOWN: 'অনির্ণেয় — ড্রডাউন সীমা ছাড়িয়ে গেছে',
+  CONTINUE_FORWARD_RESEARCH: 'ফরোয়ার্ড গবেষণা চালিয়ে যাওয়ার যোগ্য',
+};

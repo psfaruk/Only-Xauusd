@@ -21,6 +21,7 @@ import { db } from '@/lib/db';
 import { config } from '@/lib/config';
 import { logEvent } from '@/lib/logger';
 import { quoteIntegrity } from '@/lib/market/integrity';
+import type { BridgeClient } from '@/lib/market/bridge-client';
 import { computeReadiness } from '@/lib/market/quality';
 import { defaultMarketSymbol } from '@/lib/market/service';
 import type { QuoteIntegrityReport } from '@/lib/market/integrity';
@@ -29,11 +30,31 @@ import { evaluateSignal, failedSignalEvaluation } from './core';
 import { buildStrategyRules } from './rules';
 import { loadSignalWindows, saveSignalEvaluation } from './persistence';
 import { trackPaperSignals } from './paper';
+import { evaluateCandidate } from './candidate/core';
+import { CANDIDATE_RULES, CANDIDATE_STRATEGY_VERSION, type CandidateModel } from './candidate/types';
+import {
+  loadCandidateM5Window,
+  saveCandidateEvaluation,
+  windowRangeSummary,
+} from './candidate-persistence';
+import { trackCandidatePaperSignals } from './candidate-paper';
 
 export interface RunSignalOptions {
   symbol?: string;
   /** Injectable clock (epoch ms) — deterministic tests. */
   now?: () => number;
+  /** Injectable bridge client (deterministic tests). Default: the app bridge. */
+  bridge?: BridgeClient;
+}
+
+/** Phase 11-E: additive summary of the CANDIDATE dual evaluation (research only). */
+export interface CandidateRunSummary {
+  runId: string | null;
+  outcome: SignalEvaluation['outcome'];
+  model: CandidateModel | null;
+  reasonCodes: string[];
+  setupFingerprint: string | null;
+  inputFingerprint: string;
 }
 
 export interface SignalRunOutcome {
@@ -42,6 +63,11 @@ export interface SignalRunOutcome {
   durationMs: number;
   evaluation: SignalEvaluation;
   quoteReport: QuoteIntegrityReport | null;
+  /** Phase 11-E: the candidate dual evaluation summary — present only when
+   *  the candidate step ran (baseline windows loaded + candidate switch on).
+   *  Absent ⇒ no candidate row was written for this run. Never affects the
+   *  baseline verdict, response codes, or any baseline consumer. */
+  candidate?: CandidateRunSummary | null;
 }
 
 /** Map integrity blockedReasons → signal reason codes (honest pass-through). */
@@ -113,9 +139,11 @@ export async function runSignalEvaluation(opts: RunSignalOptions = {}): Promise<
   };
 
   /** Phase 10: advance read-only paper tracking after every evaluation run.
-   *  Fire-and-forget, error-isolated — can never affect the verdict. */
+   *  Fire-and-forget, error-isolated — can never affect the verdict.
+   *  Phase 11-E: the candidate tracker advances alongside (same discipline). */
   const advancePaperTracking = () => {
     void trackPaperSignals(db, { symbol, now: nowMs }).catch(() => undefined);
+    void trackCandidatePaperSignals(db, { symbol, now: nowMs }).catch(() => undefined);
   };
 
   const blockedOutcome = async (
@@ -157,7 +185,7 @@ export async function runSignalEvaluation(opts: RunSignalOptions = {}): Promise<
 
   try {
     // ── Gate 2: live quote integrity (verified broker feed or nothing) ────
-    const quoteReport = await quoteIntegrity(symbol);
+    const quoteReport = await quoteIntegrity(symbol, opts.bridge ? { bridge: opts.bridge } : {});
     const minimalQuote: Record<string, unknown> = {
       symbol: quoteReport.symbol,
       freshness: quoteReport.freshness,
@@ -264,12 +292,110 @@ export async function runSignalEvaluation(opts: RunSignalOptions = {}): Promise<
       },
     }).catch(() => undefined);
 
+    // ── Phase 11-E: CANDIDATE dual evaluation (research-only) ────────────
+    // Runs when (and only when) the shared windows loaded successfully
+    // (baseline passed gates 1-5 — we are past all of them here). The SAME
+    // windows / mid / spread / nowUtcSec the baseline used are passed to
+    // evaluateCandidate (deterministic pairing); the candidate adds the M5
+    // confirmation window. EVERYTHING here is error-isolated: a candidate
+    // failure NEVER changes the baseline outcome, response codes, or paper
+    // tracking above. The FORWARD_PAPER_TRACKING switch is REUSED (no new
+    // switch): it governs the whole forward-paper research loop — baseline
+    // autonomous evaluation + candidate dual evaluation + both trackers.
+    let candidate: CandidateRunSummary | null = null;
+    if (process.env.FORWARD_PAPER_TRACKING !== '0') {
+      try {
+        const m5Load = await loadCandidateM5Window(db, symbol, nowUtcSec);
+        if (m5Load.demoRows) {
+          await logEvent({
+            level: 'warn',
+            category: 'candidate',
+            code: 'CANDIDATE_EVALUATION_SKIPPED',
+            message: `Candidate evaluation skipped for ${symbol}: demo-labelled rows in the M5 confirmation window (fail-closed — no candidate row written).`,
+            meta: { symbol, reason: 'M5_DEMO_ROWS' },
+          }).catch(() => undefined);
+        } else if (m5Load.windowGapsSuspicious > 0) {
+          await logEvent({
+            level: 'warn',
+            category: 'candidate',
+            code: 'CANDIDATE_EVALUATION_SKIPPED',
+            message: `Candidate evaluation skipped for ${symbol}: suspicious gaps in the M5 confirmation window (fail-closed — no candidate row written).`,
+            meta: { symbol, reason: 'M5_WINDOW_GAPS', gaps: m5Load.windowGapsSuspicious },
+          }).catch(() => undefined);
+        } else {
+          const candidateEvaluation = evaluateCandidate({
+            symbol,
+            digits: windows.digits,
+            execution: windows.execution,
+            h1: windows.h1,
+            h4: windows.h4,
+            m5: m5Load.m5,
+            referencePrice: mid,
+            spreadPrice: spread,
+            nowUtcSec,
+            rules,
+          });
+          const candidateSaved = await saveCandidateEvaluation(db, {
+            evaluation: candidateEvaluation,
+            quote: minimalQuote,
+            durationMs: Date.now() - startedMs,
+            startedAtUtc: startedAt,
+            rules,
+            digits: windows.digits,
+            windows: {
+              execution: windowRangeSummary(windows.execution),
+              h1: windowRangeSummary(windows.h1),
+              h4: windowRangeSummary(windows.h4),
+              m5: windowRangeSummary(m5Load.m5),
+            },
+          });
+          candidate = {
+            runId: candidateSaved.id,
+            outcome: candidateEvaluation.outcome,
+            model: candidateEvaluation.model,
+            reasonCodes: [...candidateEvaluation.reasonCodes],
+            setupFingerprint: candidateEvaluation.setupFingerprint,
+            inputFingerprint: candidateEvaluation.inputFingerprint,
+          };
+          await logEvent({
+            level: 'info',
+            category: 'candidate',
+            code: `CANDIDATE_${candidateEvaluation.outcome}`,
+            message: `Candidate ${symbol} → ${candidateEvaluation.outcome}${
+              candidateEvaluation.reasonCodes.length ? ` [${candidateEvaluation.reasonCodes.join(',')}]` : ''
+            }${candidateEvaluation.model ? ` model=${candidateEvaluation.model}` : ''} fp=${candidateEvaluation.inputFingerprint.slice(0, 12)}`,
+            meta: {
+              outcome: candidateEvaluation.outcome,
+              model: candidateEvaluation.model,
+              reasonCodes: candidateEvaluation.reasonCodes,
+              fingerprint: candidateEvaluation.inputFingerprint,
+              strategyVersion: CANDIDATE_STRATEGY_VERSION,
+              m5WindowBars: CANDIDATE_RULES.m5WindowBars,
+              executionLocked: true,
+            },
+          }).catch(() => undefined);
+        }
+      } catch (candErr) {
+        // Error-isolated by contract: log honestly, never touch the baseline.
+        await logEvent({
+          level: 'error',
+          category: 'candidate',
+          code: 'CANDIDATE_EVALUATION_FAILED',
+          message: `Candidate evaluation failed for ${symbol}: ${
+            candErr instanceof Error ? candErr.message.slice(0, 200) : 'unknown error'
+          } (baseline verdict unaffected).`,
+          meta: { symbol, strategyVersion: CANDIDATE_STRATEGY_VERSION },
+        }).catch(() => undefined);
+      }
+    }
+
     return {
       runId,
       outcome: evaluation.outcome,
       durationMs: Date.now() - startedMs,
       evaluation,
       quoteReport,
+      candidate,
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : 'unknown signal failure';

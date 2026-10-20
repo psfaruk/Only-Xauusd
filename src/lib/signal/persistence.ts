@@ -12,7 +12,7 @@ import type { PrismaClient } from '@prisma/client';
 import { TIMEFRAME_SECONDS, type Timeframe } from '@/lib/market/types';
 import { loadAnalysisInput } from '@/lib/analysis/persistence';
 import type { TfLoadedData } from '@/lib/analysis/types';
-import type { SignalEvaluation, SignalWindow, StrategyRules } from './types';
+import { SIGNAL_STRATEGY_VERSION, type SignalEvaluation, type SignalWindow, type StrategyRules } from './types';
 import { setupFingerprintFromEvidence } from './setup-identity';
 import {
   RULES_SNAPSHOT_VERSION,
@@ -229,24 +229,50 @@ function parseLatestRow(row: {
   };
 }
 
+/**
+ * Latest evaluation for a symbol (parsed, honest — absent stays absent).
+ *
+ * Phase 11-E isolation (protocol §4): DEFAULTS to the BASELINE strategy
+ * version — every existing consumer (signal/latest, the execution pipeline,
+ * the multi-agent review, the chat tools) stays baseline-scoped after the
+ * candidate dual evaluation went live, even when a candidate row is newer.
+ * Candidate reads go through getLatestCandidateEvaluation
+ * (candidate-persistence.ts); pass an explicit version — or null for
+ * any-strategy — only where that is genuinely intended.
+ */
 export async function getLatestSignalEvaluation(
   db: PrismaClient,
   symbol?: string,
+  strategyVersion: string | null = SIGNAL_STRATEGY_VERSION,
 ): Promise<LatestSignalEvaluation | null> {
+  const where = {
+    ...(symbol ? { symbol } : {}),
+    ...(strategyVersion ? { strategyVersion } : {}),
+  };
   const row = await db.signalEvaluation
-    .findFirst({ where: symbol ? { symbol } : undefined, orderBy: { createdAt: 'desc' } })
+    .findFirst({ where, orderBy: { createdAt: 'desc' } })
     .catch(() => null);
   return row ? parseLatestRow(row) : null;
 }
 
+/**
+ * Recent evaluations (bounded). Baseline-scoped by default — see the
+ * Phase 11-E isolation note on getLatestSignalEvaluation. The candidate
+ * history surface maps ?strategy=candidate explicitly at the API layer.
+ */
 export async function getSignalEvaluationHistory(
   db: PrismaClient,
   symbol?: string,
   limit = 20,
+  strategyVersion: string | null = SIGNAL_STRATEGY_VERSION,
 ): Promise<LatestSignalEvaluation[]> {
+  const where = {
+    ...(symbol ? { symbol } : {}),
+    ...(strategyVersion ? { strategyVersion } : {}),
+  };
   const rows = await db.signalEvaluation
     .findMany({
-      where: symbol ? { symbol } : undefined,
+      where,
       orderBy: { createdAt: 'desc' },
       take: Math.min(Math.max(1, limit), 100),
     })
@@ -257,7 +283,10 @@ export async function getSignalEvaluationHistory(
 /** Phase 10.3-D: all-time counts for a symbol — evaluations vs DISTINCT logical
  *  setups (null fingerprints = legacy/unidentifiable and are counted as
  *  evaluations but NEVER as distinct setups — no fabricated identities).
- *  Display-only: on DB error returns null (honest absence beats a fake 0). */
+ *  Display-only: on DB error returns null (honest absence beats a fake 0).
+ *  Phase 11-E: baseline-scoped by default (protocol §4.2 — the dashboard
+ *  three-count strip stays baseline; the candidate card reports its own
+ *  separately-labeled counts). */
 export interface SignalEvaluationCounts {
   totalEvaluations: number;
   distinctSetups: number;
@@ -266,16 +295,22 @@ export interface SignalEvaluationCounts {
 export async function getSignalEvaluationCounts(
   db: PrismaClient,
   symbol?: string,
+  strategyVersion: string | null = SIGNAL_STRATEGY_VERSION,
 ): Promise<SignalEvaluationCounts | null> {
   try {
+    const baseWhere = {
+      ...(symbol ? { symbol } : {}),
+      ...(strategyVersion ? { strategyVersion } : {}),
+    };
     const totalEvaluations = await db.signalEvaluation.count({
-      where: symbol ? { symbol } : undefined,
+      where: baseWhere,
     });
     const grouped = await db.signalEvaluation.groupBy({
       by: ['setupFingerprint'],
-      where: symbol
-        ? { symbol, setupFingerprint: { not: null } }
-        : { setupFingerprint: { not: null } },
+      where: {
+        ...baseWhere,
+        setupFingerprint: { not: null },
+      },
     });
     return { totalEvaluations, distinctSetups: grouped.length };
   } catch {
