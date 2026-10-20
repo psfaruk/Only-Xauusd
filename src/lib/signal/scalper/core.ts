@@ -31,6 +31,9 @@ import { TIMEFRAME_SECONDS } from '@/lib/market/types';
 import { toCanonicalPrice } from '@/lib/market/validation';
 import { atrSeries, emaSeries, rsiSeries } from '@/lib/analysis/indicators';
 import type { AnalysisCandle } from '@/lib/analysis/types';
+import { evaluateSmcConfluence } from '../ict/confluence';
+import { deriveSmcLevels } from '../ict/risk';
+import type { SmcConfluenceEvidence } from '../ict/types';
 import type { SignalReasonCode, SignalWindow } from '../types';
 import type {
   ScalperCoreInput,
@@ -85,7 +88,7 @@ export function computeScalperFingerprint(input: ScalperCoreInput): string {
 export function scalperSetupFingerprint(
   symbol: string,
   sourceTf: ScalperTf,
-  model: 'MOMENTUM' | 'REVERSAL',
+  model: 'MOMENTUM' | 'REVERSAL' | 'SMC_CONFLUENCE',
   direction: 'BUY' | 'SELL',
   decisionBarTimeUtcSec: number,
 ): string {
@@ -161,13 +164,21 @@ function gateTfWindow(
 interface TfEvaluation {
   judgement: ScalperTfJudgement;
   agree: 'BUY' | 'SELL' | null;
-  model: 'MOMENTUM' | 'REVERSAL' | null;
+  model: 'MOMENTUM' | 'REVERSAL' | 'SMC_CONFLUENCE' | null;
   atr: number | null;
   decisionClose: number | null;
   decisionCloseSec: number;
+  /** Phase 14 — the full SMC evidence of this TF (null when the layer is off). */
+  smcEvidence: SmcConfluenceEvidence | null;
 }
 
-function judgeTf(w: SignalWindow, tf: ScalperTf, rules: ScalperRules): TfEvaluation {
+function judgeTf(
+  w: SignalWindow,
+  tf: ScalperTf,
+  rules: ScalperRules,
+  digits: number | null,
+  nowUtcSec: number,
+): TfEvaluation {
   const candles = w.candles;
   const idx = candles.length - 1;
   const decision = candles[idx];
@@ -208,9 +219,46 @@ function judgeTf(w: SignalWindow, tf: ScalperTf, rules: ScalperRules): TfEvaluat
     atr: judgement.indicators.atr,
     decisionClose: decision.close,
     decisionCloseSec,
+    smcEvidence: null,
   };
 
-  // Warm-up guard: without all indicators the TF simply does not agree.
+  // ── SMC_CONFLUENCE model (Phase 14 — priority: quality first). The
+  //    ten-agent confluence runs on this TF's own candles; its summary chip
+  //    is attached to the judgement REGARDLESS of agreement (the UI renders
+  //    score/tier for every TF). Runs before the indicator warm-up guard —
+  //    the SMC agents carry their own fail-closed warm-up handling.
+  if (rules.smc.enabled) {
+    const smc = evaluateSmcConfluence({
+      candles,
+      tfSec: TIMEFRAME_SECONDS[tf],
+      digits,
+      nowUtcSec,
+      params: rules.smc.params,
+      indicatorPeriods: rules.smc.indicatorPeriods,
+      newsBlackoutEnabled: rules.smc.newsBlackoutEnabled,
+    });
+    evaluation.smcEvidence = smc.evidence;
+    judgement.smc = smc.summary;
+    if (smc.actionable && smc.evidence.direction !== null) {
+      judgement.agree = smc.evidence.direction;
+      judgement.model = 'SMC_CONFLUENCE';
+      judgement.stage = smc.evidence.direction === 'BUY' ? 'SMC_BUY' : 'SMC_SELL';
+      evaluation.agree = smc.evidence.direction;
+      evaluation.model = 'SMC_CONFLUENCE';
+    }
+    // News blackout gates EVERY model on this TF (market-condition veto, not
+    // an SMC-specific one) — the legacy momentum/reversal fallbacks stay
+    // silent inside the approximate high-impact envelopes too.
+    if (rules.smc.newsBlackoutEnabled && smc.evidence.session.newsBlackout) {
+      return evaluation;
+    }
+  }
+
+  // Warm-up guard: without all indicators the legacy models cannot judge.
+  // (The SMC model may already have agreed above — then we are done.)
+  if (evaluation.agree !== null) {
+    return evaluation; // SMC already agreed — legacy models stay silent.
+  }
   if (
     fastVal === null || slowVal === null || rsiVal === null || atrVal === null ||
     !Number.isFinite(fastVal) || !Number.isFinite(slowVal) || !Number.isFinite(rsiVal) ||
@@ -390,8 +438,17 @@ export function evaluateScalper(input: ScalperCoreInput): ScalperEvaluation {
   if (gateCodes.length > 0) return blocked(gateCodes);
 
   // ── Independent per-TF judgements (priority M15 → M5 → M1) ──────────────
-  const tfEvaluations = gates.map(([tf, win]) => judgeTf(win, tf, rules));
+  const tfEvaluations = gates.map(([tf, win]) => judgeTf(win, tf, rules, input.digits, input.nowUtcSec));
   const judgements = tfEvaluations.map((t) => t.judgement);
+
+  // Best-scoring SMC evidence across TFs — attached to every non-agree
+  // outcome for observability (the winning TF's evidence is attached on
+  // setups). Null when the SMC layer is disabled.
+  const bestSmcEvidence: SmcConfluenceEvidence | null =
+    tfEvaluations
+      .map((t) => t.smcEvidence)
+      .filter((e): e is SmcConfluenceEvidence => e !== null)
+      .sort((a, b) => b.totalScore - a.totalScore)[0] ?? null;
 
   const baseEvidence: ScalperEvidenceBlock = {
     sourceTimeframe: null,
@@ -427,6 +484,7 @@ export function evaluateScalper(input: ScalperCoreInput): ScalperEvaluation {
       h1Window: scalperWindowSummary(input.m5),
       h4Window: scalperWindowSummary(input.m1),
       scalper: baseEvidence,
+      smc: bestSmcEvidence ?? undefined,
     },
     inputFingerprint: fingerprint,
     datasetFingerprint: computeScalperDatasetFingerprint(input.symbol, input.m1),
@@ -448,6 +506,44 @@ export function evaluateScalper(input: ScalperCoreInput): ScalperEvaluation {
     ...baseEvidence,
     sourceTimeframe: sourceTf,
     model: winner.model,
+  };
+
+  // ── A timeframe agreed + gates passed → SETUP ─────────────────────────
+  const finishSetup = (levels: ScalperLevels): ScalperEvaluation => {
+    const expirySec = decisionCloseSec + rules.expirySec[sourceTf];
+    return {
+      engineVersion: SCALPER_ENGINE_VERSION,
+      strategyVersion: SCALPER_STRATEGY_VERSION,
+      symbol: input.symbol,
+      purpose,
+      outcome: direction === 'BUY' ? 'BUY_SETUP' : 'SELL_SETUP',
+      reasonCodes: [],
+      decisionCandleTimeUtc: winner.judgement.decisionCandleTimeUtc,
+      setupKnownAtUtc: iso(decisionCloseSec),
+      expiryUtc: iso(expirySec),
+      levels,
+      evidence: {
+        structureEvent: null,
+        anchorSwing: null,
+        indicators: {
+          ema50: null,
+          rsi14: null,
+          atr14: null,
+          adx14: null,
+        },
+        htfContext: { h1Trend: null, h4Trend: null },
+        decisionClose: winner.decisionClose,
+        retestBarTimeUtc: null,
+        executionWindow: scalperWindowSummary(input.m15),
+        h1Window: scalperWindowSummary(input.m5),
+        h4Window: scalperWindowSummary(input.m1),
+        scalper: evidenceAgree,
+        smc: winner.smcEvidence ?? bestSmcEvidence ?? undefined,
+      },
+      inputFingerprint: fingerprint,
+      datasetFingerprint: computeScalperDatasetFingerprint(input.symbol, sourceWindow),
+      generatedAtUtc: iso(input.nowUtcSec),
+    };
   };
 
   const wait = (codes: SignalReasonCode[], suppressed: 'BUY' | 'SELL' | null): ScalperEvaluation => ({
@@ -477,6 +573,7 @@ export function evaluateScalper(input: ScalperCoreInput): ScalperEvaluation {
       h1Window: scalperWindowSummary(input.m5),
       h4Window: scalperWindowSummary(input.m1),
       scalper: { ...evidenceAgree, suppressedDirection: suppressed },
+      smc: winner.smcEvidence ?? bestSmcEvidence ?? undefined,
     },
     inputFingerprint: fingerprint,
     datasetFingerprint: computeScalperDatasetFingerprint(input.symbol, sourceWindow),
@@ -494,6 +591,40 @@ export function evaluateScalper(input: ScalperCoreInput): ScalperEvaluation {
   if (atrVal === null || decisionClose === null) {
     return wait(['SCALPER_LEVELS_INVALID'], direction);
   }
+
+  // SMC_CONFLUENCE setups derive levels from the ICT reads: POI entry zone,
+  // SL beyond the sweep wick / zone extreme, TP at the opposing liquidity.
+  if (winner.model === 'SMC_CONFLUENCE' && winner.smcEvidence) {
+    const smcEv = winner.smcEvidence;
+    const poiZone = direction === 'BUY' ? smcEv.poi.nearestBullish : smcEv.poi.nearestBearish;
+    const sweep =
+      smcEv.liquidity.sweeps.find((s) =>
+        direction === 'BUY' ? s.direction === 'BULLISH' : s.direction === 'BEARISH',
+      ) ?? null;
+    const opposingLiquidity = direction === 'BUY' ? smcEv.liquidity.nearestBuySide : smcEv.liquidity.nearestSellSide;
+    const smcDerived = deriveSmcLevels({
+      direction,
+      poiZone,
+      sweep,
+      decisionClose,
+      atr: winner.atr,
+      referencePrice: input.referencePrice,
+      halfSpread: input.spreadPrice / 2,
+      digits: input.digits,
+      opposingLiquidity,
+      rules: {
+        slAtrBuffer: rules.smc.params.slAtrBuffer,
+        rewardRisk: rules.rewardRisk,
+        minStopPrice: rules.minStopPrice,
+        entryToleranceAtr: rules.smc.params.entryToleranceAtr,
+      },
+    });
+    if (!smcDerived.ok || !smcDerived.levels) {
+      return wait([smcDerived.code === 'OK' ? 'SMC_LEVELS_INVALID' : smcDerived.code], direction);
+    }
+    return finishSetup(smcDerived.levels);
+  }
+
   const derived = deriveScalperLevels(
     direction,
     decisionClose,
@@ -506,41 +637,7 @@ export function evaluateScalper(input: ScalperCoreInput): ScalperEvaluation {
   if (!derived.ok || !derived.levels) {
     return wait([derived.code ?? 'SCALPER_LEVELS_INVALID'], direction);
   }
-
-  // ── A timeframe agreed + gates passed → SETUP ───────────────────────────
-  const expirySec = decisionCloseSec + rules.expirySec[sourceTf];
-  return {
-    engineVersion: SCALPER_ENGINE_VERSION,
-    strategyVersion: SCALPER_STRATEGY_VERSION,
-    symbol: input.symbol,
-    purpose,
-    outcome: direction === 'BUY' ? 'BUY_SETUP' : 'SELL_SETUP',
-    reasonCodes: [],
-    decisionCandleTimeUtc: winner.judgement.decisionCandleTimeUtc,
-    setupKnownAtUtc: iso(decisionCloseSec),
-    expiryUtc: iso(expirySec),
-    levels: derived.levels,
-    evidence: {
-      structureEvent: null,
-      anchorSwing: null,
-      indicators: {
-        ema50: null,
-        rsi14: null,
-        atr14: null,
-        adx14: null,
-      },
-      htfContext: { h1Trend: null, h4Trend: null },
-      decisionClose: winner.decisionClose,
-      retestBarTimeUtc: null,
-      executionWindow: scalperWindowSummary(input.m15),
-      h1Window: scalperWindowSummary(input.m5),
-      h4Window: scalperWindowSummary(input.m1),
-      scalper: evidenceAgree,
-    },
-    inputFingerprint: fingerprint,
-    datasetFingerprint: computeScalperDatasetFingerprint(input.symbol, sourceWindow),
-    generatedAtUtc: iso(input.nowUtcSec),
-  };
+  return finishSetup(derived.levels);
 }
 
 function scalperWindowSummary(w: SignalWindow): { fromUtc: string; toUtc: string; bars: number } {

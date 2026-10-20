@@ -218,7 +218,17 @@ function parseLatestRow(row: {
     setupKnownAtUtc: row.setupKnownAtUtc?.toISOString() ?? null,
     expiryUtc: row.expiryUtc?.toISOString() ?? null,
     levels: row.levels ? safeParse<SignalEvaluation['levels']>(row.levels, null) : null,
-    evidence: safeParse<SignalEvaluation['evidence']>(row.evidence, null),
+    // Honest evidence: an EMPTY object (written by legacy/rolled-back rows
+    // whose evaluation was BLOCKED before any evidence existed) is not
+    // evidence — normalize it to null so the views' `evidence &&` guards
+    // work as designed and never crash on `evidence.indicators`.
+    evidence: (() => {
+      const parsed = safeParse<SignalEvaluation['evidence']>(row.evidence, null);
+      if (parsed && typeof parsed === 'object' && Object.keys(parsed).length === 0) {
+        return null;
+      }
+      return parsed;
+    })(),
     inputFingerprint: row.inputFingerprint,
     datasetFingerprint: row.datasetFingerprint,
     setupFingerprint: row.setupFingerprint ?? null,

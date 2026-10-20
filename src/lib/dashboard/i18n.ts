@@ -115,6 +115,21 @@ export const bnErrorText: Record<string, string> = {
   INSUFFICIENT_M1_HISTORY: 'M1 ইতিহাস অপর্যাপ্ত — ইন্ডিকেটর ওয়ার্ম-আপ সম্পূর্ণ নয়।',
   INSUFFICIENT_M5_HISTORY: 'M5 ইতিহাস অপর্যাপ্ত — ইন্ডিকেটর ওয়ার্ম-আপ সম্পূর্ণ নয়।',
   INSUFFICIENT_M15_HISTORY: 'M15 ইতিহাস অপর্যাপ্ত — ইন্ডিকেটর ওয়ার্ম-আপ সম্পূর্ণ নয়।',
+  // Phase 14 — ICT/SMC confluence codes (ten-agent engine). Same honesty
+  // contract: vetoes and tier gates are HEALTHY safety outcomes.
+  SMC_NO_CONFLUENCE: 'SMC কনফ্লুয়েন্স স্কোর প্রয়োজনীয় স্তরে পৌঁছায়নি (স্বাভাবিক NO_SETUP)।',
+  SMC_BELOW_TIER: 'স্কোর নির্গমন-টিয়ারের নিচে — উচ্চ-মানের সেটআপের অপেক্ষায় (স্বাভাবিক NO_SETUP)।',
+  SMC_NEWS_BLACKOUT: 'উচ্চ-প্রভাব নিউজ উইন্ডোর ভেতরে — স্ক্যাল্পিং বন্ধ (প্রায়-নির্ভুল খাম অনুযায়ী ভিটো)।',
+  SMC_NEUTRAL_MARGIN: 'BUY/SELL স্কোরের পার্থক্য প্রয়োজনীয় মার্জিনের কম — দিক অনির্ণেয়।',
+  SMC_LEVELS_INVALID: 'SMC লেভেল (এন্ট্রি/SL/TP) গণনা বৈধ হয়নি — সেটআপ বাদ (সুরক্ষা)।',
+  SMC_SL_TOO_TIGHT: 'SMC SL-দূরত্ব খুব চাপা — অবাণিজ্যিক সেটআপ বাদ।',
+  SMC_TP_TOO_CLOSE: 'বিপরীত লিকুইডিটি ম্যাগনেট ১R-এর কাছে — অনুপাত অবাণিজ্যিক (সেটআপ বাদ)।',
+  SMC_NO_POI: 'কোনো সক্রিয় POI জোন (অর্ডার ব্লক/FVG) নেই — প্রাতিষ্ঠানিক এন্ট্রি-প্রসঙ্গ অনুপস্থিত।',
+  SMC_NO_SWEEP: 'সাম্প্রতিক লিকুইডিটি সুইপ (স্টপ-হান্ট) নেই — স্মার্ট-মানি ফুটপ্রিন্ট অনুপস্থিত।',
+  SMC_PRICE_BEYOND_POI: 'দাম POI জোনের সহনশীলতার বাইরে চলে গেছে — তাড়া করা বিপজ্জনক (ভিটো)।',
+  SMC_POI_VIOLATED: 'POI জোন ভেঙে গেছে — যে জোনের ভিত্তিতে সেটআপ, তা অবৈধ (ভিটো)।',
+  SMC_SR_WALL: '০.৮×ATR-এর মধ্যে বিপরীত কি-লেভেল দেয়াল — পথ রুদ্ধ (ভিটো)।',
+  SMC_MOMENTUM_OPPOSED: 'মোমেন্টাম দৃঢ়ভাবে বিপরীত দিকে — বিরুদ্ধে ঢোকা বিপজ্জনক (ভিটো)।',
 };
 
 export function bnForCode(code: string): string {
@@ -320,6 +335,8 @@ export const paperConclusionBn: Record<string, string> = {
 
 /** Per-TF judgement stage → Bengali label (shown as three TF chips). */
 export const scalperStageBn: Record<string, string> = {
+  SMC_BUY: 'SMC কনফ্লুয়েন্স BUY',
+  SMC_SELL: 'SMC কনফ্লুয়েন্স SELL',
   MOMENTUM_BUY: 'মোমেন্টাম BUY',
   MOMENTUM_SELL: 'মোমেন্টাম SELL',
   REVERSAL_BUY: 'রিভার্সাল BUY',
@@ -328,8 +345,38 @@ export const scalperStageBn: Record<string, string> = {
 };
 
 export const scalperModelBn: Record<string, string> = {
+  SMC_CONFLUENCE: 'SMC/ICT কনফ্লুয়েন্স (১০-এজেন্ট ইঞ্জিন)',
   MOMENTUM: 'মোমেন্টাম (EMA9/21 + RSI ব্যান্ড)',
   REVERSAL: 'রিভার্সাল (RSI চরম + ফেরা)',
+};
+
+/** SMC agent ids → Bengali labels (the eight-agent confluence grid). */
+export const smcAgentBn: Record<string, string> = {
+  STRUCTURE: 'কাঠামো (BOS/CHoCH)',
+  LIQUIDITY: 'লিকুইডিটি (সুইপ)',
+  POI: 'POI জোন (OB/FVG)',
+  KEY_LEVELS: 'কি-লেভেল (S/R)',
+  PRICE_ACTION: 'প্রাইস অ্যাকশন',
+  MOMENTUM: 'মোমেন্টাম',
+  SESSION: 'সেশন/কিলজোন',
+  AMD: 'AMD চক্র',
+};
+
+/** SMC tier → Bengali label. */
+export const smcTierBn: Record<string, string> = {
+  A: 'টিয়ার A — নিশ্চিত সেটআপ',
+  B: 'টিয়ার B — দৃঢ় সেটআপ',
+  C: 'টিয়ার C — সীমান্ত সেটআপ',
+};
+
+/** SMC veto → Bengali label. */
+export const smcVetoBn: Record<string, string> = {
+  NEWS_BLACKOUT: 'নিউজ ব্ল্যাকআউট',
+  SR_WALL: 'কি-লেভেল দেয়াল',
+  PRICE_BEYOND_POI: 'POI-এর বাইরে দাম',
+  POI_VIOLATED: 'POI ভাঙা',
+  MOMENTUM_OPPOSED: 'বিপরীত মোমেন্টাম',
+  SPREAD_WIDE: 'চওড়া স্প্রেড',
 };
 
 export const scalperTfLabelBn: Record<string, string> = {

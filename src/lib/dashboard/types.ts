@@ -381,11 +381,73 @@ export interface SignalHistoryResponse {
 // /api/signal/scalper — Phase 12 live scalper strategy (M1/M5/M15 OR-logic)
 // ---------------------------------------------------------------------------
 
+export interface SmcTfSummaryView {
+  score: number;
+  tier: 'A' | 'B' | 'C' | null;
+  direction: 'BUY' | 'SELL' | null;
+  topReasons: string[];
+}
+
+export interface SmcAgentVoteView {
+  agent: string;
+  vote: 'BUY' | 'SELL' | 'NEUTRAL';
+  weight: number;
+  score: number;
+  reasonEn: string;
+}
+
+/** Phase 14 — the ten-agent ICT/SMC confluence evidence (additive view block). */
+export interface SmcConfluenceView {
+  direction: 'BUY' | 'SELL' | null;
+  totalScore: number;
+  tier: 'A' | 'B' | 'C' | null;
+  votes: SmcAgentVoteView[];
+  vetoes: string[];
+  structure: {
+    trend: string;
+    lastEvent: { type: string; direction: string; levelText: string; barsSince: number | null } | null;
+    zone: string | null;
+  };
+  liquidity: {
+    sweeps: Array<{ direction: string; origin: string; levelText: string; wickBeyond: number; barsAgo: number }>;
+    nearestBuySide: number | null;
+    nearestSellSide: number | null;
+  };
+  poi: {
+    zones: Array<{ kind: string; topText: string; bottomText: string; fresh: boolean; timesTested: number }>;
+    nearestBullish: { kind: string; topText: string; bottomText: string; fresh: boolean } | null;
+    nearestBearish: { kind: string; topText: string; bottomText: string; fresh: boolean } | null;
+  };
+  keyLevels: {
+    nearestAbove: { kind: string; levelText: string; labelBn: string } | null;
+    nearestBelow: { kind: string; levelText: string; labelBn: string } | null;
+  };
+  priceAction: {
+    decisionPattern: { kind: string; strength: number } | null;
+  };
+  momentum: {
+    score: number;
+    emaAligned: string | null;
+    rsi: number | null;
+    atr: number | null;
+  };
+  session: {
+    active: string;
+    killzone: string | null;
+    newsBlackout: boolean;
+  };
+  amd: {
+    phase: string;
+    signature: string | null;
+    signatureDirection: string | null;
+  };
+}
+
 export interface ScalperTfJudgementView {
   timeframe: 'M15' | 'M5' | 'M1';
   agree: 'BUY' | 'SELL' | null;
-  model: 'MOMENTUM' | 'REVERSAL' | null;
-  stage: 'MOMENTUM_BUY' | 'MOMENTUM_SELL' | 'REVERSAL_BUY' | 'REVERSAL_SELL' | 'NO_AGREE';
+  model: 'MOMENTUM' | 'REVERSAL' | 'SMC_CONFLUENCE' | null;
+  stage: 'SMC_BUY' | 'SMC_SELL' | 'MOMENTUM_BUY' | 'MOMENTUM_SELL' | 'REVERSAL_BUY' | 'REVERSAL_SELL' | 'NO_AGREE';
   decisionCandleTimeUtc: string;
   indicators: {
     emaFast: number | null;
@@ -394,15 +456,19 @@ export interface ScalperTfJudgementView {
     atr: number | null;
     close: number | null;
   };
+  /** Phase 14 — this TF's SMC confluence chip (present when the layer ran). */
+  smc?: SmcTfSummaryView;
 }
 
 export interface ScalperEvidenceView extends SignalEvidenceView {
   scalper?: {
     sourceTimeframe: 'M15' | 'M5' | 'M1' | null;
-    model: 'MOMENTUM' | 'REVERSAL' | null;
+    model: 'MOMENTUM' | 'REVERSAL' | 'SMC_CONFLUENCE' | null;
     suppressedDirection: 'BUY' | 'SELL' | null;
     tfJudgements: ScalperTfJudgementView[];
   };
+  /** Phase 14 — the full ten-agent ICT/SMC breakdown of the source TF. */
+  smc?: SmcConfluenceView;
 }
 
 export interface ScalperEvaluationView {
@@ -434,7 +500,7 @@ export interface ScalperRecentSetupView {
   expiryUtc: string | null;
   levels: SignalLevelsView | null;
   sourceTimeframe: 'M15' | 'M5' | 'M1' | null;
-  model: 'MOMENTUM' | 'REVERSAL' | null;
+  model: 'MOMENTUM' | 'REVERSAL' | 'SMC_CONFLUENCE' | null;
 }
 
 export interface ScalperLatestResponse {

@@ -23,7 +23,8 @@ export type AuditCategory =
   | 'approval'
   | 'execution'
   | 'bridge'
-  | 'scalper';
+  | 'scalper'
+  | 'smc-narrative';
 
 export interface LogEventInput {
   level: LogLevel;

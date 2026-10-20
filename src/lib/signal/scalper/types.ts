@@ -19,9 +19,10 @@
  */
 
 import type { Timeframe } from '@/lib/market/types';
+import type { SmcAgentParams, SmcTfSummary } from '../ict/types';
 import type { SignalEvaluation, SignalLevels, SignalReasonCode, SignalWindow } from '../types';
 
-export const SCALPER_ENGINE_VERSION = '12.0.0';
+export const SCALPER_ENGINE_VERSION = '13.0.0';
 export const SCALPER_STRATEGY_ID = 'scalper-m1-m5-m15-or';
 export const SCALPER_STRATEGY_VERSION = `${SCALPER_STRATEGY_ID}/${SCALPER_ENGINE_VERSION}`;
 
@@ -40,6 +41,23 @@ export type ScalperReasonCode =
   | 'INSUFFICIENT_M1_HISTORY'
   | 'INSUFFICIENT_M5_HISTORY'
   | 'INSUFFICIENT_M15_HISTORY';
+
+/** Phase 14 — the ICT/SMC ten-agent confluence layer (SMC_CONFLUENCE model). */
+export interface ScalperSmcRules {
+  /** Master switch — when off the legacy models judge alone. */
+  enabled: boolean;
+  /** News-blackout veto master switch. */
+  newsBlackoutEnabled: boolean;
+  /** All agent parameters (locked, fingerprinted with every evaluation). */
+  params: SmcAgentParams;
+  /** Indicator periods shared with the agents (EMA/RSI/ATR). */
+  indicatorPeriods: {
+    emaFastPeriod: number;
+    emaSlowPeriod: number;
+    rsiPeriod: number;
+    atrPeriod: number;
+  };
+}
 
 /** Documented, configurable scalper rules (persisted with every evaluation). */
 export interface ScalperRules {
@@ -74,6 +92,8 @@ export interface ScalperRules {
   cooldownSec: number;
   /** Setup expiry per source timeframe, in seconds after the decision close. */
   expirySec: Record<ScalperTf, number>;
+  /** Phase 14 — the ICT/SMC confluence layer (SMC_CONFLUENCE model). */
+  smc: ScalperSmcRules;
 }
 
 /** One timeframe's independent judgement (persisted in the evidence block). */
@@ -82,9 +102,9 @@ export interface ScalperTfJudgement {
   /** Agreeing direction, or null when this TF does not agree. */
   agree: 'BUY' | 'SELL' | null;
   /** Which model produced the agreement (null when no agreement). */
-  model: 'MOMENTUM' | 'REVERSAL' | null;
+  model: 'MOMENTUM' | 'REVERSAL' | 'SMC_CONFLUENCE' | null;
   /** Per-TF honest stage code (always present — UI renders all three TFs). */
-  stage: 'MOMENTUM_BUY' | 'MOMENTUM_SELL' | 'REVERSAL_BUY' | 'REVERSAL_SELL' | 'NO_AGREE';
+  stage: 'SMC_BUY' | 'SMC_SELL' | 'MOMENTUM_BUY' | 'MOMENTUM_SELL' | 'REVERSAL_BUY' | 'REVERSAL_SELL' | 'NO_AGREE';
   decisionCandleTimeUtc: string;
   indicators: {
     emaFast: number | null;
@@ -93,6 +113,9 @@ export interface ScalperTfJudgement {
     atr: number | null;
     close: number | null;
   };
+  /** Phase 14 — this TF's SMC confluence chip (always present when the SMC
+   *  layer is enabled, agree or not — the UI renders score/tier per TF). */
+  smc?: SmcTfSummary;
 }
 
 /** Pure input for the scalper evaluation core. */
@@ -121,7 +144,7 @@ export interface ScalperEvidenceBlock {
   /** The timeframe whose agreement produced the setup (null when suppressed
    *  or when no TF agreed). */
   sourceTimeframe: ScalperTf | null;
-  model: 'MOMENTUM' | 'REVERSAL' | null;
+  model: 'MOMENTUM' | 'REVERSAL' | 'SMC_CONFLUENCE' | null;
   /** Suppressed direction when cooldown/dedup vetoed an agreeing setup. */
   suppressedDirection: 'BUY' | 'SELL' | null;
   /** All three independent judgements, priority order (M15 → M5 → M1). */

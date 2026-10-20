@@ -55,3 +55,63 @@ curl -s localhost:3000/api/health | python3 -c "import json,sys; h=json.load(sys
 ```
 
 Expected in production: `True 11 Phase 4 — Read-Only Research` (phase number = your `TRADING_PHASE`, label states the mode truthfully — it is a lock value, not roadmap progress).
+
+---
+
+## Phase 14 — ICT/SMC Ten-Agent Confluence Engine (Task 34 series)
+
+The scalper strategy (`scalper-m1-m5-m15-or/13.0.0`) now leads with the
+**SMC_CONFLUENCE model**: ten deterministic specialist agents fused by a
+weighted Confluence Master. The legacy EMA/RSI momentum + reversal models
+remain as honest fallbacks so the 5–7 signals/hour cadence survives quiet
+confluence periods.
+
+### Agents (all pure, no look-ahead, closed candles only)
+
+| # | Agent | Module | Weight |
+|---|---|---|---|
+| A1 | Structure (BOS/CHoCH, dealing range, premium/discount) | `src/lib/signal/ict/agents/structure.ts` | 15 |
+| A2 | Liquidity (EQH/EQL pools, sweeps/stop-hunts) | `agents/liquidity.ts` | 20 |
+| A3 | POI (order blocks, FVG, breakers, mitigation) | `agents/poi.ts` | 20 |
+| A4 | Key levels (S/R, supply/demand, PDH/PDL, sessions, round) | `agents/levels.ts` | 10 |
+| A5 | Price action (engulfing, pins, displacement, rejection) | `agents/price-action.ts` | 15 |
+| A6 | Momentum (EMA/RSI/ATR regime score) | `agents/momentum.ts` | 10 |
+| A7 | Session/News (killzones + approximate blackout envelopes) | `ict/sessions.ts` | 5 |
+| A8 | AMD (accumulation→manipulation→distribution) | `agents/amd.ts` | 5 |
+| A9 | Risk levels (POI entry, sweep-anchored SL, liquidity TP) | `ict/risk.ts` | — |
+| A10 | Confluence Master (weights → tiers → vetoes) | `ict/confluence.ts` | — |
+| A11 | GLM Bengali narrative (best-effort, never blocks) | `ict/narrative.ts` | — |
+
+Tiers: **A ≥ 75** (sure signal) · **B ≥ 55** (default emission bar) · C ≥ 40.
+Hard vetoes: NEWS_BLACKOUT · SR_WALL (<0.8×ATR opposing level) ·
+MOMENTUM_OPPOSED · PRICE_BEYOND_POI · POI_VIOLATED. News blackout gates
+EVERY model (legacy fallbacks included). Direction needs a ≥10-point
+BUY-vs-SELL margin.
+
+### Environment switches (all clamped, baked into the rules fingerprint)
+
+```
+SMC_ENABLED=1                  # master switch (fallback models judge when off)
+SMC_NEWS_BLACKOUT=1            # blackout veto master switch
+SMC_MIN_SCORE=55               # emission threshold (tier B)
+SMC_SWING_LEFT=3  SMC_SWING_RIGHT=3
+SMC_SWEEP_LOOKBACK=30  SMC_MAX_BARS_SINCE_SWEEP=8
+SMC_OB_MIN_DISPLACEMENT_ATR=1.0  SMC_FVG_MIN_GAP_ATR=0.2
+SMC_ENTRY_TOLERANCE_ATR=0.35  SMC_SL_ATR_BUFFER=0.35
+SMC_DISPLACEMENT_ATR=1.0  SMC_AMD_LOOKBACK=40  SMC_AMD_MIN_RANGE_ATR=2.0
+SMC_ROUND_STEP=5  SMC_KEY_LEVEL_TOL_ATR=0.3
+SMC_LONDON_KZ_FROM_MIN=420 SMC_LONDON_KZ_TO_MIN=600   # 07:00–10:00 UTC
+SMC_NY_KZ_FROM_MIN=720     SMC_NY_KZ_TO_MIN=900       # 12:00–15:00 UTC
+```
+
+The news blackout envelopes are APPROXIMATE scheduled windows (UTC):
+12:25–13:45 (US data cluster) and 14:55–16:15 (US conference cluster),
+±5 min buffer — widened to cover both DST variants, no live calendar feed
+is claimed. Weekend honesty: Saturday/Sunday-early → OFF_HOURS, no veto.
+
+### Verification
+
+`bun test tests/ict/` — 119 tests: sessions 17, structure 12, liquidity 17,
+poi 21, levels 22, price-action 14, momentum 14, amd 14, confluence 16
+(probe-verified golden-path fixture: EQL sweep → displacement BOS → FVG
+retrace → rejection-wick decision in the London killzone → BUY 78 tier A).

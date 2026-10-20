@@ -35,6 +35,7 @@ import {
   saveScalperEvaluation,
 } from './scalper/persistence';
 import { SCALPER_ENGINE_VERSION, SCALPER_STRATEGY_VERSION, type ScalperEvaluation } from './scalper/types';
+import { narrateEmittedSetupInBackground } from './ict/narrative';
 
 export interface RunScalperOptions {
   symbol?: string;
@@ -312,6 +313,29 @@ export async function runScalperEvaluation(opts: RunScalperOptions = {}): Promis
         fingerprint: evaluation.inputFingerprint,
       },
     }).catch(() => undefined);
+
+    // ── A11 SMC narrative hook (Phase 14) — best-effort, never blocking:
+    //    emitted SMC_CONFLUENCE setups (tier A/B) get a Bengali educational
+    //    narrative persisted in the audit trail. Model failures degrade
+    //    honestly and never affect the signal pipeline.
+    const smcEvidence = evaluation.evidence?.smc ?? null;
+    const smcTier = smcEvidence?.tier ?? null;
+    const sourceTf = evaluation.evidence?.scalper?.sourceTimeframe ?? null;
+    if (
+      (evaluation.outcome === 'BUY_SETUP' || evaluation.outcome === 'SELL_SETUP') &&
+      smcEvidence &&
+      sourceTf !== null &&
+      (smcTier === 'A' || smcTier === 'B')
+    ) {
+      const outcome = evaluation.outcome;
+      void narrateEmittedSetupInBackground({
+        symbol,
+        sourceTimeframe: sourceTf,
+        outcome,
+        levels: evaluation.levels,
+        smc: smcEvidence,
+      }).catch(() => undefined);
+    }
 
     // ── Auto-execution hook (setup survived + execution armed) ────────────
     let execution: ScalperRunOutcome['execution'] = null;
