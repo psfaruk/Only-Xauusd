@@ -1,33 +1,30 @@
 /**
- * XAUUSD AI Trading Agent — Server Instrumentation (Phase 3)
+ * XAUUSD AI Trading Agent — Server Instrumentation (Phase 3 → Phase 12)
  * ----------------------------------------------------------------------------
  * Next.js runs register() exactly once when the server process starts.
- * Used ONLY for the optional scheduled market-data sync:
+ * The scheduler owns the autonomous market-data + evaluation loop:
  *
  *   MARKET_SYNC_INTERVAL_MS > 0  AND  MT5_BRIDGE_URL set  →  interval sync
  *   otherwise (default)          →  scheduler stays completely off.
  *
- * The scheduler calls the same read-only ingestion service as the manual
- * trigger — it cannot place, modify or close orders (no such code exists).
+ * Phase 12 (Task 32): with MARKET_SYNC_INTERVAL_MS=60000 the loop becomes a
+ * 1-MINUTE cadence so the SCALPER strategy (M1/M5/M15 OR-logic) sees every
+ * fresh M1 close:
+ *
+ *   every tick   → sync M1+M5+M15 → scalper evaluation → (setup + auto-armed
+ *                  → risk check → single-attempt order, all inside the
+ *                  scalper service's execution hook)
+ *   every 5th    → sync also H1+H4 → baseline signal evaluation (+ candidate
+ *                  dual evaluation) → paper trackers → baseline execution
+ *                  hook (approval/auto, same discipline as the scalper)
+ *
+ * The multi-agent GLM review still runs only on ACTIONABLE baseline setups.
  * Overlap is impossible: runSync refuses concurrent runs (SYNC_IN_PROGRESS).
- *
- * Phase 10.2 — after every successful scheduled sync the scheduler also runs
- * the deterministic signal evaluation (READ-ONLY research signal; fail-closed
- * gates inside) so live setups are discovered and paper-tracked autonomously
- * for the pre-registered forward paper protocol. Disable with
- * FORWARD_PAPER_TRACKING=0.
- *
- * Phase 11-E — the same loop now also advances the CANDIDATE forward-paper
- * tracking (hybrid-multimodel-research/11.0.0-candidate.1, pre-registered
- * protocol audit/phase11-candidate-forward-protocol.md). The candidate dual
- * evaluation itself runs INSIDE runSignalEvaluation (error-isolated); this
- * scheduler only advances its read-only paper rows. The same
- * FORWARD_PAPER_TRACKING switch governs the whole research loop.
  */
 
 export async function register() {
   // Avoid importing app config inside the Edge/instrumentation bootstrap —
-  // read the two env switches directly and cheaply.
+  // read the env switches directly and cheaply.
   const intervalMs = Number(process.env.MARKET_SYNC_INTERVAL_MS ?? '0');
   const bridgeUrl = (process.env.MT5_BRIDGE_URL ?? '').trim();
 
@@ -42,33 +39,69 @@ export async function register() {
   const { db } = await import('@/lib/db');
 
   const symbol = (process.env.MARKET_SYMBOLS ?? 'XAUUSDm').split(',')[0]?.trim() || 'XAUUSDm';
-  const timeframes = (process.env.MARKET_TIMEFRAMES ?? 'M1,M5,M15,H1,H4')
+  const allTimeframes = (process.env.MARKET_TIMEFRAMES ?? 'M1,M5,M15,H1,H4')
     .split(',')
     .map((t) => t.trim())
-    .filter((t) => ['M1', 'M5', 'M15', 'H1', 'H4'].includes(t));
+    .filter((t) => ['M1', 'M5', 'M15', 'H1', 'H4'].includes(t)) as Array<'M1' | 'M5' | 'M15' | 'H1' | 'H4'>;
+  const fastTimeframes = allTimeframes.filter((t) => t === 'M1' || t === 'M5' || t === 'M15');
+  const slowTimeframes = allTimeframes.filter((t) => t === 'H1' || t === 'H4');
+  /** The baseline/candidate research loop keeps its historical 5-minute
+   *  cadence: N fast ticks between baseline evaluations. */
+  const baselineEveryNTicks = Math.max(1, Math.round(300_000 / minInterval));
+  const scalperEnabled = process.env.SCALPER_ENABLED !== '0';
 
-  console.log(`[instrumentation] market sync scheduler: ON — every ${Math.round(minInterval / 1000)}s for ${symbol} [${timeframes.join('/')}]`);
+  console.log(
+    `[instrumentation] market sync scheduler: ON — every ${Math.round(minInterval / 1000)}s for ${symbol} [fast: ${fastTimeframes.join('/') || 'none'} · slow: ${slowTimeframes.join('/') || 'none'} every ${baselineEveryNTicks}]${scalperEnabled ? ' · scalper loop ON' : ' · scalper loop OFF'}`,
+  );
+
+  let tickCount = 0;
 
   const tick = async () => {
+    tickCount += 1;
+    const isBaselineTick = tickCount % baselineEveryNTicks === 0 || tickCount === 1;
+    const timeframes = isBaselineTick ? allTimeframes : fastTimeframes;
     try {
       const outcome = await runSync(
         { bridge: bridgeClient, db },
-        { mode: 'scheduled', symbol, timeframes: timeframes as Array<'M1' | 'M5' | 'M15' | 'H1' | 'H4'> },
+        { mode: 'scheduled', symbol, timeframes },
       );
       if (outcome.status !== 'success') {
         console.warn(`[scheduler] sync ${outcome.status}: ${outcome.errorCode ?? ''} ${outcome.errorMessage ?? ''}`);
-      } else {
+        return;
+      }
+
+      // ── Phase 12: SCALPER loop — every successful sync ─────────────────
+      // (fire-and-forget, error-isolated; the execution hook lives inside
+      // the scalper service: risk check → single-attempt auto order).
+      if (scalperEnabled && process.env.NEXT_RUNTIME === 'nodejs') {
+        try {
+          const { runScalperEvaluation } = await import('@/lib/signal/scalper-service');
+          void runScalperEvaluation({ symbol })
+            .then((r) => {
+              if (
+                r.outcome === 'BUY_SETUP' ||
+                r.outcome === 'SELL_SETUP' ||
+                r.outcome === 'BLOCKED' ||
+                r.outcome === 'FAILED'
+              ) {
+                console.log(
+                  `[scheduler] scalper ${symbol} → ${r.outcome}${
+                    r.evaluation.reasonCodes.length ? ` [${r.evaluation.reasonCodes.join(',')}]` : ''
+                  }${r.evaluation.evidence?.scalper?.sourceTimeframe ? ` src=${r.evaluation.evidence.scalper.sourceTimeframe}` : ''}`,
+                );
+              }
+            })
+            .catch(() => undefined);
+        } catch {
+          // the scalper loop must never break the scheduler
+        }
+      }
+
+      // ── Baseline research loop — historical 5-minute cadence ──────────
+      if (isBaselineTick) {
         // Phase 10.2 — autonomous forward-paper loop: evaluate the
-        // deterministic engine after every successful scheduled sync so live
-        // setups are discovered and paper-tracked (READ-ONLY; the engine has
-        // its own fail-closed gates and no order code exists anywhere).
-        // Fire-and-forget, error-isolated — can never break the scheduler.
-        //
-        // NEXT_RUNTIME guard (official Next.js instrumentation pattern): the
-        // signal engine fingerprints inputs with node:crypto, which the Edge
-        // instrumentation entry cannot compile. This scheduler only ever runs
-        // in the Node.js server, so the import is statically tree-shaken from
-        // the Edge entry (keeps dev.log free of edge compile errors).
+        // deterministic baseline engine + candidate dual evaluation after
+        // every 5th successful scheduled sync (READ-ONLY research).
         if (process.env.FORWARD_PAPER_TRACKING !== '0' && process.env.NEXT_RUNTIME === 'nodejs') {
           try {
             const { runSignalEvaluation } = await import('@/lib/signal/service');
@@ -86,10 +119,7 @@ export async function register() {
                   );
                 }
                 // Phase 6 — autonomous multi-agent review on ACTIONABLE setups
-                // only (4 GLM calls each; NO_SETUP/WAIT would burn the budget
-                // every 5 minutes). Fire-and-forget, error-isolated, deduped
-                // by evaluation id inside the review module. ADVISORY ONLY —
-                // it never changes the deterministic outcome.
+                // only (4 GLM calls each; NO_SETUP/WAIT would burn the budget).
                 if (r.runId && (r.outcome === 'BUY_SETUP' || r.outcome === 'SELL_SETUP')) {
                   try {
                     const { runReviewForLatestEvaluation } = await import('@/lib/ai/multi-agent');
@@ -98,10 +128,9 @@ export async function register() {
                     // the review must never break the scheduler
                   }
                 }
-                // Phase 11 — risk gate + (lock-permitting) pending approval
-                // for the human decision. Fire-and-forget, error-isolated,
-                // idempotent by signal id. NO order is ever placed here —
-                // approvals are decided exclusively by the human operator.
+                // Phase 11/12 — risk gate + auto/pending approval path for
+                // the baseline. Fire-and-forget, error-isolated, idempotent
+                // by signal id.
                 if (r.outcome === 'BUY_SETUP' || r.outcome === 'SELL_SETUP') {
                   try {
                     const { processActionableSignal } = await import('@/lib/execution/service');
@@ -116,36 +145,22 @@ export async function register() {
             // signal evaluation must never break the sync scheduler
           }
         }
-        // Phase 10: advance the read-only paper-signal tracking after every
-        // successful scheduled sync (fire-and-forget, error-isolated). This
-        // also advances open rows when the evaluation itself is BLOCKED
-        // (e.g. stale quote outside market hours).
-        //
-        // NEXT_RUNTIME guard (official Next.js instrumentation pattern, same
-        // as the signal-evaluation import above): Phase 10.3-A added the
-        // setup-identity module (node:crypto) to paper.ts's import chain, so
-        // this import must also be tree-shaken from the Edge entry to keep
-        // the Edge compile clean. The tracker only ever runs in the Node server.
+        // Phase 10: advance the read-only paper-signal tracking.
         if (process.env.NEXT_RUNTIME === 'nodejs') {
           try {
             const { trackPaperSignals } = await import('@/lib/signal/paper');
             void trackPaperSignals(db, { symbol }).catch(() => undefined);
           } catch {
-            // paper tracking must never break the sync scheduler
+            // paper tracking must never break the scheduler
           }
         }
-        // Phase 11-E: advance the CANDIDATE forward-paper tracking alongside
-        // the baseline tracker (same fire-and-forget, error-isolated, Node-only
-        // discipline). It reuses the FORWARD_PAPER_TRACKING switch — one
-        // switch governs the whole forward-paper research loop (baseline +
-        // candidate); no new env switch was added. Research-only: the
-        // candidate tracker can never place an order (no such code exists).
+        // Phase 11-E: advance the CANDIDATE forward-paper tracking.
         if (process.env.FORWARD_PAPER_TRACKING !== '0' && process.env.NEXT_RUNTIME === 'nodejs') {
           try {
             const { trackCandidatePaperSignals } = await import('@/lib/signal/candidate-paper');
             void trackCandidatePaperSignals(db, { symbol }).catch(() => undefined);
           } catch {
-            // candidate paper tracking must never break the sync scheduler
+            // candidate paper tracking must never break the scheduler
           }
         }
       }

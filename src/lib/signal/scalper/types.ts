@@ -1,0 +1,155 @@
+/**
+ * XAUUSD AI Trading Agent — SCALPER Strategy Types (Phase 12, Task 32)
+ * ----------------------------------------------------------------------------
+ * The user-requested SHORT-TIMEFRAME scalping strategy:
+ *
+ *   "উচ্চ টাইম ফ্রেম এ ট্রেড করি না … 1 মিনিট, 5 মিনিট 15 মিনিট এই তিনটি
+ *    থেকে যে কোনো একটি agree হলেই যেনো সিগন্যাল আসে … প্রতি ঘণ্টায় 5
+ *    থেকে 7 টি সিগন্যাল"
+ *
+ *   → M1 / M5 / M15 evaluated INDEPENDENTLY (OR-logic: ANY ONE timeframe
+ *     agreeing is enough — NO higher-timeframe gates), tuned for a target
+ *     cadence of 5–7 setups per hour.
+ *
+ * The engine core is PURE and DETERMINISTIC (same contract as the baseline):
+ * closed candles only, explicit evaluation instant, no look-ahead, fail-closed
+ * data gates. Suppression (cooldown / same-bar dedup) is applied by the
+ * service through the pure `suppressSetup` helper so the core itself never
+ * reads the clock or the database twice.
+ */
+
+import type { Timeframe } from '@/lib/market/types';
+import type { SignalEvaluation, SignalLevels, SignalReasonCode, SignalWindow } from '../types';
+
+export const SCALPER_ENGINE_VERSION = '12.0.0';
+export const SCALPER_STRATEGY_ID = 'scalper-m1-m5-m15-or';
+export const SCALPER_STRATEGY_VERSION = `${SCALPER_STRATEGY_ID}/${SCALPER_ENGINE_VERSION}`;
+
+/** The three fast timeframes, in EVALUATION PRIORITY order (M15 → M5 → M1). */
+export const SCALPER_TIMEFRAMES = ['M15', 'M5', 'M1'] as const;
+export type ScalperTf = (typeof SCALPER_TIMEFRAMES)[number];
+
+/** Reason codes unique to the scalper strategy (added to the shared union). */
+export type ScalperReasonCode =
+  | 'SCALPER_NO_AGREE'
+  | 'SCALPER_COOLDOWN'
+  | 'SCALPER_DUPLICATE_SETUP'
+  | 'SCALPER_LEVELS_INVALID'
+  | 'SCALPER_SPREAD_TOO_WIDE'
+  | 'SCALPER_SL_TOO_TIGHT'
+  | 'INSUFFICIENT_M1_HISTORY'
+  | 'INSUFFICIENT_M5_HISTORY'
+  | 'INSUFFICIENT_M15_HISTORY';
+
+/** Documented, configurable scalper rules (persisted with every evaluation). */
+export interface ScalperRules {
+  strategyVersion: string;
+  /** Evaluation timeframes (OR-logic, priority order). */
+  timeframes: readonly ScalperTf[];
+  /** Closed candles loaded per timeframe. */
+  windowBars: number;
+  /** Minimum closed bars per TF (indicator warm-up: EMA21+RSI14+ATR14). */
+  minBarsPerTf: number;
+  /** Fast/slow EMA periods for the momentum model. */
+  emaFastPeriod: number;
+  emaSlowPeriod: number;
+  rsiPeriod: number;
+  atrPeriod: number;
+  /** Momentum model RSI acceptance band (BUY side; SELL mirrors). */
+  momentumRsiMin: number;
+  momentumRsiMax: number;
+  /** Reversal model RSI extremes. */
+  reversalRsiOversold: number;
+  reversalRsiOverbought: number;
+  /** SL distance beyond the decision close, in ATR multiples (source TF). */
+  slAtrMult: number;
+  /** Fixed reward/risk multiple. */
+  rewardRisk: number;
+  /** Maximum accepted spread in PRICE units. */
+  maxSpreadPrice: number;
+  /** Minimum SL distance in PRICE units (below this the setup is skipped —
+   *  a stop tighter than the spread is not tradable). */
+  minStopPrice: number;
+  /** Emission cooldown: seconds after an emitted setup before the next one. */
+  cooldownSec: number;
+  /** Setup expiry per source timeframe, in seconds after the decision close. */
+  expirySec: Record<ScalperTf, number>;
+}
+
+/** One timeframe's independent judgement (persisted in the evidence block). */
+export interface ScalperTfJudgement {
+  timeframe: ScalperTf;
+  /** Agreeing direction, or null when this TF does not agree. */
+  agree: 'BUY' | 'SELL' | null;
+  /** Which model produced the agreement (null when no agreement). */
+  model: 'MOMENTUM' | 'REVERSAL' | null;
+  /** Per-TF honest stage code (always present — UI renders all three TFs). */
+  stage: 'MOMENTUM_BUY' | 'MOMENTUM_SELL' | 'REVERSAL_BUY' | 'REVERSAL_SELL' | 'NO_AGREE';
+  decisionCandleTimeUtc: string;
+  indicators: {
+    emaFast: number | null;
+    emaSlow: number | null;
+    rsi: number | null;
+    atr: number | null;
+    close: number | null;
+  };
+}
+
+/** Pure input for the scalper evaluation core. */
+export interface ScalperCoreInput {
+  symbol: string;
+  digits: number | null;
+  m15: SignalWindow;
+  m5: SignalWindow;
+  m1: SignalWindow;
+  /** Live mid price at the evaluation instant. */
+  referencePrice: number;
+  /** Spread in PRICE units (observed). */
+  spreadPrice: number;
+  /** Evaluation instant (UTC sec) — MUST be >= every window's last close. */
+  nowUtcSec: number;
+  rules: ScalperRules;
+}
+
+/** The scalper evaluation reuses the shared SignalEvaluation row shape so it
+ *  persists into the SAME append-only SignalEvaluation table (own strategy
+ *  version) and renders through the same history surfaces. */
+export type ScalperEvaluation = SignalEvaluation;
+
+/** Extra per-evaluation scalper evidence (optional block on SignalEvidence). */
+export interface ScalperEvidenceBlock {
+  /** The timeframe whose agreement produced the setup (null when suppressed
+   *  or when no TF agreed). */
+  sourceTimeframe: ScalperTf | null;
+  model: 'MOMENTUM' | 'REVERSAL' | null;
+  /** Suppressed direction when cooldown/dedup vetoed an agreeing setup. */
+  suppressedDirection: 'BUY' | 'SELL' | null;
+  /** All three independent judgements, priority order (M15 → M5 → M1). */
+  tfJudgements: ScalperTfJudgement[];
+}
+
+/** Derived levels for a scalper setup (same validated shape as baseline). */
+export type ScalperLevels = SignalLevels;
+
+export interface ScalperSuppressionState {
+  /** True when an emitted setup with this fingerprint already exists. */
+  duplicate: boolean;
+  /** True when nowUtcSec < the active cooldown instant. */
+  cooldownActive: boolean;
+}
+
+export interface ScalperServiceOutcome {
+  runId: string | null;
+  outcome: ScalperEvaluation['outcome'];
+  durationMs: number;
+  evaluation: ScalperEvaluation;
+  quoteReport: unknown | null;
+  /** Present when a setup was auto-executed (order attempted). */
+  execution?: {
+    attempted: boolean;
+    code: string;
+    message: string;
+    lots: number | null;
+    executionLogId: string | null;
+  } | null;
+}

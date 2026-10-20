@@ -38,7 +38,9 @@ export const signalHistoryQuerySchema = z
      * 'baseline' (default) → hybrid-structure-retest/9.0.0 — the default
      * surface stays baseline-scoped (protocol §4). 'candidate' →
      * hybrid-multimodel-research/11.0.0-candidate.1, returned labeled.
+     * Phase 12: 'scalper' → scalper-m1-m5-m15-or/12.0.0 (the live
+     * short-timeframe OR-logic strategy).
      */
-    strategy: z.enum(['baseline', 'candidate']).default('baseline'),
+    strategy: z.enum(['baseline', 'candidate', 'scalper']).default('baseline'),
   })
   .strict();

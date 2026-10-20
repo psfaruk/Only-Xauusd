@@ -1,24 +1,26 @@
 /**
- * XAUUSD AI Trading Agent — Approval-Based Execution Service (Phase 11)
+ * XAUUSD AI Trading Agent — Approval-Based + Auto Execution Service (Phase 11/12)
  * ----------------------------------------------------------------------------
- * The DEMO execution workflow, gated by the 4-switch lock
+ * The execution workflow, gated by the 4-switch lock
  * (TRADING_PHASE ≥ 11 + EXECUTION_ARMED + ALLOW_EXECUTION + mode ≠ read_only):
  *
  *   actionable signal (deterministic engine)
  *     → Phase 7 risk check (deterministic, fail-closed)
- *     → TradeApproval row (pending, TTL-bounded) — created ONLY when the
- *       lock is armed and the risk check passed
- *     → HUMAN decision (approve / reject) in the UI
- *     → on approve: ONE bridge order (lots from the risk check, SL/TP from
- *       the signal levels) → ExecutionLog row (append-only audit)
+ *     → EXECUTION_AUTO=true (Phase 12): order placed IMMEDIATELY (single
+ *       attempt), TradeApproval row recorded as approved/auto for the audit
+ *       chain, ExecutionLog row appended
+ *       otherwise: TradeApproval row (pending, TTL-bounded) → HUMAN decision
+ *       (approve / reject) in the UI → on approve: ONE bridge order →
+ *       ExecutionLog row (append-only audit)
  *     → open positions visible; close-by-id → ExecutionLog
  *
  * Invariants:
- *   · NOTHING executes without an explicit human approval — no auto-trading.
- *   · The 4-switch lock is checked at EVERY step; when locked the API surface
- *     reports the honest lock state and never creates approvals.
+ *   · Every order is preceded by a PASSING risk check (lot cap, exposure
+ *     cap, daily cap, spread limit) — auto mode NEVER skips it.
  *   · Bridge order calls are SINGLE-ATTEMPT — a timeout is never auto-retried
  *     (exactly-once discipline; verification via the positions list).
+ *   · Idempotent by signal id: an approval (any status) existing for the
+ *     signal means no second order is ever attempted.
  *   · Every state change writes an append-only SystemEvent (approval /
  *     execution categories).
  */
@@ -35,7 +37,7 @@ import {
 } from '@/lib/risk/service';
 import type { RiskCheckDetail } from '@/lib/risk/types';
 import { getLatestSignalEvaluation } from '@/lib/signal/persistence';
-import type { SignalLevels } from '@/lib/signal/types';
+import { SIGNAL_STRATEGY_VERSION, type SignalLevels } from '@/lib/signal/types';
 import {
   getBridgeAccountState,
   listBridgePositions,
@@ -94,17 +96,46 @@ export interface ProcessSignalOutcome {
   reason: string;
   approvalId: string | null;
   riskPassed: boolean | null;
+  /** Phase 12 auto-execution summary — present only when an order was
+   *  attempted for this signal. */
+  execution?: {
+    attempted: boolean;
+    code: string;
+    message: string;
+    lots: number | null;
+    executionLogId: string | null;
+  };
+}
+
+/** Equity basis for the risk gate. The bridge reports accountEquity = 0
+ *  while the account has no open positions and the market quote layer is
+ *  the only equity source it tracks — in that exact case the BALANCE is the
+ *  true equity (no floating P/L can exist with zero open positions), so it
+ *  is used as the honest fallback. Never a guess when both are absent. */
+function equityBasis(equity: number | null, balance: number | null): number | null {
+  if (equity !== null && Number.isFinite(equity) && equity > 0) return equity;
+  if (balance !== null && Number.isFinite(balance) && balance > 0) return balance;
+  return equity; // honest absence — the risk check fails closed on it
 }
 
 /**
  * Called after EVERY signal evaluation (scheduler + manual). Runs the Phase 7
- * risk check for actionable setups and — only when the execution lock is
- * armed AND the risk check passed — creates a pending TradeApproval with TTL.
+ * risk check for actionable setups and — when the execution lock is armed:
+ * EXECUTION_AUTO=true → places the order immediately (single attempt);
+ * otherwise → creates a pending TradeApproval with TTL for the human gate.
  * Idempotent by signal id; never throws.
+ *
+ * Phase 12: `strategyVersion` selects which strategy's latest evaluation is
+ * processed (baseline default — existing callers unchanged; the scalper
+ * passes its own version).
  */
-export async function processActionableSignal(symbol: string): Promise<ProcessSignalOutcome> {
+export async function processActionableSignal(
+  symbol: string,
+  opts: { strategyVersion?: string } = {},
+): Promise<ProcessSignalOutcome> {
+  const strategyVersion = opts.strategyVersion ?? SIGNAL_STRATEGY_VERSION;
   try {
-    const latest = await getLatestSignalEvaluation(db, symbol);
+    const latest = await getLatestSignalEvaluation(db, symbol, strategyVersion);
     if (!latest || (latest.outcome !== 'BUY_SETUP' && latest.outcome !== 'SELL_SETUP')) {
       return { ran: false, reason: 'no actionable setup', approvalId: null, riskPassed: null };
     }
@@ -127,7 +158,10 @@ export async function processActionableSignal(symbol: string): Promise<ProcessSi
       getRiskCheckCounts().catch(() => null),
       listBridgePositions().catch(() => null),
     ]);
-    const equity = accountRes.ok ? accountRes.data?.accountEquity ?? null : null;
+    const equity = equityBasis(
+      accountRes.ok ? accountRes.data?.accountEquity ?? null : null,
+      accountRes.ok ? accountRes.data?.accountBalance ?? null : null,
+    );
     const balance = accountRes.ok ? accountRes.data?.accountBalance ?? null : null;
     const spread = await liveSpread(symbol);
     // Real open-position count when the bridge reports it; honest fallback to
@@ -159,18 +193,24 @@ export async function processActionableSignal(symbol: string): Promise<ProcessSi
         level: 'warn',
         category: 'risk',
         code: 'RISK_CHECK_FAILED',
-        message: `Risk check FAILED for ${symbol} ${levels.direction} setup — no approval created`,
+        message: `Risk check FAILED for ${symbol} ${levels.direction} setup — no order`,
         meta: {
           signalId: evaluationId,
+          strategyVersion,
           failedRules: riskResult.checks.filter((c) => !c.passed).map((c) => c.rule),
         },
       }).catch(() => undefined);
-      return { ran: true, reason: 'risk check failed — no approval', approvalId: null, riskPassed: false };
+      return { ran: true, reason: 'risk check failed — no order', approvalId: null, riskPassed: false };
     }
 
-    // ---- Lock gate — approvals exist only when execution is armed -----------
+    // ---- Lock gate — orders exist only when execution is armed -----------
     if (!config.execution.enabled) {
-      return { ran: true, reason: 'risk passed; execution locked — no approval (read-only mode)', approvalId: null, riskPassed: true };
+      return { ran: true, reason: 'risk passed; execution locked — no order (read-only mode)', approvalId: null, riskPassed: true };
+    }
+
+    // ---- Phase 12: AUTO-EXECUTION (no human gate) -------------------------
+    if (config.execution.auto) {
+      return await autoExecuteApprovalChain(evaluationId, levels, riskResult.lotSize, symbol);
     }
 
     const expiresAt = new Date(Date.now() + approvalTtlMin() * 60_000);
@@ -200,6 +240,104 @@ export async function processActionableSignal(symbol: string): Promise<ProcessSi
     }).catch(() => undefined);
     return { ran: false, reason: 'internal error (logged)', approvalId: null, riskPassed: null };
   }
+}
+
+/**
+ * Phase 12 auto-execution: record the approval row (status approved, note
+ * auto) for the audit chain, then place the order — SINGLE attempt. The
+ * caller guarantees: lock armed + risk check passed + no prior approval for
+ * this signal id (idempotency).
+ */
+async function autoExecuteApprovalChain(
+  evaluationId: string,
+  levels: SignalLevels,
+  lots: number | null,
+  symbol: string,
+): Promise<ProcessSignalOutcome> {
+  if (lots === null || !Number.isFinite(lots) || lots <= 0) {
+    return { ran: true, reason: 'risk passed but lot size unavailable (honest skip)', approvalId: null, riskPassed: true };
+  }
+
+  const approval = await db.tradeApproval.create({
+    data: {
+      signalId: evaluationId,
+      status: 'approved',
+      decidedAt: new Date(),
+      note: `auto-execution (EXECUTION_AUTO) — ${lots} lots`,
+      expiresAt: new Date(Date.now() + approvalTtlMin() * 60_000),
+    },
+  }).catch(() => null);
+
+  const orderRequest = {
+    symbol,
+    type: levels.direction,
+    lots,
+    sl: levels.stopLoss,
+    tp: levels.target,
+    comment: `xau-auto:${evaluationId.slice(-20)}`,
+  };
+  const result = await placeBridgeOrder(orderRequest);
+
+  const logStatus = !result.ok
+    ? result.errorCode === 'BRIDGE_TIMEOUT'
+      ? 'sent'
+      : 'failed'
+    : result.data?.accepted
+      ? 'filled'
+      : 'rejected';
+
+  const execLog = await db.executionLog
+    .create({
+      data: {
+        signalId: evaluationId,
+        request: JSON.stringify({ ...orderRequest, approvalId: approval?.id ?? null, mode: 'auto' }),
+        result: JSON.stringify(
+          result.ok
+            ? result.data?.raw ?? { ok: false }
+            : { ok: false, errorCode: result.errorCode, errorMessage: result.errorMessage },
+        ),
+        status: logStatus,
+      },
+    })
+    .catch(() => null);
+
+  const accepted = result.ok && result.data?.accepted === true;
+  await logEvent({
+    level: accepted ? 'info' : 'error',
+    category: 'execution',
+    code: accepted ? 'AUTO_EXECUTION_FILLED' : 'AUTO_EXECUTION_FAILED',
+    message: accepted
+      ? `AUTO order FILLED: ${symbol} ${levels.direction} ${lots} lots @ ${result.data?.price ?? '?'} (deal ${result.data?.dealId ?? '?'})`
+      : `AUTO order failed for ${symbol}: ${result.errorCode ?? 'unknown'} — ${result.errorMessage ?? ''}`,
+    meta: {
+      approvalId: approval?.id ?? null,
+      signalId: evaluationId,
+      lots,
+      price: result.data?.price ?? null,
+      dealId: result.data?.dealId ?? null,
+      executionLogId: execLog?.id ?? null,
+    },
+  }).catch(() => undefined);
+
+  return {
+    ran: true,
+    reason: accepted ? 'auto-execution filled' : `auto-execution failed: ${result.errorCode ?? 'unknown'}`,
+    approvalId: approval?.id ?? null,
+    riskPassed: true,
+    execution: {
+      attempted: true,
+      code: accepted
+        ? 'FILLED'
+        : result.errorCode === 'BRIDGE_TIMEOUT'
+          ? 'EXECUTION_TIMEOUT_UNKNOWN'
+          : 'EXECUTION_FAILED',
+      message: accepted
+        ? `অটো-অর্ডার সম্পন্ন: ${result.data?.price ?? '?'} দামে ${lots} লট`
+        : `অটো-অর্ডার ব্যর্থ: ${result.errorCode ?? 'unknown'}`,
+      lots,
+      executionLogId: execLog?.id ?? null,
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -280,7 +418,10 @@ export async function decideApproval(
     sameSetupApprovedToday(approval.signalId).catch(() => 0),
     listBridgePositions().catch(() => null),
   ]);
-  const equity = accountRes.ok ? accountRes.data?.accountEquity ?? null : null;
+  const equity = equityBasis(
+    accountRes.ok ? accountRes.data?.accountEquity ?? null : null,
+    accountRes.ok ? accountRes.data?.accountBalance ?? null : null,
+  );
   const balance = accountRes.ok ? accountRes.data?.accountBalance ?? null : null;
   const spread = await liveSpread(signalRow.symbol);
   // Real open-position count when the bridge reports it (honest fallback to
@@ -497,6 +638,8 @@ export interface ExecutionLogView {
 
 export interface ExecutionState {
   executionEnabled: boolean;
+  /** Phase 12: auto-execution active (orders placed without human gate). */
+  executionAuto: boolean;
   executionReason: string;
   switches: {
     phaseGatePassed: boolean;
@@ -588,6 +731,7 @@ export async function getExecutionState(): Promise<ExecutionState> {
 
   return {
     executionEnabled: config.execution.enabled,
+    executionAuto: config.execution.auto,
     executionReason: config.execution.reason,
     switches: {
       phaseGatePassed: config.execution.switches.phaseGatePassed,

@@ -222,7 +222,7 @@ export function ExecutionPanel({
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2 text-sm font-semibold text-zinc-100">
           <Crosshair className="h-4 w-4 text-orange-400" aria-hidden />
-          এক্সিকিউশন — অনুমোদন-ভিত্তিক ডেমো ট্রেডিং (Phase 11)
+          এক্সিকিউশন — লাইভ অর্ডার পাইপলাইন (Phase 11/12)
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -246,11 +246,18 @@ export function ExecutionPanel({
               <Lock className="mt-0.5 h-5 w-5 shrink-0 text-zinc-400" aria-hidden />
             )}
             <div className="min-w-0 text-xs leading-relaxed">
-              {s.executionEnabled ? (
+              {s.executionEnabled && s.executionAuto ? (
+                <>
+                  <p className="font-semibold text-emerald-300">অটো-এক্সিকিউশন সচল — সিগন্যাল + রিস্ক-চেক পাস হলেই অর্ডার যায়</p>
+                  <p className="mt-0.5 text-zinc-400">
+                    প্রতিটি অর্ডারের আগে ডিটারমিনিস্টিক রিস্ক চেক (লট-ক্যাপ, এক্সপোজার-ক্যাপ, দৈনিক সীমা, স্প্রেড) বাধ্যতামূলক — একবারই পাঠানো হয়, স্বয়ংক্রিয় রিট্রাই নেই।
+                  </p>
+                </>
+              ) : s.executionEnabled ? (
                 <>
                   <p className="font-semibold text-emerald-300">ডেমো এক্সিকিউশন সক্রিয় — প্রতিটি অর্ডারে আপনার অনুমোদন লাগবে</p>
                   <p className="mt-0.5 text-zinc-400">
-                    স্বয়ংক্রিয় ট্রেডিং নেই — সিগন্যাল + রিস্ক চেক পাস হলে অনুমোদনের অপেক্ষায় থাকবে, আপনি চাপ দিলেই ব্রোকারে যাবে।
+                    সিগন্যাল + রিস্ক চেক পাস হলে অনুমোদনের অপেক্ষায় থাকবে, আপনি চাপ দিলেই ব্রোকারে যাবে।
                   </p>
                 </>
               ) : (

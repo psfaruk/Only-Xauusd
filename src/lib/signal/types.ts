@@ -33,6 +33,32 @@ export type SignalOutcome = 'BUY_SETUP' | 'SELL_SETUP' | 'WAIT' | 'BLOCKED' | 'N
 
 /** Machine-readable reason codes (typed, stable). */
 export type SignalReasonCode =
+  // Phase 14 ICT/SMC confluence codes (smc-confluence model) — emitted by the
+  // ten-agent confluence engine alongside the shared gate codes above.
+  | 'SMC_NO_CONFLUENCE'
+  | 'SMC_BELOW_TIER'
+  | 'SMC_NEWS_BLACKOUT'
+  | 'SMC_NEUTRAL_MARGIN'
+  | 'SMC_LEVELS_INVALID'
+  | 'SMC_SL_TOO_TIGHT'
+  | 'SMC_TP_TOO_CLOSE'
+  | 'SMC_NO_POI'
+  | 'SMC_NO_SWEEP'
+  | 'SMC_PRICE_BEYOND_POI'
+  | 'SMC_POI_VIOLATED'
+  | 'SMC_SR_WALL'
+  | 'SMC_MOMENTUM_OPPOSED'
+  // Phase 12 scalper codes (scalper-m1-m5-m15-or) — the short-timeframe
+  // OR-logic strategy emits these alongside the shared gate codes above.
+  | 'SCALPER_NO_AGREE'
+  | 'SCALPER_COOLDOWN'
+  | 'SCALPER_DUPLICATE_SETUP'
+  | 'SCALPER_LEVELS_INVALID'
+  | 'SCALPER_SPREAD_TOO_WIDE'
+  | 'SCALPER_SL_TOO_TIGHT'
+  | 'INSUFFICIENT_M1_HISTORY'
+  | 'INSUFFICIENT_M5_HISTORY'
+  | 'INSUFFICIENT_M15_HISTORY'
   // Gate codes (BLOCKED family)
   | 'SYMBOL_NOT_ALLOWED'
   | 'SPEC_MISSING'
@@ -185,13 +211,23 @@ export interface SignalEvidence {
   executionWindow: { fromUtc: string; toUtc: string; bars: number };
   h1Window: { fromUtc: string; toUtc: string; bars: number };
   h4Window: { fromUtc: string; toUtc: string; bars: number };
+  /** Phase 12 scalper evidence — present only on scalper-strategy rows
+   *  (source timeframe, model, per-TF judgements). Optional + additive:
+   *  baseline and candidate rows never carry it. */
+  scalper?: import('./scalper/types').ScalperEvidenceBlock;
+  /** Phase 14 ICT/SMC confluence evidence — full ten-agent breakdown of the
+   *  SOURCE timeframe's reads (or the best-scoring TF when nothing agreed).
+   *  Optional + additive; old rows never carry it. */
+  smc?: import('./ict/types').SmcConfluenceEvidence;
 }
 
 export interface SignalEvaluation {
   engineVersion: string;
   strategyVersion: string;
   symbol: string;
-  purpose: 'research-signal-not-an-execution-instruction';
+  /** Baseline/candidate rows are research signals; scalper rows (Phase 12)
+   *  are live trading instructions driven to the auto-execution pipeline. */
+  purpose: 'research-signal-not-an-execution-instruction' | 'live-signal-auto-execution';
   outcome: SignalOutcome;
   reasonCodes: SignalReasonCode[];
   decisionCandleTimeUtc: string | null;

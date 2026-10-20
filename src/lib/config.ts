@@ -58,6 +58,11 @@ const phase = Math.max(1, Math.floor(num('TRADING_PHASE', 1)));
 const requestedMode = str('TRADING_MODE', 'read_only');
 const executionArmed = bool('EXECUTION_ARMED', false);
 const allowExecution = bool('ALLOW_EXECUTION', false);
+/** Phase 12: AUTO-execution — when true (and the four switches pass), an
+ *  actionable signal that passes the risk check is executed IMMEDIATELY
+ *  (single attempt) without waiting for a human approval. The risk gate
+ *  (lot cap, exposure cap, daily cap, spread) still runs before every order. */
+const executionAuto = bool('EXECUTION_AUTO', false);
 
 const validModes = new Set(['read_only', 'demo', 'live']);
 const tradingMode = validModes.has(requestedMode) ? requestedMode : 'read_only';
@@ -77,6 +82,8 @@ export const config = {
   tradingMode,
   execution: {
     enabled: executionEnabled,
+    // Phase 12: auto-execution switch (see above).
+    auto: executionEnabled && executionAuto,
     // Individual switch states (read-only exposure for audit honesty).
     switches: {
       phaseGatePassed,
@@ -177,6 +184,91 @@ export const config = {
     swingRight: Math.min(Math.max(2, num('ANALYSIS_SWING_RIGHT', 3)), 8),
   },
   signal: {
+    /** Phase 12 — the short-timeframe scalper strategy (M1/M5/M15 OR-logic).
+     *  All thresholds are clamped; the engine never reads these directly —
+     *  buildScalperRules() materializes them into the persisted rules. */
+    scalper: {
+      /** Master switch for the scalper evaluation loop (scheduler + API). */
+      enabled: bool('SCALPER_ENABLED', true),
+      /** Closed candles per TF window. */
+      windowBars: Math.min(Math.max(60, num('SCALPER_WINDOW_BARS', 240)), 1_000),
+      /** Minimum closed bars per TF (EMA21+RSI14+ATR14 warm-up + context). */
+      minBarsPerTf: Math.min(Math.max(30, num('SCALPER_MIN_BARS', 60)), 1_000),
+      emaFastPeriod: Math.min(Math.max(3, num('SCALPER_EMA_FAST', 9)), 50),
+      emaSlowPeriod: Math.min(Math.max(5, num('SCALPER_EMA_SLOW', 21)), 100),
+      rsiPeriod: Math.min(Math.max(5, num('SCALPER_RSI_PERIOD', 14)), 50),
+      atrPeriod: Math.min(Math.max(5, num('SCALPER_ATR_PERIOD', 14)), 50),
+      /** Momentum RSI band (BUY side; SELL mirrors around 50). */
+      momentumRsiMin: clampNum('SCALPER_MOMENTUM_RSI_MIN', 52, 40, 70),
+      momentumRsiMax: clampNum('SCALPER_MOMENTUM_RSI_MAX', 78, 60, 95),
+      /** Reversal RSI extremes. */
+      reversalRsiOversold: clampNum('SCALPER_REVERSAL_RSI_OVERSOLD', 32, 10, 45),
+      reversalRsiOverbought: clampNum('SCALPER_REVERSAL_RSI_OVERBOUGHT', 68, 55, 90),
+      /** SL distance in ATR multiples beyond the decision close. */
+      slAtrMult: clampNum('SCALPER_SL_ATR_MULT', 1.2, 0.3, 5),
+      /** Fixed reward/risk multiple. */
+      rewardRisk: clampNum('SCALPER_REWARD_RISK', 1.5, 0.5, 5),
+      /** Max accepted spread (price units). */
+      maxSpreadPrice: clampNum('SCALPER_MAX_SPREAD', 0.6, 0.1, 5),
+      /** Minimum SL distance (price units) — below this the setup is skipped. */
+      minStopPrice: clampNum('SCALPER_MIN_STOP', 0.5, 0.1, 10),
+      /** Emission cooldown in SECONDS (target cadence 5–7 setups/hour). */
+      cooldownSec: Math.min(Math.max(60, num('SCALPER_COOLDOWN_SEC', 480)), 3_600),
+      /** Setup expiry per source TF, seconds after the decision close. */
+      expirySecM1: Math.min(Math.max(300, num('SCALPER_EXPIRY_M1_SEC', 1_800)), 14_400),
+      expirySecM5: Math.min(Math.max(300, num('SCALPER_EXPIRY_M5_SEC', 3_600)), 28_800),
+      expirySecM15: Math.min(Math.max(600, num('SCALPER_EXPIRY_M15_SEC', 7_200)), 43_200),
+    },
+    /** Phase 14 — the ICT/SMC ten-agent confluence engine layered onto the
+     *  scalper (SMC_CONFLUENCE model). Pure agents never read config directly;
+     *  buildScalperRules() materializes these into the persisted rules. */
+    smc: {
+      /** Master switch for the SMC confluence model (fallback: legacy
+       *  momentum/reversal models still judge when off). */
+      enabled: bool('SMC_ENABLED', true),
+      /** Swing window (left/right closed bars) for structure/liquidity. */
+      swingLeft: Math.min(Math.max(2, num('SMC_SWING_LEFT', 3)), 8),
+      swingRight: Math.min(Math.max(2, num('SMC_SWING_RIGHT', 3)), 8),
+      /** Max bars between BOS/CHoCH and the decision bar (full points). */
+      maxBarsSinceEvent: Math.min(Math.max(2, num('SMC_MAX_BARS_SINCE_EVENT', 20)), 100),
+      /** Lookback bars for liquidity sweep detection. */
+      sweepLookbackBars: Math.min(Math.max(5, num('SMC_SWEEP_LOOKBACK', 30)), 200),
+      /** Max bars between sweep candle and decision bar (full points). */
+      maxBarsSinceSweep: Math.min(Math.max(1, num('SMC_MAX_BARS_SINCE_SWEEP', 8)), 50),
+      /** Equal-high/low tolerance in ATR multiples. */
+      equalLevelAtrTol: clampNum('SMC_EQUAL_TOL_ATR', 0.25, 0.05, 1.5),
+      /** Min displacement (ATR mult) for a valid order block. */
+      obMinDisplacementAtr: clampNum('SMC_OB_MIN_DISPLACEMENT_ATR', 1.0, 0.2, 5),
+      /** FVG minimum gap in ATR multiples. */
+      fvgMinGapAtr: clampNum('SMC_FVG_MIN_GAP_ATR', 0.2, 0.05, 2),
+      /** POI entry tolerance beyond the zone edge, in ATR multiples. */
+      entryToleranceAtr: clampNum('SMC_ENTRY_TOLERANCE_ATR', 0.35, 0.05, 2),
+      /** SL buffer beyond sweep wick / POI extreme, in ATR multiples. */
+      slAtrBuffer: clampNum('SMC_SL_ATR_BUFFER', 0.35, 0.05, 2),
+      /** Max POI tests before the zone is exhausted. */
+      poiMaxTests: Math.min(Math.max(1, num('SMC_POI_MAX_TESTS', 3)), 10),
+      /** Displacement candle body threshold (ATR mult). */
+      displacementAtr: clampNum('SMC_DISPLACEMENT_ATR', 1.0, 0.3, 3),
+      /** AMD range lookback bars. */
+      amdLookbackBars: Math.min(Math.max(10, num('SMC_AMD_LOOKBACK', 40)), 200),
+      /** Min range height in ATR multiples to call it a range. */
+      amdMinRangeAtr: clampNum('SMC_AMD_MIN_RANGE_ATR', 2.0, 0.5, 10),
+      /** Emission threshold — minimum confluence score (tier B = 55). */
+      minScore: clampNum('SMC_MIN_SCORE', 55, 30, 95),
+      /** Required BUY-vs-SELL score margin, else NEUTRAL. */
+      directionMargin: clampNum('SMC_DIRECTION_MARGIN', 10, 0, 50),
+      /** Round-number grid step for XAUUSD (price units). */
+      roundNumberStep: clampNum('SMC_ROUND_STEP', 5, 0.5, 50),
+      /** Key-level touch tolerance in ATR multiples. */
+      keyLevelTolAtr: clampNum('SMC_KEY_LEVEL_TOL_ATR', 0.3, 0.05, 2),
+      /** Session/killzone overrides (UTC minutes). */
+      londonKzFromMin: Math.min(Math.max(0, num('SMC_LONDON_KZ_FROM_MIN', 420)), 1_439),
+      londonKzToMin: Math.min(Math.max(1, num('SMC_LONDON_KZ_TO_MIN', 600)), 1_440),
+      nyKzFromMin: Math.min(Math.max(0, num('SMC_NY_KZ_FROM_MIN', 720)), 1_439),
+      nyKzToMin: Math.min(Math.max(1, num('SMC_NY_KZ_TO_MIN', 900)), 1_440),
+      /** News blackout master switch (envelopes stay approximate either way). */
+      newsBlackoutEnabled: bool('SMC_NEWS_BLACKOUT', true),
+    },
     /** Deterministic strategy thresholds — documented in src/lib/signal/rules.ts
      *  and persisted with every evaluation. The LLM can NEVER change these. */
     executionTf: 'M15' as const,

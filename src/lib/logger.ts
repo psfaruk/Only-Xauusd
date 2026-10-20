@@ -22,7 +22,8 @@ export type AuditCategory =
   | 'risk'
   | 'approval'
   | 'execution'
-  | 'bridge';
+  | 'bridge'
+  | 'scalper';
 
 export interface LogEventInput {
   level: LogLevel;

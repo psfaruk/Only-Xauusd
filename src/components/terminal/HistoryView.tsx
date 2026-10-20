@@ -73,8 +73,8 @@ export function HistoryView({
       <div role="note" className="flex items-start gap-3 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3.5">
         <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" aria-hidden />
         <p className="text-xs leading-relaxed text-zinc-400">
-          সিগন্যাল ইঞ্জিন <span className="font-semibold text-amber-300">নির্ধারিত (deterministic)</span> — LLM এটি বদলাতে পারে না। ফলাফল শুধুমাত্র{' '}
-          <span className="font-semibold text-amber-300">গবেষণা/সিদ্ধান্ত-সহায়তা</span>; কোনো ট্রেড কার্যকর হয়নি এবং সেই ক্ষমতা সিস্টেমে নেই (চার-সুইচ লক সক্রিয়)।
+          সিগন্যাল ইঞ্জিন <span className="font-semibold text-amber-300">নির্ধারিত (deterministic)</span> — LLM এটি বদলাতে পারে না। বেসলাইন ফলাফল{' '}
+          <span className="font-semibold text-amber-300">গবেষণা/সিদ্ধান্ত-সহায়তা</span>; স্ক্যাল্পার সিগন্যাল (M1·M5·M15) রিস্ক-চেক পাস করলে স্বয়ংক্রিয়ভাবে অর্ডার কার্যকর হয়।
           BUY_SETUP/SELL_SETUP হলেই লাভের প্রমাণ নয়।
         </p>
       </div>

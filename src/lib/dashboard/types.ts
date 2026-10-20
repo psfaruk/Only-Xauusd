@@ -367,14 +367,87 @@ export interface SignalHistoryEntryView {
 export interface SignalHistoryResponse {
   ok: boolean;
   symbol: string;
-  /** 'baseline' (default) or 'candidate' — the scope of every listed row. */
-  strategy?: 'baseline' | 'candidate' | string;
+  /** 'baseline' (default), 'candidate' or 'scalper' — the scope of every listed row. */
+  strategy?: 'baseline' | 'candidate' | 'scalper' | string;
   strategyVersion?: string;
   count: number;
   counts: { totalEvaluations: number; distinctSetups: number } | null;
   outcomeCounts: Record<string, number>;
   history: SignalHistoryEntryView[];
   note?: string;
+}
+
+// ---------------------------------------------------------------------------
+// /api/signal/scalper — Phase 12 live scalper strategy (M1/M5/M15 OR-logic)
+// ---------------------------------------------------------------------------
+
+export interface ScalperTfJudgementView {
+  timeframe: 'M15' | 'M5' | 'M1';
+  agree: 'BUY' | 'SELL' | null;
+  model: 'MOMENTUM' | 'REVERSAL' | null;
+  stage: 'MOMENTUM_BUY' | 'MOMENTUM_SELL' | 'REVERSAL_BUY' | 'REVERSAL_SELL' | 'NO_AGREE';
+  decisionCandleTimeUtc: string;
+  indicators: {
+    emaFast: number | null;
+    emaSlow: number | null;
+    rsi: number | null;
+    atr: number | null;
+    close: number | null;
+  };
+}
+
+export interface ScalperEvidenceView extends SignalEvidenceView {
+  scalper?: {
+    sourceTimeframe: 'M15' | 'M5' | 'M1' | null;
+    model: 'MOMENTUM' | 'REVERSAL' | null;
+    suppressedDirection: 'BUY' | 'SELL' | null;
+    tfJudgements: ScalperTfJudgementView[];
+  };
+}
+
+export interface ScalperEvaluationView {
+  id: string;
+  createdAt: string;
+  outcome: 'BUY_SETUP' | 'SELL_SETUP' | 'WAIT' | 'BLOCKED' | 'NO_SETUP' | 'FAILED';
+  reasonCodes: string[];
+  engineVersion: string;
+  strategyVersion: string;
+  symbol: string;
+  decisionCandleTimeUtc: string | null;
+  setupKnownAtUtc: string | null;
+  expiryUtc: string | null;
+  levels: SignalLevelsView | null;
+  evidence: ScalperEvidenceView | null;
+  inputFingerprint: string;
+  datasetFingerprint: string | null;
+  setupFingerprint: string | null;
+  executionLocked: boolean;
+  durationMs: number | null;
+}
+
+export interface ScalperRecentSetupView {
+  id: string;
+  createdAt: string;
+  outcome: string;
+  reasonCodes: string[];
+  decisionCandleTimeUtc: string | null;
+  expiryUtc: string | null;
+  levels: SignalLevelsView | null;
+  sourceTimeframe: 'M15' | 'M5' | 'M1' | null;
+  model: 'MOMENTUM' | 'REVERSAL' | null;
+}
+
+export interface ScalperLatestResponse {
+  ok: boolean;
+  symbol: string;
+  strategyVersion: string;
+  enabled: boolean;
+  execution: { enabled: boolean; auto: boolean; mode: string };
+  latest: ScalperEvaluationView | null;
+  setupsLastHour: number;
+  recentSetups: ScalperRecentSetupView[];
+  rules: Record<string, unknown>;
+  note: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -1084,6 +1157,8 @@ export interface ExecutionStateResponse {
   ok: true;
   state: {
     executionEnabled: boolean;
+    /** Phase 12: auto-execution active (orders without human gate). */
+    executionAuto: boolean;
     executionReason: string;
     switches: {
       phaseGatePassed: boolean;

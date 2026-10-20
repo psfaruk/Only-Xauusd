@@ -228,13 +228,13 @@ export function SystemMiniCards({
       title: 'Order Execution',
       // Master-audit fix B-D2: derived from the backend's own flag — the old
       // card was a static string (could not reflect an abnormal unlock).
-      value: health ? (health.executionLocked ? 'Read-Only' : '(!) UNLOCKED') : '—',
+      value: health ? (health.executionLocked ? 'Read-Only' : 'লাইভ সচল') : '—',
       state: health?.executionLocked
         ? { label: 'LOCKED', cls: 'border-red-500/40 bg-red-500/10 text-red-400' }
         : health
-          ? { label: 'UNLOCKED', cls: 'border-red-600/60 bg-red-600/20 text-red-300' }
+          ? { label: 'LIVE', cls: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400' }
           : { label: '—', cls: 'border-zinc-600/50 bg-zinc-700/20 text-zinc-400' },
-      lines: [health?.executionReason ?? 'Execution locked — read-only by design.'],
+      lines: [health?.executionReason ?? 'Execution state unavailable.'],
     },
   ];
 
@@ -299,12 +299,21 @@ export function DashboardView({
 }) {
   return (
     <div className="space-y-4">
-      {/* Read-only banner — the safety contract stays visible */}
-      <div role="note" className="flex items-start gap-2.5 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3">
-        <LockKeyhole className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" aria-hidden />
+      {/* Live-trading banner — honest posture from the backend state */}
+      <div role="note" className="flex items-start gap-2.5 rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3">
+        <LockKeyhole className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" aria-hidden />
         <p className="text-[11px] leading-relaxed text-zinc-400">
-          <span className="font-semibold text-amber-200">Read-Only টার্মিনাল</span> — বিশ্লেষণ ও গবেষণা-সিগন্যাল ছাড়া কিছু নয়।{' '}
-          {health?.executionReason ?? 'চার-সুইচ এক্সিকিউশন লক সক্রিয় — কোনো অর্ডার পাঠানোর ক্ষমতা সিস্টেমে নেই।'}
+          {health && !health.executionLocked ? (
+            <>
+              <span className="font-semibold text-emerald-300">লাইভ ডেমো ট্রেডিং সচল</span> — স্ক্যাল্পার সিগন্যাল (M1·M5·M15)
+              রিস্ক-চেক পাস করলে স্বয়ংক্রিয়ভাবে অর্ডার কার্যকর হয়। {health.executionReason}
+            </>
+          ) : (
+            <>
+              <span className="font-semibold text-amber-200">রিড-ওনলি মোড</span> — বিশ্লেষণ ও সিগন্যাল গবেষণা ছাড়া কিছু নয়।{' '}
+              {health?.executionReason ?? 'চার-সুইচ এক্সিকিউশন লক সক্রিয়।'}
+            </>
+          )}
         </p>
       </div>
 

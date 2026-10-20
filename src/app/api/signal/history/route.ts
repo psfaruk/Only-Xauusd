@@ -15,6 +15,7 @@ import { guardDataApi, parseQuery } from '@/lib/api-guard';
 import { getSignalEvaluationCounts, getSignalEvaluationHistory } from '@/lib/signal/persistence';
 import { SIGNAL_STRATEGY_VERSION } from '@/lib/signal/types';
 import { CANDIDATE_STRATEGY_VERSION } from '@/lib/signal/candidate/types';
+import { SCALPER_STRATEGY_VERSION } from '@/lib/signal/scalper/types';
 import { config } from '@/lib/config';
 import { signalHistoryQuerySchema } from '@/lib/signal/schemas';
 
@@ -32,7 +33,12 @@ export async function GET(req: Request) {
   });
   if (!parsed.ok) return parsed.response;
   const symbol = parsed.data.symbol ?? config.market.symbols[0] ?? 'XAUUSDm';
-  const strategyVersion = parsed.data.strategy === 'candidate' ? CANDIDATE_STRATEGY_VERSION : SIGNAL_STRATEGY_VERSION;
+  const strategyVersion =
+    parsed.data.strategy === 'candidate'
+      ? CANDIDATE_STRATEGY_VERSION
+      : parsed.data.strategy === 'scalper'
+        ? SCALPER_STRATEGY_VERSION
+        : SIGNAL_STRATEGY_VERSION;
 
   try {
     const history = await getSignalEvaluationHistory(db, symbol, parsed.data.limit, strategyVersion);
@@ -59,7 +65,9 @@ export async function GET(req: Request) {
       note:
         parsed.data.strategy === 'candidate'
           ? 'Append-only CANDIDATE trail (research-only forward observation, phase11-candidate-forward/1 — never an execution instruction).'
-          : 'Append-only trail — earlier evaluations are never overwritten or deleted.',
+          : parsed.data.strategy === 'scalper'
+            ? 'Append-only SCALPER trail (M1/M5/M15 OR-logic live strategy — emitted setups drive the auto-execution pipeline when armed).'
+            : 'Append-only trail — earlier evaluations are never overwritten or deleted.',
     });
   } catch (e) {
     return NextResponse.json(

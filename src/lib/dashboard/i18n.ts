@@ -103,6 +103,18 @@ export const bnErrorText: Record<string, string> = {
   RANGE_NOT_DETECTED: 'সাম্প্রতিক উইন্ডোতে কোনো বৈধ রেঞ্জ শনাক্ত হয়নি (স্বাভাবিক NO_SETUP)।',
   RANGE_SWEEP_PENDING: 'রেঞ্জ-সুইপ মডেল: সীমানা ভেদের (sweep) অপেক্ষায় (স্বাভাবিক WAIT)।',
   RANGE_RECLAIM_PENDING: 'রেঞ্জ-সুইপ মডেল: সুইপের পর দাম সীমানার ভেতরে ফেরার অপেক্ষায় (স্বাভাবিক WAIT)।',
+  // Phase 12 — scalper strategy codes (M1/M5/M15 OR-logic). Same honesty
+  // contract: WAIT-family outcomes are HEALTHY, NO_SETUP is a normal scan
+  // result — none of these is a system failure.
+  SCALPER_NO_AGREE: 'এই মুহূর্তে M15/M5/M1 কোনো টাইমফ্রেমই agree করছে না (স্বাভাবিক NO_SETUP — পরের মিনিটে আবার দেখা হবে)।',
+  SCALPER_COOLDOWN: 'একটি সেটআপ মিলেছে, তবে কুলডাউন চলছে — শেষ সিগন্যালের ৮ মিনিটের মধ্যে নতুনটি আসবে না (ছন্দ-নিয়ন্ত্রণ)।',
+  SCALPER_DUPLICATE_SETUP: 'একই সিদ্ধান্ত-বারের সেটআপ আগেই নির্গত হয়েছে — ডুপ্লিকেট নয় (স্বাভাবিক WAIT)।',
+  SCALPER_LEVELS_INVALID: 'এন্ট্রি/SL/TP লেভেল গণনা বৈধ হয়নি — সেটআপ বাদ (সুরক্ষা)।',
+  SCALPER_SPREAD_TOO_WIDE: 'স্প্রেড সর্বোচ্চ সীমার চেয়ে চওড়া — সেটআপ স্থগিত (স্বাভাবিক WAIT)।',
+  SCALPER_SL_TOO_TIGHT: 'SL-দূরত্ব খুব চাপা (স্প্রেডের কাছে) — অবাণিজ্যিক সেটআপ বাদ।',
+  INSUFFICIENT_M1_HISTORY: 'M1 ইতিহাস অপর্যাপ্ত — ইন্ডিকেটর ওয়ার্ম-আপ সম্পূর্ণ নয়।',
+  INSUFFICIENT_M5_HISTORY: 'M5 ইতিহাস অপর্যাপ্ত — ইন্ডিকেটর ওয়ার্ম-আপ সম্পূর্ণ নয়।',
+  INSUFFICIENT_M15_HISTORY: 'M15 ইতিহাস অপর্যাপ্ত — ইন্ডিকেটর ওয়ার্ম-আপ সম্পূর্ণ নয়।',
 };
 
 export function bnForCode(code: string): string {
@@ -300,4 +312,28 @@ export const paperConclusionBn: Record<string, string> = {
   INCONCLUSIVE_CONCENTRATION: 'অনির্ণেয় — লাভ অল্প কয়েকটি ফলাফলে কেন্দ্রীভূত',
   INCONCLUSIVE_DRAWDOWN: 'অনির্ণেয় — ড্রডাউন সীমা ছাড়িয়ে গেছে',
   CONTINUE_FORWARD_RESEARCH: 'ফরোয়ার্ড গবেষণা চালিয়ে যাওয়ার যোগ্য',
+};
+
+// ---------------------------------------------------------------------------
+// Phase 12 — scalper renderings (M1/M5/M15 OR-logic live card)
+// ---------------------------------------------------------------------------
+
+/** Per-TF judgement stage → Bengali label (shown as three TF chips). */
+export const scalperStageBn: Record<string, string> = {
+  MOMENTUM_BUY: 'মোমেন্টাম BUY',
+  MOMENTUM_SELL: 'মোমেন্টাম SELL',
+  REVERSAL_BUY: 'রিভার্সাল BUY',
+  REVERSAL_SELL: 'রিভার্সাল SELL',
+  NO_AGREE: 'agree নেই',
+};
+
+export const scalperModelBn: Record<string, string> = {
+  MOMENTUM: 'মোমেন্টাম (EMA9/21 + RSI ব্যান্ড)',
+  REVERSAL: 'রিভার্সাল (RSI চরম + ফেরা)',
+};
+
+export const scalperTfLabelBn: Record<string, string> = {
+  M15: '১৫ মিনিট',
+  M5: '৫ মিনিট',
+  M1: '১ মিনিট',
 };

@@ -53,6 +53,7 @@ import type {
   QualityResponse,
   SignalHistoryResponse,
   SignalLatestResponse,
+  ScalperLatestResponse,
   ValidationLatestResponse,
   VerifyResponse,
 } from '@/lib/dashboard/types';
@@ -60,6 +61,7 @@ import { bnForCode, syncStatusBn } from '@/lib/dashboard/i18n';
 import { TerminalHeader } from '@/components/terminal/TerminalHeader';
 import { ChartPanel } from '@/components/terminal/ChartPanel';
 import { CandidateSignalCard } from '@/components/terminal/CandidateSignalCard';
+import { ScalperSignalCard } from '@/components/terminal/ScalperSignalCard';
 import { SignalCard } from '@/components/terminal/SignalCard';
 import { DashboardView, MarketSnapshot, SystemMiniCards } from '@/components/terminal/DashboardView';
 import { ChatView } from '@/components/terminal/ChatView';
@@ -93,6 +95,9 @@ export default function TradingTerminal() {
   const [backtestLatest, setBacktestLatest] = useState<BacktestLatestResponse | null>(null);
   const [signalLatest, setSignalLatest] = useState<SignalLatestResponse | null>(null);
   const [signalRunning, setSignalRunning] = useState(false);
+  // Phase 12 — the live scalper strategy surface (M1/M5/M15 OR-logic).
+  const [scalperLatest, setScalperLatest] = useState<ScalperLatestResponse | null>(null);
+  const [scalperRunning, setScalperRunning] = useState(false);
   const [signalHistory, setSignalHistory] = useState<SignalHistoryResponse | null>(null);
   // Phase 11-E — the candidate's own separately-labeled history surface
   // (?strategy=candidate; never merged into the baseline history list).
@@ -145,6 +150,7 @@ export default function TradingTerminal() {
         fetch('/api/signal/history?symbol=XAUUSDm&limit=20&strategy=candidate', { cache: 'no-store', signal: AbortSignal.timeout(20_000) }),
         fetch('/api/ai/review/latest?symbol=XAUUSDm', { cache: 'no-store', signal: AbortSignal.timeout(20_000) }),
         fetch('/api/execution/state', { cache: 'no-store', signal: AbortSignal.timeout(20_000) }),
+        fetch('/api/signal/scalper?symbol=XAUUSDm', { cache: 'no-store', signal: AbortSignal.timeout(20_000) }),
       ]);
       const resOf = (i: number): Response | null =>
         results[i].status === 'fulfilled' ? results[i].value : null;
@@ -157,6 +163,22 @@ export default function TradingTerminal() {
         if (r === null || !r.ok) return null;
         try {
           return (await r.json()) as T;
+        } catch {
+          return null;
+        }
+      };
+      /** /api/health deliberately answers HTTP 503 while its JSON body still
+       *  carries the full report (status "degraded" — e.g. GLM not yet
+       *  verified, or the execution-lock check honestly flagged DANGER now
+       *  that live orders are enabled). The dashboard needs that PAYLOAD
+       *  regardless of the HTTP status — without this, a permanently
+       *  "degraded" (but fully operational) backend would leave health=null
+       *  and the UI would fall back to stale lock messaging forever. */
+      const healthBody = async (): Promise<HealthReport | null> => {
+        const r = resOf(0);
+        if (r === null) return null;
+        try {
+          return (await r.json()) as HealthReport;
         } catch {
           return null;
         }
@@ -175,7 +197,7 @@ export default function TradingTerminal() {
 
       if (!ok(0) && !ok(1)) throw new Error('API unreachable');
 
-      setHealth((await body<HealthReport>(0)) ?? null);
+      setHealth((await healthBody()) ?? null);
       setAudit((await body<AuditResponse>(1)) ?? null);
       setApiError('audit', await errCode(1));
 
@@ -206,6 +228,8 @@ export default function TradingTerminal() {
       setApiError('aiReview', await errCode(12));
       setExecutionState((await body<ExecutionStateResponse>(13)) ?? null);
       setApiError('execution', await errCode(13));
+      setScalperLatest((await body<ScalperLatestResponse>(14)) ?? null);
+      setApiError('scalper', await errCode(14));
 
       setLoadError(null);
     } catch (e) {
@@ -401,6 +425,50 @@ export default function TradingTerminal() {
       toast({ title: 'সিগন্যাল মূল্যায়ন চালানো যায়নি', description: e instanceof Error ? e.message : 'unknown error', variant: 'destructive' });
     } finally {
       setSignalRunning(false);
+    }
+  }, [marketStatus?.symbol, refresh, syncBeforeRun, toast]);
+
+  // ---- Phase 12 — manual scalper evaluation trigger ----------------------------
+  const runScalperNow = useCallback(async () => {
+    setScalperRunning(true);
+    try {
+      const symbol = marketStatus?.symbol ?? SYMBOL;
+      await syncBeforeRun(symbol);
+      const res = await fetch(`/api/signal/scalper?symbol=${encodeURIComponent(symbol)}`, {
+        method: 'POST',
+        signal: AbortSignal.timeout(120_000),
+      });
+      const body = (await res.json().catch(() => null)) as {
+        ok?: boolean;
+        outcome?: string;
+        evaluation?: { reasonCodes: string[] };
+        execution?: { attempted: boolean; code: string; message: string; lots: number | null } | null;
+        error?: { code: string; message: string };
+      } | null;
+      if (!res.ok || !body?.ok) {
+        toast({
+          title: 'স্ক্যাল্পার মূল্যায়ন চালানো যায়নি',
+          description: body?.error ? `${body.error.code}: ${body.error.message}` : `HTTP ${res.status}`,
+          variant: 'destructive',
+        });
+      } else if (body.outcome === 'BUY_SETUP' || body.outcome === 'SELL_SETUP') {
+        toast({
+          title: `স্ক্যাল্পার সেটআপ: ${body.outcome === 'BUY_SETUP' ? 'BUY' : 'SELL'}`,
+          description: body.execution
+            ? body.execution.message
+            : 'রিস্ক-চেক/অটো-এক্সিকিউশন পাইপলাইনে গেছে।',
+        });
+      } else {
+        toast({
+          title: `স্ক্যাল্পার ফলাফল: ${body.outcome}`,
+          description: body.evaluation?.reasonCodes.map((c) => bnForCode(c)).join(' ') || 'কোনো কারণ-কোড নেই।',
+        });
+      }
+      await refresh();
+    } catch (e) {
+      toast({ title: 'স্ক্যাল্পার মূল্যায়ন চালানো যায়নি', description: e instanceof Error ? e.message : 'unknown error', variant: 'destructive' });
+    } finally {
+      setScalperRunning(false);
     }
   }, [marketStatus?.symbol, refresh, syncBeforeRun, toast]);
 
@@ -661,6 +729,17 @@ export default function TradingTerminal() {
                 liveTick={tickStream.status === 'live' ? tickStream.tick : null}
               />
               <div className="space-y-4">
+                {/* Phase 12 — the LIVE scalper strategy is the PRIMARY signal
+                 * surface (M1/M5/M15 OR-logic; auto-execution when armed). */}
+                <ScalperSignalCard
+                  scalper={scalperLatest}
+                  running={scalperRunning}
+                  onRun={() => void runScalperNow()}
+                  priceSpec={priceSpec}
+                  error={apiErrors.scalper ?? null}
+                  loading={loading}
+                  compact
+                />
                 <SignalCard
                   signalLatest={signalLatest}
                   signalRunning={signalRunning}
@@ -715,19 +794,31 @@ export default function TradingTerminal() {
           <div className="space-y-4 px-3 pb-28 pt-3" data-testid="mobile-view-root">
             {loadErrorBanner}
             {view === 'dashboard' && (
-              <DashboardView
-                health={health}
-                marketStatus={marketStatus}
-                dataHealth={dataHealth}
-                signalLatest={signalLatest}
-                signalRunning={signalRunning}
-                onRunSignal={() => void runSignalNow()}
-                priceSpec={priceSpec}
-                signalError={apiErrors.signal ?? null}
-                marketError={apiErrors.market ?? null}
-                loading={loading}
-                tickStream={tickStream}
-              />
+              <div className="space-y-4">
+                {/* Phase 12 — the live scalper card on top of the mobile
+                 * dashboard (primary signal surface). */}
+                <ScalperSignalCard
+                  scalper={scalperLatest}
+                  running={scalperRunning}
+                  onRun={() => void runScalperNow()}
+                  priceSpec={priceSpec}
+                  error={apiErrors.scalper ?? null}
+                  loading={loading}
+                />
+                <DashboardView
+                  health={health}
+                  marketStatus={marketStatus}
+                  dataHealth={dataHealth}
+                  signalLatest={signalLatest}
+                  signalRunning={signalRunning}
+                  onRunSignal={() => void runSignalNow()}
+                  priceSpec={priceSpec}
+                  signalError={apiErrors.signal ?? null}
+                  marketError={apiErrors.market ?? null}
+                  loading={loading}
+                  tickStream={tickStream}
+                />
+              </div>
             )}
             {view === 'chart' && (
               <div className="space-y-4">
@@ -787,16 +878,22 @@ export default function TradingTerminal() {
       <footer className="mt-auto border-t border-zinc-800 bg-zinc-950">
         <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-2 px-4 pb-20 pt-4 text-xs text-zinc-500 sm:px-6 lg:pb-4 md:flex-row md:items-center md:justify-between">
           <p className="flex items-center gap-1.5">
-            <ShieldCheck className="h-3.5 w-3.5 text-red-400" aria-hidden />
-            XAUUSD AI Trading Agent · {health?.phaseLabel ?? 'Phase —'} · Read-Only — কোনো অর্ডার পাঠানো হবে না
+            <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" aria-hidden />
+            XAUUSD AI Trading Agent · {health?.phaseLabel ?? 'Phase —'} ·{' '}
+            {health && !health.executionLocked
+              ? 'লাইভ ডেমো ট্রেডিং সচল — সিগন্যাল অনুযায়ী অর্ডার যায়'
+              : 'রিড-ওনলি মোড'}
           </p>
           <p className="font-mono text-[11px] text-zinc-400">
             Next.js 16 · TypeScript · Prisma/SQLite · z-ai-web-dev-sdk (glm-4-plus)
           </p>
-          {/* Master-audit fix B-D3: the gate number is now derived from the
-           * backend's OWN gate constant (was a stale hardcoded "Phase 12
-           * while the lock logic gates at Phase 11"). */}
-          <p className="text-zinc-400">Live Trading: Phase {health?.executionGatePhase ?? 11} রিলিজ-গেটের আগে চালু হবে না</p>
+          {/* Honest live posture derived from the backend state — no stale
+           * release-gate messaging (Phase 12: the app is fully operational). */}
+          <p className="text-zinc-400">
+            {health && !health.executionLocked
+              ? 'স্ক্যাল্পার M1·M5·M15 সিগন্যাল সচল — রিস্ক-চেক পাস করলে অটো-অর্ডার কার্যকর হয়'
+              : `Live Trading: Phase ${health?.executionGatePhase ?? 11} গেট পাস হলে চালু হবে`}
+          </p>
         </div>
       </footer>
 

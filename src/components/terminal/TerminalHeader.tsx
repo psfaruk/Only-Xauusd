@@ -94,13 +94,13 @@ export function TerminalHeader({
               className={`gap-1.5 ${
                 locked
                   ? 'border-red-500/40 bg-red-500/10 text-red-400'
-                  : 'border-red-600/60 bg-red-600/20 text-red-300 animate-pulse'
+                  : 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400 animate-pulse'
               }`}
               title={health?.executionReason ?? 'Execution locked — read-only by design'}
               data-execution-locked={locked ? 'true' : 'false'}
             >
               <LockKeyhole className="h-3 w-3" aria-hidden />
-              <span className="hidden sm:inline">Order Execution:</span> {locked ? 'LOCKED' : 'UNLOCKED'}
+              <span className="hidden sm:inline">Order Execution:</span> {locked ? 'LOCKED' : 'LIVE'}
             </Badge>
             <span
               className="hidden font-mono text-xs tabular-nums text-zinc-400 md:inline"
