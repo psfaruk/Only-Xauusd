@@ -1,0 +1,1086 @@
+MASTER ENGINEERING PROMPT
+
+XAUUSD AI TRADING AGENT — COMPLETE FRONTEND + BACKEND-INTEGRATED UI REDESIGN
+
+1. ROLE AND MISSION
+
+You are the Principal Software Architect, Senior Frontend Engineer, Backend Integration Engineer, UI/UX Designer, Design-System Architect, Accessibility Engineer, Performance Engineer, QA Lead, and Release Manager.
+
+Your task is to deeply inspect and redesign the existing repository:
+
+Repository: "psfaruk/Xauusd-agent"
+
+This is an existing application. You are NOT authorized to replace it with an unrelated template or create a disconnected demo dashboard.
+
+Your mission is to transform the current application into a professional, polished, visually consistent, responsive, real-time XAUUSD AI Trading Terminal while preserving every working backend capability, API contract, market-data pipeline, authentication rule, signal-generation workflow, database integration, and execution-safety restriction.
+
+The final product must feel like a cohesive professional trading platform rather than a collection of inconsistent pages and components.
+
+Core objectives
+
+1. Audit the entire existing frontend and its design inconsistencies.
+2. Audit the backend-to-frontend data flow before changing interfaces.
+3. Establish one unified design system.
+4. Redesign every relevant page, panel, modal, menu, chart container, table, form, dropdown, filter, toolbar, popup, and navigation component.
+5. Improve visual hierarchy, spacing, typography, color consistency, alignment, responsiveness, and usability.
+6. Preserve all existing functional APIs and integrations.
+7. Improve data freshness visibility, loading states, error handling, and operational diagnostics.
+8. Implement the redesign in the actual repository.
+9. Test the application deeply and fix regressions before reporting completion.
+
+Do not stop after producing a design plan, screenshots, a mockup, or a list of recommendations. Inspect, implement, test, and deliver the actual code changes.
+
+---
+
+2. NON-NEGOTIABLE PRESERVATION RULES
+
+The existing application's functionality takes priority over visual changes.
+
+Before modifying any code, map the existing system and establish a baseline.
+
+Preserve:
+
+- Existing Next.js routing and rendering architecture.
+- Existing TypeScript contracts and application types.
+- Existing backend API routes and HTTP methods.
+- Existing request and response schemas.
+- Existing authentication, authorization, middleware, and rate limiting.
+- Existing database schema and migrations.
+- Existing Prisma integration and stored historical data.
+- Existing MT5 bridge and market-data pipeline.
+- Existing real-time event subscriptions and update mechanisms.
+- Existing analysis and signal-generation engine.
+- Existing indicators, strategy rules, and deterministic risk validation.
+- Existing environment-variable names and configuration.
+- Existing error-handling and retry behavior, unless a confirmed defect requires a safe correction.
+- Existing mobile and desktop functionality.
+- Existing security controls and execution restrictions.
+
+Critical trading restrictions
+
+This application remains a READ-ONLY market-analysis and signal platform.
+
+- Do not introduce live or demo order execution.
+- Do not add or enable order-placement endpoints.
+- Preserve all four existing execution safety locks in their locked state.
+- Do not weaken strategy or risk gates.
+- Do not generate fake BUY/SELL signals for visual demonstration.
+- Do not fabricate live prices, ticks, candles, spreads, account balances, or connection statuses.
+- Do not change the frozen paper-testing protocol.
+- Never expose credentials, API tokens, broker passwords, or environment-variable values in logs, screenshots, source code, or UI.
+
+A redesign is not permission to change the trading system's behavior.
+
+---
+
+3. PHASE 0 — FULL REPOSITORY AND ARCHITECTURE AUDIT
+
+Inspect the actual repository before choosing the implementation.
+
+Read the relevant files, including:
+
+- "package.json"
+- Lockfile and installed dependencies
+- "src/app/**"
+- Existing layouts and page components
+- Existing global CSS and design tokens
+- "src/components/**", if present
+- Existing hooks, contexts, and state-management code
+- Existing API route handlers
+- Existing market-data and MT5 bridge modules
+- Existing WebSocket/SSE implementations
+- Existing chart and indicator components
+- Existing authentication and middleware
+- Prisma schema, migration history, and database access layer
+- Existing tests, lint rules, TypeScript configuration, and build configuration
+
+Adapt paths to the repository's actual structure. Do not assume every listed path exists.
+
+Build a component inventory
+
+Create an inventory of:
+
+- Pages and routes
+- Layouts and navigation
+- Shared components
+- Page-specific components
+- Charts
+- Tables
+- Forms
+- Search controls
+- Filters
+- Dropdowns
+- Toolbars
+- Popovers
+- Modal dialogs
+- Drawers and slide-over panels
+- Command menus
+- Tooltips
+- Notifications and toast messages
+- Loading states
+- Empty states
+- Error boundaries
+- Responsive layouts
+- Theme and color configuration
+
+For each component, record:
+
+1. File location.
+2. Purpose.
+3. Existing dependencies.
+4. Data sources and API calls.
+5. Current design problems.
+6. Existing functionality that must be preserved.
+7. Proposed redesign.
+8. Required regression tests.
+
+Identify duplicated components, conflicting CSS, inconsistent spacing, arbitrary colors, conflicting z-index values, unnecessary nested containers, oversized cards, broken mobile layouts, and inaccessible interactions.
+
+Do not delete a component merely because its design looks inconsistent. First determine whether it provides important functionality.
+
+---
+
+4. PHASE 1 — WEB RESEARCH AND DESIGN REFERENCE REVIEW
+
+Research current official documentation and credible implementation references before selecting components.
+
+Prioritize:
+
+- Official shadcn/ui documentation.
+- Official Tailwind CSS documentation.
+- Official Next.js documentation.
+- Radix UI or Base UI accessibility and interaction documentation, matching the existing shadcn/ui configuration.
+- Official documentation for the chart library already installed.
+- TanStack Table documentation if the application uses or genuinely needs advanced data tables.
+- WCAG accessibility guidance.
+- Well-designed professional financial and analytics dashboards for visual reference.
+
+Reference starting points:
+
+- shadcn/ui: https://ui.shadcn.com/
+- Tailwind CSS: https://tailwindcss.com/docs
+- Next.js: https://nextjs.org/docs
+- Radix UI: https://www.radix-ui.com/primitives/docs/overview/introduction
+- TanStack Table: https://tanstack.com/table/latest/docs
+- WCAG: https://www.w3.org/WAI/standards-guidelines/wcag/
+
+Research rules
+
+- Verify current official documentation.
+- Check installed package versions before using new APIs.
+- Follow the project's existing React, Next.js, Tailwind, and component-library compatibility.
+- Do not blindly upgrade the entire dependency tree.
+- Do not install multiple libraries that solve the same problem.
+- Do not add a heavyweight UI framework when a small existing component can solve the requirement.
+- Do not copy proprietary designs, branding, or paid templates.
+- Use research to inform implementation, not to replace repository-specific engineering.
+
+Deliver an evidence-based design decision document before implementation begins.
+
+---
+
+5. PHASE 2 — ESTABLISH THE VISUAL IDENTITY
+
+Create a unified design identity using these four primary visual themes:
+
+1. Sky blue.
+2. Sunlight and warm amber.
+3. Dark graphite/navy.
+4. Clean white.
+
+The overall direction should combine a modern financial terminal with a clean, premium analytics dashboard.
+
+The interface must be visually attractive without sacrificing readability, chart visibility, or operational clarity.
+
+5.1 Color system
+
+Use centralized design tokens. Do not scatter arbitrary hex colors across individual components.
+
+Suggested initial palette:
+
+Token| Suggested value| Purpose
+Primary sky blue| "#38BDF8"| Primary actions, active navigation, highlights
+Deep sky blue| "#0284C7"| Primary buttons on light surfaces
+Pale sky blue| "#E0F2FE"| Light-theme selection and informational backgrounds
+Dark background| "#0B1220"| Main dark-theme background
+Elevated dark surface| "#111C2E"| Sidebar and major panels
+Dark card surface| "#162338"| Cards and secondary surfaces
+Clean white| "#FFFFFF"| Light-theme backgrounds
+Light surface| "#F4F8FC"| Light-theme panels
+Main dark text| "#172033"| Light-theme text
+Main light text| "#EAF2FF"| Dark-theme text
+Muted text| "#64748B"| Secondary text on light surfaces
+Dark-theme muted text| "#9FB0C7"| Secondary text on dark surfaces
+Sunlight amber| "#FBBF24"| Highlights, selected accents, warning emphasis
+Success green| "#22C55E"| Successful operations and validated states
+Danger red| "#EF4444"| Errors and bearish/downward market indicators
+Border light| "#DCE5F0"| Light-theme dividers and borders
+Border dark| "#26364D"| Dark-theme dividers and borders
+
+These are starting values, not an excuse to ignore contrast testing. Refine them after checking text contrast, chart visibility, active states, and visual balance.
+
+Important color semantics
+
+- Sky blue is the primary brand accent.
+- Sunlight amber is a restrained secondary accent.
+- Dark graphite and navy create a professional terminal environment.
+- White and soft gray create clean light-mode surfaces.
+- Green and red communicate market direction and status, not decorative branding.
+- Never use color alone to communicate a critical state; combine it with a label or icon.
+
+Avoid excessive gradients, glowing borders, neon colors, glassmorphism, blur effects, and decorative animations.
+
+Use gradients sparingly, mainly in subtle hero or overview accents.
+
+5.2 Theme modes
+
+Implement a coherent dark and light theme if the existing architecture supports it.
+
+Requirements:
+
+- Dark mode should be the primary trading-terminal experience.
+- Light mode must remain fully designed, not merely an inverted dark theme.
+- All surfaces, borders, text, menus, popovers, tooltips, charts, and dialogs must follow the active theme.
+- Persist the user's theme preference using the project's existing or appropriate theme mechanism.
+- Avoid hydration mismatches and theme flashes.
+- Respect system preferences where appropriate.
+- Ensure charts update their visual configuration when the theme changes.
+
+Do not add a theme toggle that changes only the page background.
+
+---
+
+6. PHASE 3 — CREATE A COMPLETE DESIGN SYSTEM
+
+Create a documented, maintainable design system.
+
+Centralize tokens for:
+
+- Colors
+- Typography
+- Font sizes
+- Font weights
+- Line heights
+- Spacing
+- Border radii
+- Border widths
+- Shadows
+- Layout widths
+- Sidebar dimensions
+- Header heights
+- Z-index layers
+- Transition durations
+- Focus rings
+- Responsive breakpoints
+- Chart colors
+- Status colors
+
+Use CSS custom properties and the styling approach supported by the existing project.
+
+Use Tailwind utilities where appropriate and reusable component variants for repeated patterns.
+
+Do not build every page using independent custom CSS.
+
+Typography
+
+Choose a professional, readable sans-serif font that supports the required languages.
+
+Recommended hierarchy:
+
+- Main page title: 26–32 px desktop.
+- Section title: 18–22 px.
+- Card title: 14–16 px.
+- Body text: 14–16 px.
+- Secondary labels: 12–14 px.
+- Market price: 24–36 px, depending on context.
+- Small technical metadata: generally 11–12 px, never too small for critical information.
+
+Use consistent font weights and line heights.
+
+Use tabular numerals for prices, timestamps, spreads, and other rapidly changing numeric values where appropriate.
+
+Avoid oversized text in dense trading panels.
+
+Spacing system
+
+Use a consistent spacing scale based on 4 px increments.
+
+Suggested patterns:
+
+- Small inline gaps: 4–8 px.
+- Control spacing: 8–12 px.
+- Card internal spacing: 16–20 px.
+- Section spacing: 20–28 px.
+- Major page separation: 24–32 px.
+- Desktop outer page padding: 24–32 px.
+- Tablet outer page padding: 16–24 px.
+- Mobile outer page padding: 12–16 px.
+
+Choose values consistently and centralize repeated patterns.
+
+Radius and elevation
+
+- Small controls: 6–8 px radius.
+- Inputs and standard buttons: 8–10 px radius.
+- Cards and panels: 12–16 px radius.
+- Large dialogs: 16–20 px radius.
+
+Use subtle borders and restrained shadows.
+
+Avoid making every element a floating rounded card. Use clear grouping and deliberate visual hierarchy.
+
+---
+
+7. PHASE 4 — REDESIGN THE APPLICATION SHELL
+
+Build a coherent application shell around the existing routes and features.
+
+7.1 Header
+
+Create a clean top header with:
+
+- Product identity and logo treatment.
+- Current symbol indicator: "XAUUSDm".
+- Actual market-data connection status.
+- Last update timestamp.
+- Current theme control.
+- Search or command launcher, if appropriate.
+- Relevant user/settings actions already supported by the application.
+
+Do not display invented broker connectivity, fabricated account details, or fake live prices.
+
+Keep the header compact and aligned.
+
+7.2 Sidebar
+
+Create a consistent navigation sidebar with:
+
+- Clear icons and labels.
+- Logical navigation groups.
+- Active route highlighting.
+- Optional collapsible behavior.
+- Tooltips for icon-only mode.
+- Accessible keyboard navigation.
+- A responsive mobile drawer.
+
+Determine the actual routes from the repository. Do not invent nonfunctional pages.
+
+Group existing features according to their real purpose. Potential groups include:
+
+- Overview
+- Live Market
+- Charts and Analysis
+- Signals
+- Strategy
+- Market Data
+- Agent Activity
+- Diagnostics
+- Settings
+
+Only display groups supported by the actual application.
+
+7.3 Main content
+
+- Use consistent page headers and breadcrumbs where useful.
+- Keep content aligned to a shared grid.
+- Establish a clear hierarchy between primary and secondary panels.
+- Avoid random widths, overflowing cards, and inconsistent margins.
+- Use responsive grid layouts rather than fixed desktop-only dimensions.
+- Keep the most important market and signal information visually prominent.
+
+7.4 Footer
+
+If a footer is useful for the existing application, create a compact and unobtrusive one containing appropriate application version, environment, or system-status information.
+
+Do not add decorative footer sections to a dense trading terminal without a real purpose.
+
+---
+
+8. PHASE 5 — REDESIGN THE TRADING DASHBOARD
+
+Inspect the existing dashboard and reorganize its real features into a logical information hierarchy.
+
+A suggested layout:
+
+Row A — Market status
+
+Compact status items for:
+
+- Symbol.
+- Current bid/ask, when actual data is available.
+- Spread.
+- Market-data freshness.
+- Bridge connection.
+- Last candle update.
+- Active analysis state.
+
+Use consistent sizes and status badges.
+
+Row B — Main chart and analysis
+
+The main chart should be the visual anchor of the page.
+
+Include, where supported:
+
+- Candlestick chart.
+- Timeframe selector.
+- Chart controls.
+- Available indicators.
+- Existing drawing tools.
+- Price axis and time axis.
+- Current price marker.
+- Loading, empty, stale and error states.
+- Chart information and update status.
+
+Keep the chart large enough to inspect candles clearly.
+
+Do not replace the real chart with a static illustration.
+
+Do not fabricate candle movements to make the dashboard look active.
+
+Row C — Signal and setup analysis
+
+Display actual analysis results, including when available:
+
+- BUY, SELL, WAIT or NO_SETUP.
+- Strategy/setup identifier.
+- Analysis timestamp.
+- Entry, stop-loss and take-profit candidates.
+- Risk/reward calculation.
+- Setup evidence.
+- Rejection reason.
+- Data freshness and validation state.
+
+Only render fields actually returned by the backend.
+
+Distinguish a proposed analytical level from an executed order. The application remains read-only.
+
+Row D — Agent activity and diagnostics
+
+If the backend exposes agent information, show:
+
+- Agent/task name.
+- Current state.
+- Start time and last update.
+- Progress or stage, when actually measured.
+- Error state and concise diagnostic details.
+
+Do not display a fictional number of active agents or fabricate progress percentages.
+
+Row E — Detailed information
+
+Use well-organized tabs, panels or collapsible sections for:
+
+- Indicator values.
+- Market structure.
+- Multi-timeframe analysis.
+- Recent signal history.
+- Event logs.
+- Data-quality diagnostics.
+
+Only include features supported by real backend data.
+
+Layout principles
+
+- Prioritize the chart and actionable analytical context.
+- Prevent dashboard cards from becoming excessively tall.
+- Avoid redundant copies of the same price or connection information.
+- Allow secondary panels to collapse when useful.
+- Use a consistent grid and responsive breakpoints.
+- Preserve existing features even if they need to move to another panel or tab.
+
+---
+
+9. PHASE 6 — BUILD A CONSISTENT COMPONENT LIBRARY
+
+Audit existing components first. Reuse and improve working components rather than blindly replacing them.
+
+Use shadcn/ui with the compatible Radix UI or Base UI primitives already selected by the project, where appropriate.
+
+Build or standardize these component families.
+
+9.1 Basic controls
+
+- Button
+- Icon button
+- Button group
+- Input
+- Search input
+- Textarea
+- Select
+- Combobox
+- Checkbox
+- Radio group
+- Switch
+- Slider
+- Date/time input, if needed
+- Form field
+- Validation message
+- Label
+- Badge
+- Status indicator
+- Tooltip
+
+9.2 Navigation
+
+- Sidebar
+- Navigation menu
+- Breadcrumb
+- Tabs
+- Pagination
+- Collapsible navigation group
+- Mobile navigation drawer
+- Command menu
+- Page-level action toolbar
+
+9.3 Overlays and floating UI
+
+- Dropdown menu
+- Context menu
+- Popover
+- Tooltip
+- Dialog
+- Alert dialog
+- Sheet or slide-over panel
+- Drawer
+- Hover card, where useful
+- Toast notifications
+- Command palette
+
+Ensure each overlay has appropriate positioning, keyboard behavior, focus management and dismissal behavior.
+
+Prevent dropdowns from being clipped by chart containers or card overflow.
+
+Manage stacking contexts and z-index consistently.
+
+9.4 Data display
+
+- Metric card
+- Data table
+- Table toolbar
+- Table filter
+- Sortable table header
+- Empty state
+- Loading skeleton
+- Error panel
+- Pagination controls
+- Status badge
+- Timeline
+- Activity list
+- Diagnostic event panel
+- Chart legend
+- Expandable detail panel
+
+9.5 Advanced layout tools
+
+Where justified by real requirements, use:
+
+- Resizable panels
+- Split panes
+- Collapsible sections
+- Dock-like tool panels
+- Command palette
+- Floating chart toolbar
+- Full-screen chart mode
+
+Do not introduce resizable or draggable panels simply for decoration. Keep the default layout predictable and easy to use.
+
+---
+
+10. PHASE 7 — SEARCH, FILTERS, DROPDOWNS AND TOOLBOXES
+
+Design these interactions as one consistent system.
+
+Search bar
+
+- Clear search purpose.
+- Consistent icon and spacing.
+- Keyboard focus indicator.
+- Accessible label.
+- Clear/reset control where useful.
+- Loading, no-results and error states.
+- Debounce only where appropriate.
+- Cancel or disregard stale asynchronous results safely.
+
+If the application has multiple search scopes, distinguish global navigation search from table filters and market-data search.
+
+Filters
+
+- Clear filter labels.
+- Sensible defaults.
+- Multi-select only when necessary.
+- Active-filter indicators.
+- Clear-all action.
+- Appropriate Apply/Cancel behavior.
+- Filter count when useful.
+- Empty-result explanation.
+- Mobile-friendly filter drawer where appropriate.
+
+Filters must operate on real data and must not silently change the underlying trading strategy.
+
+Dropdowns
+
+- Consistent menu width and alignment.
+- Keyboard navigation.
+- Escape-to-close.
+- Click-outside behavior.
+- Focus management.
+- Visible selected state.
+- Proper handling of long lists and scrolling.
+
+Toolboxes and chart controls
+
+Group related actions together.
+
+Provide concise tooltips for unfamiliar icons.
+
+Distinguish destructive actions from ordinary actions.
+
+Do not expose execution controls that violate the read-only requirement.
+
+Popups and dialogs
+
+- Clear title and purpose.
+- Appropriate size for the task.
+- Explicit primary and secondary actions.
+- Predictable dismissal behavior.
+- Confirmation for destructive operations.
+- Focus trapping where required.
+- Accessible labels and descriptions.
+- No accidental loss of unsaved user input.
+
+Use a compact dialog for small tasks and a side panel for detailed contextual information.
+
+Avoid stacking multiple dialogs without a compelling reason.
+
+---
+
+11. PHASE 8 — BACKEND-TO-FRONTEND CONTRACT PRESERVATION
+
+This is the most important engineering requirement.
+
+The UI must become better without breaking the application behind it.
+
+11.1 Build an API contract inventory
+
+Before frontend integration changes, inspect every relevant endpoint.
+
+For each endpoint, record:
+
+- Path.
+- HTTP method.
+- Authentication and authorization.
+- Request schema.
+- Response schema.
+- Error response format.
+- Side effects.
+- Cache behavior.
+- Consumers in the frontend.
+- Existing tests.
+
+Inspect all existing market-data, analysis, signal, settings and diagnostic endpoints that are actually present.
+
+Do not assume endpoint paths or schemas.
+
+11.2 Preserve contracts
+
+Unless a separately justified backend bug requires a controlled change:
+
+- Keep endpoint paths unchanged.
+- Keep HTTP methods unchanged.
+- Preserve request field names and types.
+- Preserve response field names and types.
+- Preserve status codes and error semantics.
+- Preserve authentication headers and cookies.
+- Preserve rate limits.
+- Preserve request validation.
+- Preserve existing business rules.
+- Preserve event names and payload schemas.
+- Preserve database compatibility.
+
+Do not create a new mock API to make the redesign appear functional.
+
+Do not hardcode sample responses into production components.
+
+Do not silently replace a failing real request with fabricated data.
+
+11.3 Audit API consumers
+
+Search the repository for all usages of the existing endpoints and event streams.
+
+Check:
+
+- API client functions.
+- React hooks.
+- Server components and client components.
+- Polling loops.
+- WebSocket/SSE subscriptions.
+- Query caching.
+- Loading states.
+- Error handling.
+- Retry behavior.
+- Request cancellation.
+- Data transformation and formatting.
+
+Where useful, introduce typed API adapters or hooks, but keep the external contracts unchanged.
+
+Avoid duplicating API logic across multiple components.
+
+11.4 Preserve live data behavior
+
+The redesigned dashboard must continue using the actual live market-data pipeline.
+
+- Preserve the current MT5 bridge.
+- Preserve "XAUUSDm" mapping.
+- Preserve actual candle timestamps and OHLC values.
+- Preserve real signal-generation behavior.
+- Preserve analysis history.
+- Preserve backend connection status.
+- Preserve actual stale-data detection.
+- Avoid stale caches being displayed as current market data.
+- Do not introduce unnecessary polling loops.
+- Do not subscribe multiple times to the same event stream.
+- Clean up subscriptions when components unmount.
+- Prevent late asynchronous responses from overwriting newer data.
+- Keep the UI responsive when incoming ticks arrive frequently.
+
+If an API fails, display an honest error or stale state with a retry option where appropriate.
+
+Never make a disconnected backend appear connected just because the new design looks better.
+
+---
+
+12. PHASE 9 — CHART AND REAL-TIME RENDERING PERFORMANCE
+
+The application may receive frequent market updates. Design for continuous data without unnecessary rendering overhead.
+
+Requirements:
+
+- Update the existing chart series efficiently.
+- Avoid recreating the entire chart for each tick.
+- Keep chart components stable across parent renders.
+- Memoize expensive calculations only when profiling justifies it.
+- Avoid redundant state copies.
+- Batch noncritical UI updates if needed.
+- Do not delay essential price/candle updates unnecessarily.
+- Keep chart interaction smooth during bursts.
+- Ensure timeframe changes do not corrupt candle data.
+- Keep chart colors consistent with the design tokens.
+- Preserve existing indicators and overlays.
+- Avoid reformatting every historical candle on each tick.
+- Handle empty data, missing data, disconnections and reconnects safely.
+
+Measure before and after where possible.
+
+Report actual observed rendering performance instead of inventing benchmark numbers.
+
+---
+
+13. PHASE 10 — RESPONSIVE DESIGN
+
+The application must work across:
+
+- Large desktop screens.
+- Standard laptops.
+- Tablets.
+- Mobile browsers.
+- Android devices with narrow viewports.
+
+Use a mobile-first approach.
+
+Desktop
+
+- Persistent or collapsible sidebar.
+- Full chart and secondary analytical panels.
+- Efficient multi-column grid.
+- Clearly separated market controls and detailed data.
+
+Tablet
+
+- Reduced column count.
+- Collapsible secondary panels.
+- Compact toolbar.
+- Touch-friendly controls.
+
+Mobile
+
+- Sidebar becomes an accessible drawer or appropriate compact navigation.
+- Main chart remains readable and usable.
+- Horizontal overflow is controlled.
+- Dense tables use an appropriate responsive presentation.
+- Secondary panels move below the main chart or into tabs.
+- Important market status remains visible.
+- Dropdowns and dialogs fit the viewport.
+- Touch targets are generally at least 44 × 44 CSS pixels where practical.
+- No essential action requires hover.
+- Forms do not cause horizontal overflow.
+- The virtual keyboard does not obscure essential form actions.
+
+Do not simply scale down the desktop interface. Reorganize content according to mobile priorities.
+
+---
+
+14. PHASE 11 — ACCESSIBILITY AND INTERACTION QUALITY
+
+Apply WCAG-aligned practices.
+
+Requirements:
+
+- Semantic HTML.
+- Accessible labels.
+- Keyboard navigation.
+- Visible focus indicators.
+- Appropriate contrast.
+- Screen-reader-friendly status messages.
+- Correct dialog and menu semantics.
+- Accessible form validation.
+- Reduced-motion support.
+- Appropriate ARIA attributes only where needed.
+- No keyboard traps outside intentional modal focus management.
+- No critical state communicated only by color.
+- No tiny unreadable text in critical trading panels.
+
+Test real interactions, not just rendered appearance.
+
+Every visible button, menu, search box, tab and filter must have a defined, functioning behavior.
+
+Do not add attractive but nonfunctional controls.
+
+---
+
+15. PHASE 12 — LOADING, ERROR, EMPTY AND DEGRADED STATES
+
+Design these states as part of the system rather than as afterthoughts.
+
+Every data-dependent panel must have appropriate behavior for:
+
+1. Initial loading.
+2. Successful data load.
+3. Empty results.
+4. Backend/API error.
+5. Disconnected market-data stream.
+6. Stale market data.
+7. Partial data.
+8. Retry in progress.
+9. Permission or authentication failure.
+10. Unsupported or unavailable functionality.
+
+Use consistent skeletons, empty-state messages, status badges and retry controls.
+
+Avoid layout jumps during loading.
+
+Do not show a permanent spinner when the actual operation has failed.
+
+Do not use fabricated prices, fake activity logs or sample signals to fill empty panels.
+
+A truthful empty state is preferable to a misleading populated interface.
+
+---
+
+16. PHASE 13 — FRONTEND AND BACKEND REGRESSION TESTING
+
+Before changes, run the existing baseline tests.
+
+After each major integration, run the appropriate test suite.
+
+Required checks
+
+- TypeScript typecheck.
+- ESLint or the repository's configured linter.
+- Production build.
+- Existing unit tests.
+- Existing integration tests.
+- Existing API tests.
+- Existing E2E tests.
+- Desktop layout tests.
+- Mobile layout tests.
+- Theme consistency tests.
+- Chart update regression tests.
+- Navigation and route regression tests.
+- Dropdown and modal interaction tests.
+- Accessibility checks.
+- Console and browser-error checks.
+- Backend-to-frontend contract tests.
+
+API regression suite
+
+Verify that:
+
+- Existing API endpoints remain available.
+- Existing request payloads remain accepted.
+- Existing response schemas remain compatible.
+- Authentication remains enforced.
+- Rate limiting remains enforced.
+- Error responses remain correctly handled.
+- Existing database reads and writes still behave as intended.
+- Real market data reaches the correct components.
+- Existing signal results render correctly.
+- Failed requests do not display fake successful data.
+
+Visual regression suite
+
+Where the repository already has a suitable tool, use screenshots or visual comparisons to check:
+
+- Desktop dashboard.
+- Mobile dashboard.
+- Light theme.
+- Dark theme.
+- Main chart.
+- Search and filter controls.
+- Dropdown menus.
+- Modal dialogs.
+- Empty and error states.
+
+Use the existing toolchain where possible. Do not install an unnecessary browser-testing framework without justification.
+
+Trading safety regression suite
+
+Verify that:
+
+- No order endpoint has been added or enabled.
+- All four execution locks remain locked.
+- No live or demo orders can be submitted by the redesigned UI.
+- Existing risk validation remains intact.
+- The frozen paper-testing protocol is unchanged.
+- No credentials or secrets have entered the diff.
+
+If a regression is discovered, fix it before declaring completion.
+
+---
+
+17. PHASE 14 — IMPLEMENTATION AND CHANGE MANAGEMENT
+
+Use controlled implementation rather than rewriting the entire application at once.
+
+Recommended order:
+
+1. Baseline and architecture audit.
+2. API/data-flow mapping.
+3. Design tokens and global styles.
+4. Shared component library.
+5. Application shell and navigation.
+6. Main dashboard layout.
+7. Chart and market-data panels.
+8. Signal and analysis panels.
+9. Tables, filters, toolboxes and overlays.
+10. Responsive/mobile refinement.
+11. Accessibility and error states.
+12. API and E2E regression testing.
+13. Final visual consistency review.
+14. Build, lint, typecheck and security review.
+15. Final report.
+
+This sequence is an implementation order, not permission to stop after any one step.
+
+After each stage, verify that the application still compiles and that important routes continue working.
+
+Preserve unrelated working-tree changes. Do not overwrite work from another agent or discard user changes.
+
+If multiple agents are available, assign parallel read-only reviews and isolated implementation tasks. Use one coordinated integration process for shared files.
+
+Do not have multiple agents independently rewrite global CSS, root layouts, or shared component files at the same time.
+
+---
+
+18. REQUIRED DELIVERABLES
+
+Create these documents using the repository's existing conventions.
+
+A. "audit/ui-redesign-baseline.md"
+
+Include:
+
+- Repository baseline.
+- Existing architecture.
+- Page/component inventory.
+- Existing design inconsistencies.
+- Backend integration map.
+- Existing test status.
+- Main risks.
+
+B. "audit/ui-redesign-design-system.md"
+
+Include:
+
+- Final color tokens.
+- Typography scale.
+- Spacing scale.
+- Radius and shadow system.
+- Layout grid.
+- Component variants.
+- Responsive breakpoints.
+- Theme behavior.
+- Accessibility decisions.
+
+C. "audit/ui-redesign-api-contracts.md"
+
+Include:
+
+- Existing endpoint inventory.
+- Request/response compatibility requirements.
+- Frontend consumers.
+- Event-stream integration.
+- Regression-test mapping.
+
+Do not expose secrets or private tokens in these documents.
+
+D. "audit/ui-redesign-final-report.md"
+
+Include:
+
+- Files changed.
+- Major design improvements.
+- Components added or refactored.
+- API contracts preserved.
+- Backend changes, if any, and why they were necessary.
+- Responsive and accessibility improvements.
+- Actual test commands and results.
+- Actual build status.
+- Known limitations.
+- Remaining work.
+- Whether changes were committed and pushed.
+- Exact commit hash, if committed.
+
+E. Actual implementation
+
+The deliverable is the working application code, not only these reports.
+
+---
+
+19. FINAL ACCEPTANCE CRITERIA
+
+The task is complete only when all applicable criteria are satisfied:
+
+1. The app has one coherent and recognizable visual identity.
+2. Sky blue, sunlight amber, dark graphite and white are applied consistently.
+3. Typography, spacing, borders, radii, controls and panels are standardized.
+4. The main dashboard has clear information hierarchy.
+5. All existing relevant pages and features are redesigned consistently.
+6. Search, filters, dropdowns, toolboxes, popovers, dialogs and drawers work correctly.
+7. Desktop and mobile layouts are usable.
+8. Dark and light themes are coherent, if both are supported.
+9. Real chart, candle and signal data continue to flow from the existing backend.
+10. Existing API request and response contracts remain compatible.
+11. Authentication and security controls remain intact.
+12. No fake data or fake signal has been introduced.
+13. The application builds successfully, or every remaining blocker is precisely documented.
+14. Relevant automated tests pass, with failures reported honestly.
+15. The four execution safety locks remain locked.
+16. No live or demo order-execution capability has been added.
+17. The final report identifies exactly what was changed and what was actually verified.
+
+FINAL EXECUTION INSTRUCTION
+
+Begin by auditing the actual repository and preserving the baseline. Then research compatible design patterns, define the design system, map the backend contracts, implement the redesign, and run regression tests.
+
+Do not stop after writing a plan.
+
+Do not rebuild the application from scratch.
+
+Do not replace real backend integrations with mock data.
+
+Do not silently change strategy behavior.
+
+Do not claim that tests passed unless they actually ran and passed.
+
+Deliver a visually polished, professional, responsive XAUUSD trading terminal whose improved frontend is fully integrated with the existing backend and whose original functionality and safety controls remain intact.
