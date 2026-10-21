@@ -466,6 +466,12 @@ export interface ScalperEvidenceView extends SignalEvidenceView {
     model: 'MOMENTUM' | 'REVERSAL' | 'SMC_CONFLUENCE' | null;
     suppressedDirection: 'BUY' | 'SELL' | null;
     tfJudgements: ScalperTfJudgementView[];
+    /** Task 36 — the H1/H4 trend read behind the reverse-vs-continue gate. */
+    htfTrend?: {
+      h1: 'bullish' | 'bearish' | 'range' | null;
+      h4: 'bullish' | 'bearish' | 'range' | null;
+      opposed: boolean;
+    };
   };
   /** Phase 14 — the full ten-agent ICT/SMC breakdown of the source TF. */
   smc?: SmcConfluenceView;

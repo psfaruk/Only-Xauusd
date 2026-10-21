@@ -75,6 +75,8 @@ export function computeScalperFingerprint(input: ScalperCoreInput): string {
     m15: windowPayload(input.m15),
     m5: windowPayload(input.m5),
     m1: windowPayload(input.m1),
+    h1: windowPayload(input.h1),
+    h4: windowPayload(input.h4),
   };
   return createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 }
@@ -104,6 +106,68 @@ export function computeScalperDatasetFingerprint(symbol: string, w: SignalWindow
     h.update(`|${c.timeUtcSec},${c.openText},${c.highText},${c.lowText},${c.closeText}`);
   }
   return h.digest('hex');
+}
+
+// ---------------------------------------------------------------------------
+// Task 36 — Higher-timeframe trend read (the reverse-vs-continue brain)
+// ---------------------------------------------------------------------------
+
+/** One HTF window's EMA-structure trend: bullish when EMA-fast > EMA-slow AND
+ * the last close above both, bearish mirrored, otherwise range. Null when the
+ * window has fewer bars than the rule minimum or the EMAs are not warmed up —
+ * the honest "no opinion" (the veto then never fires on this TF).
+ * PURE: candles + rules in, trend out. */
+export function readHtfTrend(
+  w: SignalWindow,
+  htf: ScalperRules['htf'],
+): 'bullish' | 'bearish' | 'range' | null {
+  if (!htf.enabled) return null;
+  const candles = w.candles;
+  if (candles.length < Math.max(htf.minBars, htf.emaSlowPeriod + 1)) return null;
+  const closes = candles.map((c) => c.close);
+  const fast = emaSeries(closes, htf.emaFastPeriod);
+  const slow = emaSeries(closes, htf.emaSlowPeriod);
+  if (!fast.ok || !slow.ok) return null;
+  const idx = candles.length - 1;
+  const f = fast.series.values[idx];
+  const s = slow.series.values[idx];
+  const close = candles[idx].close;
+  if (f === null || s === null || !Number.isFinite(f) || !Number.isFinite(s) || !Number.isFinite(close)) {
+    return null;
+  }
+  if (f > s && close > f) return 'bullish';
+  if (f < s && close < f) return 'bearish';
+  return 'range';
+}
+
+/** The Task 36 reverse-vs-continue gate. Veto rule (all must hold):
+ *   1. the HTF layer is enabled,
+ *   2. H1 AND H4 agree on the SAME directional trend (both bullish or both
+ *      bearish) — a mixed or range read leaves the Phase-12 OR-logic intact,
+ *   3. the agreeing setup stands AGAINST that aligned trend,
+ *   4. the setup is NOT an SMC_CONFLUENCE with score ≥ counterTrendMinScore
+ *      (a sweep+BOS-confirmed tier-A reversal is exactly the kind of genuine
+ *      reversal the exception exists for).
+ * PURE: every input is a parameter. */
+export function htfOpposesSetup(args: {
+  htf: ScalperRules['htf'];
+  h1Trend: 'bullish' | 'bearish' | 'range' | null;
+  h4Trend: 'bullish' | 'bearish' | 'range' | null;
+  direction: 'BUY' | 'SELL';
+  model: 'MOMENTUM' | 'REVERSAL' | 'SMC_CONFLUENCE';
+  smcScore: number | null;
+}): boolean {
+  const { htf, h1Trend, h4Trend, direction, model, smcScore } = args;
+  if (!htf.enabled) return false;
+  if (h1Trend === null || h4Trend === null) return false;
+  if (h1Trend !== h4Trend) return false;
+  if (h1Trend !== 'bullish' && h1Trend !== 'bearish') return false;
+  const trendDirection: 'BUY' | 'SELL' = h1Trend === 'bullish' ? 'BUY' : 'SELL';
+  if (direction === trendDirection) return false; // continuation — always fine
+  if (model === 'SMC_CONFLUENCE' && smcScore !== null && smcScore >= htf.counterTrendMinScore) {
+    return false; // tier-A genuine reversal exception
+  }
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -268,15 +332,26 @@ function judgeTf(
   }
 
   // ── MOMENTUM model: fast EMA above slow EMA, price riding the fast EMA,
-  //    RSI in the healthy-trend band (not exhausted).
+  //    RSI in the healthy-trend band (not exhausted). Task 36 anti-chase
+  //    guard: the decision close must sit WITHIN maxExtensionAtr × ATR of
+  //    the fast EMA — buy the pullback leg, never the top of an extended
+  //    run (the empirical SL-farm: 2025-10-21 BUY@4119.9/4122.7 chasing a
+  //    ~10-point rally). 0 disables the guard (legacy behaviour).
+  const extensionOk = (price: number, ema: number, side: 'BUY' | 'SELL'): boolean => {
+    if (!(rules.maxExtensionAtr > 0) || atrVal === null) return true;
+    const extension = side === 'BUY' ? price - ema : ema - price;
+    return extension <= rules.maxExtensionAtr * atrVal;
+  };
   const momentumBuy =
     fastVal > slowVal &&
     decision.close > fastVal &&
+    extensionOk(decision.close, fastVal, 'BUY') &&
     rsiVal >= rules.momentumRsiMin &&
     rsiVal <= rules.momentumRsiMax;
   const momentumSell =
     fastVal < slowVal &&
     decision.close < fastVal &&
+    extensionOk(decision.close, fastVal, 'SELL') &&
     rsiVal <= 100 - rules.momentumRsiMin &&
     rsiVal >= 100 - rules.momentumRsiMax;
 
@@ -441,6 +516,11 @@ export function evaluateScalper(input: ScalperCoreInput): ScalperEvaluation {
   const tfEvaluations = gates.map(([tf, win]) => judgeTf(win, tf, rules, input.digits, input.nowUtcSec));
   const judgements = tfEvaluations.map((t) => t.judgement);
 
+  // ── Task 36 — higher-timeframe trend read (H1/H4). Missing/insufficient
+  //    windows degrade to null (no opinion — the veto never fires on null).
+  const h1Trend = readHtfTrend(input.h1, rules.htf);
+  const h4Trend = readHtfTrend(input.h4, rules.htf);
+
   // Best-scoring SMC evidence across TFs — attached to every non-agree
   // outcome for observability (the winning TF's evidence is attached on
   // setups). Null when the SMC layer is disabled.
@@ -455,6 +535,7 @@ export function evaluateScalper(input: ScalperCoreInput): ScalperEvaluation {
     model: null,
     suppressedDirection: null,
     tfJudgements: judgements,
+    htfTrend: { h1: h1Trend, h4: h4Trend, opposed: false },
   };
 
   const noSetup = (codes: SignalReasonCode[]): ScalperEvaluation => ({
@@ -477,12 +558,12 @@ export function evaluateScalper(input: ScalperCoreInput): ScalperEvaluation {
         atr14: null,
         adx14: null,
       },
-      htfContext: { h1Trend: null, h4Trend: null },
+      htfContext: { h1Trend, h4Trend },
       decisionClose: null,
       retestBarTimeUtc: null,
       executionWindow: scalperWindowSummary(input.m15),
-      h1Window: scalperWindowSummary(input.m5),
-      h4Window: scalperWindowSummary(input.m1),
+      h1Window: scalperWindowSummary(input.h1),
+      h4Window: scalperWindowSummary(input.h4),
       scalper: baseEvidence,
       smc: bestSmcEvidence ?? undefined,
     },
@@ -531,12 +612,12 @@ export function evaluateScalper(input: ScalperCoreInput): ScalperEvaluation {
           atr14: null,
           adx14: null,
         },
-        htfContext: { h1Trend: null, h4Trend: null },
+        htfContext: { h1Trend, h4Trend },
         decisionClose: winner.decisionClose,
         retestBarTimeUtc: null,
         executionWindow: scalperWindowSummary(input.m15),
-        h1Window: scalperWindowSummary(input.m5),
-        h4Window: scalperWindowSummary(input.m1),
+        h1Window: scalperWindowSummary(input.h1),
+        h4Window: scalperWindowSummary(input.h4),
         scalper: evidenceAgree,
         smc: winner.smcEvidence ?? bestSmcEvidence ?? undefined,
       },
@@ -546,7 +627,11 @@ export function evaluateScalper(input: ScalperCoreInput): ScalperEvaluation {
     };
   };
 
-  const wait = (codes: SignalReasonCode[], suppressed: 'BUY' | 'SELL' | null): ScalperEvaluation => ({
+  const wait = (
+    codes: SignalReasonCode[],
+    suppressed: 'BUY' | 'SELL' | null,
+    htfTrendOverride?: ScalperEvidenceBlock['htfTrend'],
+  ): ScalperEvaluation => ({
     engineVersion: SCALPER_ENGINE_VERSION,
     strategyVersion: SCALPER_STRATEGY_VERSION,
     symbol: input.symbol,
@@ -566,19 +651,39 @@ export function evaluateScalper(input: ScalperCoreInput): ScalperEvaluation {
         atr14: null,
         adx14: null,
       },
-      htfContext: { h1Trend: null, h4Trend: null },
+      htfContext: { h1Trend, h4Trend },
       decisionClose: winner.decisionClose,
       retestBarTimeUtc: null,
       executionWindow: scalperWindowSummary(input.m15),
-      h1Window: scalperWindowSummary(input.m5),
-      h4Window: scalperWindowSummary(input.m1),
-      scalper: { ...evidenceAgree, suppressedDirection: suppressed },
+      h1Window: scalperWindowSummary(input.h1),
+      h4Window: scalperWindowSummary(input.h4),
+      scalper: { ...evidenceAgree, suppressedDirection: suppressed, htfTrend: htfTrendOverride ?? { h1: h1Trend, h4: h4Trend, opposed: false } },
       smc: winner.smcEvidence ?? bestSmcEvidence ?? undefined,
     },
     inputFingerprint: fingerprint,
     datasetFingerprint: computeScalperDatasetFingerprint(input.symbol, sourceWindow),
     generatedAtUtc: iso(input.nowUtcSec),
   });
+
+  // ── Task 36 — the reverse-vs-continue gate. A setup standing against an
+  //    ALIGNED H1+H4 trend is suppressed (WAIT) unless it is a tier-A SMC
+  //    reversal. This is the fix for the empirical whipsaw streak: SELL into
+  //    an uptrend → SL → late BUY chase → SL → BUY the top → SL.
+  const htfOpposed = htfOpposesSetup({
+    htf: rules.htf,
+    h1Trend,
+    h4Trend,
+    direction,
+    model: winner.model,
+    smcScore: winner.smcEvidence?.totalScore ?? null,
+  });
+  if (htfOpposed) {
+    return wait(
+      ['SCALPER_HTF_OPPOSED'],
+      direction,
+      { h1: h1Trend, h4: h4Trend, opposed: true },
+    );
+  }
 
   // ── Spread gate (checked once a TF agreed — the setup is otherwise real) ─
   if (input.spreadPrice > rules.maxSpreadPrice) {
@@ -660,10 +765,12 @@ function scalperWindowSummary(w: SignalWindow): { fromUtc: string; toUtc: string
  * The result is an honest WAIT carrying WHICH setup was suppressed (the UI
  * shows the direction + source TF) — the audit trail keeps the full evidence.
  * PURE: no clock, no DB — the caller states the suppression facts.
+ * Task 36: postLossCooldown suppresses new entries while the position
+ * manager's loss circuit-breaker is active (SCALPER_POST_LOSS_COOLDOWN).
  */
 export function suppressSetup(
   evaluation: ScalperEvaluation,
-  state: { duplicate: boolean; cooldownActive: boolean },
+  state: { duplicate: boolean; cooldownActive: boolean; postLossCooldown?: boolean },
 ): ScalperEvaluation {
   if (evaluation.outcome !== 'BUY_SETUP' && evaluation.outcome !== 'SELL_SETUP') {
     return evaluation;
@@ -671,6 +778,7 @@ export function suppressSetup(
   const codes: SignalReasonCode[] = [];
   if (state.duplicate) codes.push('SCALPER_DUPLICATE_SETUP');
   if (state.cooldownActive) codes.push('SCALPER_COOLDOWN');
+  if (state.postLossCooldown) codes.push('SCALPER_POST_LOSS_COOLDOWN');
   if (!codes.length) return evaluation;
 
   const suppressedDirection: 'BUY' | 'SELL' =

@@ -21,18 +21,23 @@ export interface LoadedScalperWindows {
   m15: SignalWindow;
   m5: SignalWindow;
   m1: SignalWindow;
+  /** Task 36 — higher-timeframe context windows (empty when H1/H4 have not
+   *  been synced yet; the HTF trend read then degrades to null). */
+  h1: SignalWindow;
+  h4: SignalWindow;
   demoRows: boolean;
   windowGapsSuspicious: number;
 }
 
-/** Load the three fast closed-candle windows (M15 / M5 / M1). */
+/** Load the three fast closed-candle windows (M15 / M5 / M1) plus the
+ *  higher-timeframe context windows (H1 / H4 — Task 36 trend gate). */
 export async function loadScalperWindows(
   db: PrismaClient,
   symbol: string,
   rules: ScalperRules,
   nowUtcSec: number,
 ): Promise<LoadedScalperWindows> {
-  const tfs: Timeframe[] = ['M15', 'M5', 'M1'];
+  const tfs: Timeframe[] = ['M15', 'M5', 'M1', 'H1', 'H4'];
   const loaded = await loadAnalysisInput(db, symbol, tfs, {
     maxBarsPerTf: rules.windowBars,
     nowUtcSec,
@@ -51,6 +56,8 @@ export async function loadScalperWindows(
     m15: toWindow('M15', loaded.perTimeframe.get('M15')),
     m5: toWindow('M5', loaded.perTimeframe.get('M5')),
     m1: toWindow('M1', loaded.perTimeframe.get('M1')),
+    h1: toWindow('H1', loaded.perTimeframe.get('H1')),
+    h4: toWindow('H4', loaded.perTimeframe.get('H4')),
     demoRows: [...loaded.perTimeframe.values()].some((d) => d.demoRows),
     windowGapsSuspicious: [...loaded.perTimeframe.values()].reduce(
       (s, d) => s + d.windowGapsSuspicious,
@@ -91,8 +98,8 @@ export async function saveScalperEvaluation(
         windows: e.evidence
           ? {
               m15: e.evidence.executionWindow,
-              m5: e.evidence.h1Window,
-              m1: e.evidence.h4Window,
+              h1: e.evidence.h1Window,
+              h4: e.evidence.h4Window,
             }
           : null,
       }),

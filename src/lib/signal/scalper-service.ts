@@ -24,6 +24,7 @@ import type { BridgeClient } from '@/lib/market/bridge-client';
 import { computeReadiness } from '@/lib/market/quality';
 import { defaultMarketSymbol } from '@/lib/market/service';
 import type { QuoteIntegrityReport } from '@/lib/market/integrity';
+import { lossCooldownActive } from '@/lib/execution/loss-state';
 import type { SignalReasonCode } from './types';
 import { evaluateScalper, setupFingerprintOf, suppressSetup } from './scalper/core';
 import { buildScalperRules } from './scalper/rules';
@@ -269,6 +270,8 @@ export async function runScalperEvaluation(opts: RunScalperOptions = {}): Promis
       m15: windows.m15,
       m5: windows.m5,
       m1: windows.m1,
+      h1: windows.h1,
+      h4: windows.h4,
       referencePrice: mid,
       spreadPrice: spread,
       nowUtcSec,
@@ -292,7 +295,19 @@ export async function runScalperEvaluation(opts: RunScalperOptions = {}): Promis
       latestSetup.createdAtUtcSec + rules.cooldownSec > nowUtcSec &&
       !duplicate; // a duplicate is reported as a duplicate, not as cooldown
 
-    const evaluation = suppressSetup(rawEvaluation, { duplicate, cooldownActive });
+    // ── Task 36 — post-loss circuit breaker. The position manager records a
+    //    realized loss the moment one of OUR positions closes negative; while
+    //    the window is active the setup is suppressed (WAIT) — the revenge
+    //    loop (SL → instant re-entry at a worse price) was the single
+    //    biggest observed loss-multiplier on 2025-10-21.
+    const postLossCooldown =
+      rules.postLossCooldownSec > 0 && lossCooldownActive(nowMs(), rules.postLossCooldownSec);
+
+    const evaluation = suppressSetup(rawEvaluation, {
+      duplicate,
+      cooldownActive,
+      postLossCooldown,
+    });
 
     const runId = await persist(evaluation, minimalQuote, windows.digits);
     await logEvent({
@@ -343,7 +358,8 @@ export async function runScalperEvaluation(opts: RunScalperOptions = {}): Promis
       (evaluation.outcome === 'BUY_SETUP' || evaluation.outcome === 'SELL_SETUP') &&
       config.execution.enabled &&
       config.execution.auto &&
-      runId !== null
+      runId !== null &&
+      !lossCooldownActive(nowMs(), rules.postLossCooldownSec) // Task 36: never fire INTO an active loss pause
     ) {
       const runExecution = async (): Promise<ScalperRunOutcome['execution']> => {
         try {

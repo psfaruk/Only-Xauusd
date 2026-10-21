@@ -18,6 +18,12 @@
  *                  dual evaluation) → paper trackers → baseline execution
  *                  hook (approval/auto, same discipline as the scalper)
  *
+ * Task 36: the cadence floor dropped 30s → 10s so a 15-second interval makes
+ * the scalper react to a fresh M1 close within seconds (user demand: data in
+ * real time). The H1/H4 sync follows the same baseline tick math. The
+ * position manager runs its OWN loop (position-manager.ts) and is started
+ * below, independent of this sync cadence.
+ *
  * The multi-agent GLM review still runs only on ACTIONABLE baseline setups.
  * Overlap is impossible: runSync refuses concurrent runs (SYNC_IN_PROGRESS).
  */
@@ -51,10 +57,24 @@ export async function register() {
     return;
   }
 
-  const minInterval = Math.max(30_000, Math.floor(intervalMs));
+  const minInterval = Math.max(10_000, Math.floor(intervalMs));
   const { runSync } = await import('@/lib/market/ingestion');
   const { bridgeClient } = await import('@/lib/market/bridge-client');
   const { db } = await import('@/lib/db');
+
+  // ── Task 36 — software position manager (breakeven / trailing / time stop).
+  //    Independent of the sync loop: it watches OUR open positions every
+  //    pollSec, banks moves at a trailing floor instead of round-tripping
+  //    them to the SL, and feeds the post-loss circuit breaker. Never blocks
+  //    the scheduler; disabled by POSITION_MANAGER_ENABLED=0.
+  if (process.env.NEXT_RUNTIME === 'nodejs') {
+    try {
+      const { startPositionManagerLoop } = await import('@/lib/execution/position-manager');
+      startPositionManagerLoop();
+    } catch {
+      // the manager must never break the scheduler
+    }
+  }
 
   const symbol = (process.env.MARKET_SYMBOLS ?? 'XAUUSDm').split(',')[0]?.trim() || 'XAUUSDm';
   const allTimeframes = (process.env.MARKET_TIMEFRAMES ?? 'M1,M5,M15,H1,H4')

@@ -397,6 +397,49 @@ export function ScalperSignalCard({
               </div>
             )}
 
+            {/* Task 36 — HTF reverse-vs-continue context (H1/H4 trend read).
+             * Renders only when the engine attached the block; the OPPOSED
+             * state gets the amber highlight because it explains a WAIT. */}
+            {(() => {
+              const htf = s.evidence?.scalper?.htfTrend;
+              if (!htf) return null;
+              const trendBn: Record<string, string> = {
+                bullish: 'বুলিশ ↑',
+                bearish: 'বেয়ারিশ ↓',
+                range: 'রেঞ্জ ↔',
+              };
+              return (
+                <div
+                  className={`flex flex-wrap items-center gap-1.5 rounded-lg border p-2 text-[11px] ${
+                    htf.opposed
+                      ? 'border-amber-500/40 bg-amber-500/5'
+                      : 'border-zinc-800 bg-zinc-900/60'
+                  }`}
+                  data-testid="scalper-htf-trend"
+                >
+                  <span className="text-zinc-500">HTF প্রসঙ্গ (কনটিনিউ-বিচার):</span>
+                  <span className="font-mono">
+                    H1{' '}
+                    <span className={htf.h1 === 'bullish' ? 'text-emerald-400' : htf.h1 === 'bearish' ? 'text-red-400' : 'text-zinc-400'}>
+                      {htf.h1 ? trendBn[htf.h1] : '—'}
+                    </span>
+                  </span>
+                  <span className="text-zinc-600">·</span>
+                  <span className="font-mono">
+                    H4{' '}
+                    <span className={htf.h4 === 'bullish' ? 'text-emerald-400' : htf.h4 === 'bearish' ? 'text-red-400' : 'text-zinc-400'}>
+                      {htf.h4 ? trendBn[htf.h4] : '—'}
+                    </span>
+                  </span>
+                  {htf.opposed && (
+                    <span className="text-amber-300">
+                      — ট্রেন্ডের বিপরীত সিগন্যাল আটকানো (SCALPER_HTF_OPPOSED)
+                    </span>
+                  )}
+                </div>
+              );
+            })()}
+
             {/* Phase 14 — the ICT/SMC ten-agent confluence evidence of the
              * source timeframe (ONLY when the engine actually attached it). */}
             {smcEvidence !== null && <SmcConfluenceSection smc={smcEvidence} />}

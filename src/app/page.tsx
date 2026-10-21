@@ -129,11 +129,18 @@ export default function TradingTerminal() {
   const [chatSheetOpen, setChatSheetOpen] = useState(false);
   /** bumped by the refresh loop so the chart refetches too. */
   const [refreshTick, setRefreshTick] = useState(0);
+  /** Task 36-rt — wall-clock of the last COMPLETED refresh sweep. The realtime
+   *  channels (positions/account) win over the polled views only while their
+   *  updatedAtMs beats this timestamp — an honest newest-observation rule. */
+  const [lastRefreshAtMs, setLastRefreshAtMs] = useState<number | null>(null);
 
   // ---- Refresh loop (same 12 endpoints as before + error codes) ----------------
   // Master-audit fix: every fetch is bounded by a client-side timeout so a
-  // network blackhole can never wedge the 30s refresh loop (each promise
+  // network blackhole can never wedge the 15s refresh loop (each promise
   // settles as a rejection → honest NETWORK_ERROR code, next tick retries).
+  // Task 36-rt: the sweep runs every 15 s now — the heavy/audit endpoints stay
+  // polled, while price (250 ms), positions (3 s) and account (2 s) ride the
+  // realtime tick-stream socket instead.
   const refresh = useCallback(async () => {
     try {
       const results = await Promise.allSettled([
@@ -238,12 +245,13 @@ export default function TradingTerminal() {
     } finally {
       setLoading(false);
       setRefreshTick((t) => t + 1);
+      setLastRefreshAtMs(Date.now());
     }
   }, [setApiError]);
 
   useEffect(() => {
     void refresh();
-    const id = setInterval(() => void refresh(), 30_000);
+    const id = setInterval(() => void refresh(), 15_000);
     return () => clearInterval(id);
   }, [refresh]);
 
@@ -254,6 +262,30 @@ export default function TradingTerminal() {
   );
   const quoteDigitsMismatch =
     dataHealth?.quote.digits != null && priceSpec.verified && dataHealth.quote.digits !== priceSpec.digits;
+
+  // ---- Task 36-rt — realtime bundles for the execution panel --------------------
+  // The live channel wins ONLY while it is fresh (socket live, payload not
+  // stale) AND newer than the last completed 15 s poll; otherwise the polled
+  // view renders unchanged (honest fallback — the two are never mixed).
+  const liveExecutionPositions = useMemo(() => {
+    if (tickStream.status !== 'live') return null;
+    const updatedAtMs = tickStream.positionsUpdatedAtMs;
+    if (updatedAtMs === null || tickStream.positionsStale) return null;
+    if (lastRefreshAtMs !== null && updatedAtMs <= lastRefreshAtMs) return null;
+    return {
+      positions: tickStream.positions,
+      updatedAtMs,
+      stale: tickStream.positionsStale,
+    };
+  }, [tickStream.status, tickStream.positions, tickStream.positionsUpdatedAtMs, tickStream.positionsStale, lastRefreshAtMs]);
+
+  const liveExecutionAccount = useMemo(() => {
+    if (tickStream.status !== 'live') return null;
+    const a = tickStream.account;
+    if (!a || a.balance === null) return null;
+    if (lastRefreshAtMs !== null && a.updatedAtMs <= lastRefreshAtMs) return null;
+    return { balance: a.balance, currency: a.currency, updatedAtMs: a.updatedAtMs };
+  }, [tickStream.status, tickStream.account, lastRefreshAtMs]);
 
   // ---- Actions (same endpoints, same honest error handling) ---------------------
 
@@ -640,6 +672,9 @@ export default function TradingTerminal() {
             onDecide={(id, d) => void decideApproval(id, d)}
             onClose={(pid) => void closePosition(pid)}
             error={apiErrors.execution ?? null}
+            livePositions={liveExecutionPositions}
+            liveTick={tickStream.status === 'live' ? tickStream.tick : null}
+            liveAccount={liveExecutionAccount}
           />
         </>
       }
@@ -701,7 +736,7 @@ export default function TradingTerminal() {
 
   const loadErrorBanner = loadError ? (
     <div role="alert" className="rounded-xl border border-red-500/40 bg-red-500/10 p-3 text-xs text-red-300">
-      ডেটা রিফ্রেশ ব্যর্থ ({loadError}) — ৩০ সেকেন্ড পরে আবার চেষ্টা হবে। পুরনো ডেটা দেখানো হচ্ছে, কিছু বানানো হয়নি।
+      ডেটা রিফ্রেশ ব্যর্থ ({loadError}) — ১৫ সেকেন্ড পরে আবার চেষ্টা হবে। পুরনো ডেটা দেখানো হচ্ছে, কিছু বানানো হয়নি।
     </div>
   ) : null;
 

@@ -1,27 +1,45 @@
 /**
- * tick-stream — READ-ONLY live tick relay (Task 29-b), port 3041.
+ * tick-stream — READ-ONLY live tick relay (Task 29-b; realtime channels Task 36-rt), port 3041.
  * ----------------------------------------------------------------------------
- * Polls the mt5-bridge (:3031, x-trader-key auth) for the live XAUUSDm quote
- * (every 1 s) and the bridge status (every 5 s), and broadcasts genuine
- * observations to socket.io clients. The Next.js dashboard connects through
- * the platform gateway as io('/?XTransformPort=3041') — hence the hardcoded
- * port and the fixed socket path '/' (Caddy selects the upstream by the
- * XTransformPort url-query parameter and requires path '/').
+ * Polls the mt5-bridge (:3031, x-trader-key auth) and broadcasts genuine
+ * observations to socket.io clients:
+ *
+ *   · `tick`      — live XAUUSDm quote, polled every 250 ms (Task 36-rt — the
+ *                   "millisecond" price cadence), emitted ONLY on change;
+ *   · `positions` — open positions via GET /api/positions every 3 s (each
+ *                   bridge call opens a fresh probe session, 0.5–2 s — strict
+ *                   non-overlap guard, 8 s timeout), marked to market against
+ *                   the latest cached quote;
+ *   · `account`   — balance/connection from GET /api/status every 2 s;
+ *   · `bridge`    — full relay/bridge health snapshot after every status poll
+ *                   and immediately on client connect.
+ *
+ * The Next.js dashboard connects through the platform gateway as
+ * io('/?XTransformPort=3041') — hence the hardcoded port and the fixed socket
+ * path '/' (Caddy selects the upstream by the XTransformPort url-query
+ * parameter and requires path '/').
  *
  * READ-ONLY BY CONSTRUCTION:
- *   - the only upstream calls are two GETs (/api/quote, /api/status);
+ *   - the only upstream calls are three GETs (/api/quote, /api/status,
+ *     /api/positions — the positions list is a read, never an order);
  *   - this service exposes no HTTP routes of its own beyond socket.io, and
- *     contains no trading, deal, position or execution code path whatsoever;
- *   - the bridge itself is GET-only, so no trading surface exists upstream
- *     either — this relay physically cannot trade.
+ *     contains no trading, deal or execution code path whatsoever;
+ *   - the bridge itself is GET-only on these paths, so no trading surface
+ *     exists upstream either — this relay physically cannot trade.
  *
  * Honesty contract:
  *   - every broadcast field is a genuine observation or an honest null —
  *     degraded states never invent values;
  *   - `tick` fires only when the observed quote actually changed (bid, ask or
  *     quote timestamp) — no synthetic heartbeats, no filler repetition;
- *   - logging is bounded: one startup line, reachability transition lines
- *     (debounced), never per-poll output; MT5_BRIDGE_TOKEN is never logged.
+ *   - `positions`/`account` fire only after a SUCCESSFUL poll — on bridge
+ *     errors nothing is emitted for that channel, the last good payload is
+ *     kept server-side, and replays to newly connected clients carry an
+ *     honest `stale: true` flag once older than 15 s;
+ *   - `currentPrice`/`floatingPnlUsd` are computed ONLY from a fresh (< 10 s)
+ *     cached XAUUSDm quote (1 lot = 100 oz) — otherwise honest nulls;
+ *   - logging is bounded: one startup line, reachability/channel transition
+ *     lines (debounced), never per-poll output; MT5_BRIDGE_TOKEN is never logged.
  */
 
 import { createServer } from 'http'
@@ -32,13 +50,27 @@ import { Server } from 'socket.io'
 // deliberately NOT env-configurable (task spec: PORT stays 3041, path '/').
 const PORT = 3041
 const SYMBOL = 'XAUUSDm'
-const QUOTE_POLL_MS = 1000
-const STATUS_POLL_MS = 5000
-const REQUEST_TIMEOUT_MS = 3000
+
+// Task 36-rt — millisecond-cadence realtime channels. The quote poll is the
+// price cadence (250 ms); the positions poll MUST stay ≥ 3 s (each bridge call
+// opens a fresh probe session, 0.5–2 s — never concurrent, never faster);
+// the status poll also drives the `account` event cadence.
+const QUOTE_POLL_MS = 250
+const STATUS_POLL_MS = 2000
+const POSITIONS_POLL_MS = 3000
+const POSITIONS_TIMEOUT_MS = 8000 // probe sessions are slow (fresh login per read)
+const REQUEST_TIMEOUT_MS = 3000 // quote + status polls (cheap, in-memory reads)
 const TRANSITION_LOG_MIN_GAP_MS = 5000 // anti-flap guard: at most one transition line per 5 s
 
+/** A quote older than this is NOT used to mark positions (honest nulls instead). */
+const QUOTE_FRESH_MS = 10_000
+/** Last-good payloads older than this are replayed to new clients with stale:true. */
+const STALE_AFTER_MS = 15_000
+/** XAUUSDm contract: 1 lot = 100 oz (the same constant the risk engine uses). */
+const GOLD_CONTRACT_OZ = 100
+
 const SERVICE = 'tick-stream'
-const VERSION = '1.0.0'
+const VERSION = '1.1.0'
 
 const BRIDGE_URL = (process.env.MT5_BRIDGE_URL ?? 'http://127.0.0.1:3031').replace(/\/+$/, '')
 const BRIDGE_TOKEN = process.env.MT5_BRIDGE_TOKEN ?? '' // lives only in the x-trader-key header — never logged
@@ -64,7 +96,7 @@ interface TickPayload {
   bridgeLatencyMs: number // HTTP round-trip of the poll that produced this tick
 }
 
-/** `bridge` — emitted after every status poll (every 5 s) and immediately on
+/** `bridge` — emitted after every status poll (every 2 s) and immediately on
  *  any client connect. Degraded states carry honest nulls, never invented
  *  values; `reachable`/`configured`/`serviceUptimeMs` are live relay state,
  *  the remaining fields are the last successful status-poll observation. */
@@ -85,6 +117,41 @@ interface BridgePayload {
   lastErrorAtMs: number | null
   uptimeMs: number | null
   serviceUptimeMs: number
+}
+
+/** `positions` — emitted after every SUCCESSFUL /api/positions poll (3 s
+ *  cadence, strict non-overlap). `currentPrice`/`floatingPnlUsd` are honest
+ *  nulls whenever no fresh (< 10 s) XAUUSDm quote is cached, or the position's
+ *  symbol is one whose contract size this relay does not know — never invented. */
+interface LivePositionRow {
+  positionId: string
+  symbol: string
+  direction: 'BUY' | 'SELL'
+  lots: number
+  entryPrice: number
+  openTimeUtcSec: number
+  currentPrice: number | null
+  floatingPnlUsd: number | null
+  comment: string | null
+}
+
+interface PositionsPayload {
+  positions: LivePositionRow[]
+  updatedAtMs: number
+  source: string
+  stale: boolean // true only on replays of last-good state older than STALE_AFTER_MS
+}
+
+/** `account` — emitted after every SUCCESSFUL /api/status poll (2 s cadence).
+ *  accountEquity is deliberately absent (this gateway reports 0 — known). */
+interface AccountPayload {
+  balance: number | null
+  currency: string | null
+  connected: boolean | null
+  authenticated: boolean | null
+  serverTime: number | null
+  updatedAtMs: number
+  stale: boolean
 }
 
 // ── defensive parsing ────────────────────────────────────────────────────────
@@ -123,6 +190,20 @@ interface NormalizedQuote {
   digits: number | null
   tsMs: number
   recvMs: number
+}
+
+/** Validated raw position from the bridge /api/positions response (the
+ *  PositionInfo shape of mini-services/mt5-bridge/src/mt5-client.ts:
+ *  positionId, symbol, direction BUY|SELL, lots, priceOpen, timeCreateUtcSec
+ *  — the bridge sends no per-position comment, so it stays an honest null). */
+interface RawBridgePosition {
+  positionId: string
+  symbol: string
+  direction: 'BUY' | 'SELL'
+  lots: number
+  entryPrice: number
+  openTimeUtcSec: number
+  comment: string | null
 }
 
 /** Defensive quote parse. Accepts the REAL bridge shape (flat
@@ -192,6 +273,95 @@ function parseStatusFields(body: unknown): BridgeStatusFields {
   }
 }
 
+/** Defensive /api/positions parse. Accepts the REAL bridge envelope
+ *  {ok:true, source, count, positions:[PositionInfo...]} or a bare position
+ *  array. Malformed ENTRIES are skipped honestly; a failure envelope
+ *  (ok:false) or a shape without a positions array returns null (the caller
+ *  then emits nothing for this channel). */
+function parsePositionsResponse(body: unknown): { positions: RawBridgePosition[]; source: string } | null {
+  if (body === null || typeof body !== 'object') return null
+  const envelope = body as Record<string, unknown>
+  const rawList: unknown[] | null = Array.isArray(envelope.positions)
+    ? envelope.positions
+    : Array.isArray(body)
+      ? body
+      : null
+  if (rawList === null || envelope.ok === false) return null
+  const source = toNonEmptyString(envelope.source) ?? 'bridge'
+  const positions: RawBridgePosition[] = []
+  for (const item of rawList) {
+    if (item === null || typeof item !== 'object') continue
+    const p = item as Record<string, unknown>
+    const positionId = toNonEmptyString(p.positionId)
+    const symbol = toNonEmptyString(p.symbol)
+    const direction = p.direction === 'BUY' || p.direction === 'SELL' ? p.direction : null
+    const lots = toFiniteNumber(p.lots)
+    const entryPrice = toFiniteNumber(p.priceOpen)
+    const openTimeUtcSec = toFiniteNumber(p.timeCreateUtcSec) ?? 0
+    if (
+      positionId === null || symbol === null || direction === null ||
+      lots === null || lots <= 0 || entryPrice === null || entryPrice <= 0
+    ) {
+      continue // malformed entry — skipped honestly, never guessed
+    }
+    positions.push({ positionId, symbol, direction, lots, entryPrice, openTimeUtcSec, comment: toNonEmptyString(p.comment) })
+  }
+  return { positions, source }
+}
+
+/** Mark every position to market against the LATEST cached quote (cached on
+ *  every successful quote poll, i.e. ≤ 250 ms old as an observation). Quote
+ *  FRESHNESS is the quote's own broker timestamp (< 10 s) — during a market
+ *  pause the honest result is null, never a stale mark presented as current. */
+function buildPositionsPayload(raw: { positions: RawBridgePosition[]; source: string }): PositionsPayload {
+  const updatedAtMs = Date.now()
+  return {
+    positions: raw.positions.map((p): LivePositionRow => {
+      const q = lastQuoteForMarking
+      let currentPrice: number | null = null
+      let floatingPnlUsd: number | null = null
+      if (q !== null && updatedAtMs - q.tsMs < QUOTE_FRESH_MS && p.symbol === SYMBOL) {
+        if (p.direction === 'BUY') {
+          currentPrice = q.bid // a BUY closes at bid
+          floatingPnlUsd = Math.round((q.bid - p.entryPrice) * GOLD_CONTRACT_OZ * p.lots * 100) / 100
+        } else {
+          currentPrice = q.ask // a SELL closes at ask
+          floatingPnlUsd = Math.round((p.entryPrice - q.ask) * GOLD_CONTRACT_OZ * p.lots * 100) / 100
+        }
+      }
+      return {
+        positionId: p.positionId,
+        symbol: p.symbol,
+        direction: p.direction,
+        lots: p.lots,
+        entryPrice: p.entryPrice,
+        openTimeUtcSec: p.openTimeUtcSec,
+        currentPrice,
+        floatingPnlUsd,
+        comment: p.comment,
+      }
+    }),
+    updatedAtMs,
+    source: raw.source,
+    stale: false,
+  }
+}
+
+/** `account` projection of a successful /api/status body (fields:
+ *  accountBalance, accountCurrency, connected, authenticated, serverTime). */
+function buildAccountPayload(body: unknown): AccountPayload {
+  const s = body !== null && typeof body === 'object' ? (body as Record<string, unknown>) : {}
+  return {
+    balance: toFiniteNumber(s.accountBalance),
+    currency: toNonEmptyString(s.accountCurrency),
+    connected: toBoolean(s.connected),
+    authenticated: toBoolean(s.authenticated),
+    serverTime: toFiniteNumber(s.serverTime),
+    updatedAtMs: Date.now(),
+    stale: false,
+  }
+}
+
 // ── relay state ──────────────────────────────────────────────────────────────
 
 let reachableNow: boolean | null = null // null = no poll has completed yet
@@ -200,11 +370,20 @@ let lastTickPayload: TickPayload | null = null // replayed to newly connected cl
 let lastBroadcastKey: { bid: number; ask: number; tsMs: number } | null = null // change detection
 let serviceSeq = 0
 
+// Task 36-rt — realtime channel state.
+let lastQuoteForMarking: { bid: number; ask: number; tsMs: number } | null = null // EVERY successful quote observation
+let lastPositionsPayload: PositionsPayload | null = null // last good positions observation (replayed on connect)
+let lastAccountPayload: AccountPayload | null = null // last good account observation (replayed on connect)
+
 let quoteInFlight = false
 let statusInFlight = false
+let positionsInFlight = false // strict non-overlap guard for the probe-session positions reads
 
 let loggedReachable: boolean | null = null
 let lastTransitionLogAtMs = 0
+
+let positionsChannelOk: boolean | null = null
+let positionsTransitionLogAtMs = 0
 
 function buildBridgePayload(): BridgePayload {
   const f = lastStatusFields
@@ -226,6 +405,13 @@ function buildBridgePayload(): BridgePayload {
     uptimeMs: f?.uptimeMs ?? null,
     serviceUptimeMs: Date.now() - startedAtMs,
   }
+}
+
+/** Replay copy of a last-good payload for a newly connected client: identical
+ *  data with the staleness flag recomputed at SEND time (honest age — the
+ *  observation itself is never refreshed or fabricated). */
+function withStaleFlag<T extends { updatedAtMs: number; stale: boolean }>(payload: T): T {
+  return { ...payload, stale: Date.now() - payload.updatedAtMs > STALE_AFTER_MS }
 }
 
 /** Update the shared reachability view; log TRANSITIONS only (debounced). */
@@ -260,9 +446,9 @@ interface BridgeFetchResult {
   latencyMs: number
 }
 
-async function bridgeGet(pathAndQuery: string): Promise<BridgeFetchResult> {
+async function bridgeGet(pathAndQuery: string, timeoutMs: number = REQUEST_TIMEOUT_MS): Promise<BridgeFetchResult> {
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
   const started = Date.now()
   try {
     const res = await fetch(`${BRIDGE_URL}${pathAndQuery}`, {
@@ -311,6 +497,10 @@ async function pollQuote(): Promise<void> {
     }
     noteReachable(true, 'quote poll ok')
 
+    // Cache EVERY successful observation (not just changed quotes) so the
+    // positions channel can mark to market at poll time (Task 36-rt).
+    lastQuoteForMarking = { bid: q.bid, ask: q.ask, tsMs: q.tsMs }
+
     const changed =
       lastBroadcastKey === null ||
       q.bid !== lastBroadcastKey.bid ||
@@ -351,6 +541,11 @@ async function pollStatus(): Promise<void> {
     if (res.ok) {
       noteReachable(true, 'status poll ok')
       lastStatusFields = parseStatusFields(res.body)
+      // Task 36-rt — account channel: the same successful status observation,
+      // emitted as its own event. On failure nothing is emitted for this
+      // channel; the last good payload stays server-side with its honest age.
+      lastAccountPayload = buildAccountPayload(res.body)
+      io.emit('account', lastAccountPayload)
     } else {
       noteReachable(false, `status poll: ${res.error ?? 'unknown failure'}`)
       lastStatusFields = null // honest nulls — never serve stale status as current
@@ -361,8 +556,61 @@ async function pollStatus(): Promise<void> {
   } finally {
     statusInFlight = false
   }
-  // `bridge` is broadcast after EVERY status poll (5 s), healthy or degraded.
+  // `bridge` is broadcast after EVERY status poll (2 s), healthy or degraded.
   io.emit('bridge', buildBridgePayload())
+}
+
+/** Task 36-rt — positions channel. Polls GET /api/positions every 3 s with a
+ *  STRICT non-overlap guard: each bridge call opens a fresh probe session
+ *  (connect → auth → login → positions → close, 0.5–2 s) and must never run
+ *  concurrently or faster than every 3 s. On any failure nothing is emitted
+ *  for this channel — the last good payload is kept server-side and replayed
+ *  (with stale:true once > 15 s) to newly connected clients. */
+async function pollPositions(): Promise<void> {
+  if (!BRIDGE_CONFIGURED || positionsInFlight) return // previous probe still running — skip this tick
+  positionsInFlight = true
+  try {
+    const res = await bridgeGet('/api/positions', POSITIONS_TIMEOUT_MS)
+    if (!res.ok) {
+      notePositionsChannel(false, `positions poll: ${res.error ?? 'unknown failure'}`)
+      return
+    }
+    const parsed = parsePositionsResponse(res.body)
+    if (parsed === null) {
+      notePositionsChannel(false, 'positions poll: response did not validate')
+      return
+    }
+    notePositionsChannel(true, `${parsed.positions.length} open, source ${parsed.source}`)
+    const payload = buildPositionsPayload(parsed)
+    lastPositionsPayload = payload
+    io.emit('positions', payload)
+  } catch (e) {
+    notePositionsChannel(false, `positions poll: ${e instanceof Error ? e.message : String(e)}`)
+  } finally {
+    positionsInFlight = false
+  }
+}
+
+/** Positions-channel health for BOUNDED transition logging (same anti-flap
+ *  discipline as noteReachable — at most one line per 5 s, never per-poll). */
+function notePositionsChannel(ok: boolean, detail: string): void {
+  const previous = positionsChannelOk
+  positionsChannelOk = ok
+  if (previous === ok) return
+  const now = Date.now()
+  if (now - positionsTransitionLogAtMs < TRANSITION_LOG_MIN_GAP_MS) return
+  positionsTransitionLogAtMs = now
+  if (ok) {
+    console.log(
+      previous === null
+        ? `[tick-stream] positions channel live (${detail})`
+        : `[tick-stream] positions channel live again (${detail})`,
+    )
+  } else {
+    console.log(
+      `[tick-stream] positions channel degraded (${detail}) — nothing emitted for this channel, last good state kept (stale flag after ${STALE_AFTER_MS / 1000}s)`,
+    )
+  }
 }
 
 // ── socket.io relay ─────────────────────────────────────────────────────────
@@ -390,6 +638,11 @@ io.on('connection', (socket) => {
   })
   socket.emit('bridge', buildBridgePayload())
   if (lastTickPayload !== null) socket.emit('tick', lastTickPayload)
+  // Task 36-rt — replay the last-good realtime-channel observations so a
+  // freshly connected client paints instantly; staleness is recomputed at
+  // send time (an old observation is flagged, never presented as current).
+  if (lastPositionsPayload !== null) socket.emit('positions', withStaleFlag(lastPositionsPayload))
+  if (lastAccountPayload !== null) socket.emit('account', withStaleFlag(lastAccountPayload))
 
   socket.on('disconnect', () => {
     // Client count is tracked by the engine (io.engine.clientsCount) — no
@@ -415,15 +668,21 @@ httpServer.listen(PORT, () => {
 
 if (BRIDGE_CONFIGURED) {
   // Immediate first poll, then steady cadence. The in-flight guards prevent
-  // pile-up when a request hangs up to its 3 s timeout.
+  // pile-up when a request hangs up to its timeout (positions probes may
+  // legitimately take up to 8 s — the 3 s interval simply skips ticks while
+  // one is still running, so reads NEVER overlap).
   void pollQuote()
   void pollStatus()
+  void pollPositions()
   setInterval(() => {
     void pollQuote()
   }, QUOTE_POLL_MS)
   setInterval(() => {
     void pollStatus()
   }, STATUS_POLL_MS)
+  setInterval(() => {
+    void pollPositions()
+  }, POSITIONS_POLL_MS)
 }
 
 process.on('unhandledRejection', (reason) => {

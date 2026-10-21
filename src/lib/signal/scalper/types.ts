@@ -22,7 +22,7 @@ import type { Timeframe } from '@/lib/market/types';
 import type { SmcAgentParams, SmcTfSummary } from '../ict/types';
 import type { SignalEvaluation, SignalLevels, SignalReasonCode, SignalWindow } from '../types';
 
-export const SCALPER_ENGINE_VERSION = '13.0.0';
+export const SCALPER_ENGINE_VERSION = '14.0.0';
 export const SCALPER_STRATEGY_ID = 'scalper-m1-m5-m15-or';
 export const SCALPER_STRATEGY_VERSION = `${SCALPER_STRATEGY_ID}/${SCALPER_ENGINE_VERSION}`;
 
@@ -38,6 +38,8 @@ export type ScalperReasonCode =
   | 'SCALPER_LEVELS_INVALID'
   | 'SCALPER_SPREAD_TOO_WIDE'
   | 'SCALPER_SL_TOO_TIGHT'
+  | 'SCALPER_HTF_OPPOSED'
+  | 'SCALPER_POST_LOSS_COOLDOWN'
   | 'INSUFFICIENT_M1_HISTORY'
   | 'INSUFFICIENT_M5_HISTORY'
   | 'INSUFFICIENT_M15_HISTORY';
@@ -57,6 +59,21 @@ export interface ScalperSmcRules {
     rsiPeriod: number;
     atrPeriod: number;
   };
+}
+
+/** Task 36 — higher-timeframe trend intelligence (reverse-vs-continue brain).
+ *  The empirical driver: three consecutive auto-trades (2025-10-21) fought a
+ *  ~10-point H1 uptrend because M1/M5 judged in isolation. */
+export interface ScalperHtfRules {
+  /** Master switch — when off the OR-logic of Phase 12 is fully restored. */
+  enabled: boolean;
+  /** EMA periods for the H1/H4 trend read. */
+  emaFastPeriod: number;
+  emaSlowPeriod: number;
+  /** Minimum closed H1/H4 bars for a trend read (below → null, no veto). */
+  minBars: number;
+  /** Counter-trend SMC setups still pass at/above this score (tier-A exception). */
+  counterTrendMinScore: number;
 }
 
 /** Documented, configurable scalper rules (persisted with every evaluation). */
@@ -92,6 +109,13 @@ export interface ScalperRules {
   cooldownSec: number;
   /** Setup expiry per source timeframe, in seconds after the decision close. */
   expirySec: Record<ScalperTf, number>;
+  /** Task 36 — anti-chase guard: the momentum model needs the decision close
+   *  within this many ATR of the fast EMA (pullback entries, not tops). 0 = off. */
+  maxExtensionAtr: number;
+  /** Task 36 — post-loss circuit breaker (seconds, service-level). 0 = off. */
+  postLossCooldownSec: number;
+  /** Task 36 — higher-timeframe trend intelligence. */
+  htf: ScalperHtfRules;
   /** Phase 14 — the ICT/SMC confluence layer (SMC_CONFLUENCE model). */
   smc: ScalperSmcRules;
 }
@@ -125,6 +149,11 @@ export interface ScalperCoreInput {
   m15: SignalWindow;
   m5: SignalWindow;
   m1: SignalWindow;
+  /** Task 36 — higher-timeframe context windows (H1/H4 closed candles). Used
+   *  by the HTF trend gate (reverse-vs-continue intelligence). Empty windows
+   *  are legal (trend reads become null — the veto then never fires). */
+  h1: SignalWindow;
+  h4: SignalWindow;
   /** Live mid price at the evaluation instant. */
   referencePrice: number;
   /** Spread in PRICE units (observed). */
@@ -149,6 +178,15 @@ export interface ScalperEvidenceBlock {
   suppressedDirection: 'BUY' | 'SELL' | null;
   /** All three independent judgements, priority order (M15 → M5 → M1). */
   tfJudgements: ScalperTfJudgement[];
+  /** Task 36 — the H1/H4 trend read behind the reverse-vs-continue gate
+   *  (nulls when the HTF layer is off or its data is insufficient). */
+  htfTrend?: {
+    h1: 'bullish' | 'bearish' | 'range' | null;
+    h4: 'bullish' | 'bearish' | 'range' | null;
+    /** True when an agreeing setup was vetoed for standing against an
+     *  aligned H1+H4 trend (the reason the outcome is WAIT). */
+    opposed: boolean;
+  };
 }
 
 /** Derived levels for a scalper setup (same validated shape as baseline). */

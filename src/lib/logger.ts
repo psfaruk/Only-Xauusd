@@ -24,7 +24,8 @@ export type AuditCategory =
   | 'execution'
   | 'bridge'
   | 'scalper'
-  | 'smc-narrative';
+  | 'smc-narrative'
+  | 'position-manager';
 
 export interface LogEventInput {
   level: LogLevel;

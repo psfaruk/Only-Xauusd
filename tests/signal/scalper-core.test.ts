@@ -20,9 +20,9 @@
 
 import { describe, expect, test } from 'bun:test';
 import '../market/helpers/setup';
-import { evaluateScalper, suppressSetup, deriveScalperLevels, scalperSetupFingerprint, setupFingerprintOf } from '@/lib/signal/scalper/core';
+import { computeScalperFingerprint, deriveScalperLevels, evaluateScalper, htfOpposesSetup, readHtfTrend, scalperSetupFingerprint, setupFingerprintOf, suppressSetup } from '@/lib/signal/scalper/core';
 import { buildScalperRules } from '@/lib/signal/scalper/rules';
-import type { ScalperCoreInput, ScalperRules } from '@/lib/signal/scalper/types';
+import type { ScalperEvidenceBlock,  ScalperCoreInput, ScalperRules } from '@/lib/signal/scalper/types';
 import type { SignalWindow } from '@/lib/signal/types';
 import type { AnalysisCandle } from '@/lib/analysis/types';
 
@@ -30,7 +30,16 @@ import type { AnalysisCandle } from '@/lib/analysis/types';
 // Fixtures
 // ---------------------------------------------------------------------------
 
-const RULES: ScalperRules = { ...buildScalperRules(), windowBars: 240, minBarsPerTf: 60 };
+// LEGACY MODE for the pinned Phase-12 behaviour tests: the chase guard and
+// the HTF gate (Task 36) are OFF here — they have their own describe block
+// below with explicitly-enabled rules (the production defaults).
+const RULES: ScalperRules = {
+  ...buildScalperRules(),
+  windowBars: 240,
+  minBarsPerTf: 60,
+  maxExtensionAtr: 0,
+  htf: { ...buildScalperRules().htf, enabled: false },
+};
 
 const M1 = 60;
 const M5 = 300;
@@ -141,6 +150,10 @@ function baseInput(overrides: Partial<ScalperCoreInput> = {}): ScalperCoreInput 
     m15: flatWindow(M15, 120),
     m5: flatWindow(M5, 120),
     m1: flatWindow(M1, 120),
+    // Task 36 — HTF windows default to EMPTY (trend reads null → no veto);
+    // the HTF-gate tests override these explicitly.
+    h1: { timeframe: 'H1', candles: [], source: 'mt5-broker' },
+    h4: { timeframe: 'H4', candles: [], source: 'mt5-broker' },
     referencePrice: 2650.0,
     spreadPrice: 0.2,
     nowUtcSec: NOW,
@@ -366,6 +379,169 @@ describe('Phase 12 scalper — suppression + setup identity', () => {
     expect(a).not.toBe(c);
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// Task 36 — trading intelligence (chase guard + HTF reverse-vs-continue gate)
+// ---------------------------------------------------------------------------
+
+describe('Task 36 — HTF trend read (readHtfTrend)', () => {
+  const htfRules = { ...buildScalperRules().htf, enabled: true };
+
+  test('a rising window (close above both EMAs) reads bullish', () => {
+    expect(readHtfTrend(upTrendWindow(3600, 130), htfRules)).toBe('bullish');
+  });
+
+  test('a falling window reads bearish', () => {
+    expect(readHtfTrend(downTrendWindow(3600, 130), htfRules)).toBe('bearish');
+  });
+
+  test('a deep pullback inside an uptrend reads range (close below fast EMA, EMAs still rising)', () => {
+    // upTrendWindow's decision close always rides ABOVE EMA20 (bullish); a
+    // sharp 3-bar drop pushes the close under the fast EMA while EMA20 stays
+    // above EMA50 — the honest "range" read (neither alignment holds).
+    const w = upTrendWindow(3600, 130);
+    const last = w.candles[w.candles.length - 1];
+    const out = [...w.candles];
+    for (let k = 1; k <= 3; k++) {
+      const o = last.close - (k - 1) * 5;
+      const c = o - 5;
+      out.push(candle(last.timeUtcSec + k * 3600, o, o + 0.2, c - 0.2, c));
+    }
+    expect(readHtfTrend({ ...w, candles: out }, htfRules)).toBe('range');
+  });
+
+  test('insufficient history reads null (no opinion — the veto never fires)', () => {
+    expect(readHtfTrend(upTrendWindow(3600, 30), htfRules)).toBeNull();
+  });
+
+  test('disabled layer reads null', () => {
+    expect(readHtfTrend(upTrendWindow(3600, 130), { ...htfRules, enabled: false })).toBeNull();
+  });
+});
+
+describe('Task 36 — htfOpposesSetup (the pure reverse-vs-continue gate)', () => {
+  const htf = { ...buildScalperRules().htf, enabled: true, counterTrendMinScore: 75 };
+  const bull = 'bullish' as const;
+  const bear = 'bearish' as const;
+
+  test('counter-trend SELL against aligned bullish H1+H4 is opposed', () => {
+    expect(htfOpposesSetup({ htf, h1Trend: bull, h4Trend: bull, direction: 'SELL', model: 'MOMENTUM', smcScore: null })).toBe(true);
+  });
+
+  test('continuation BUY with aligned bullish H1+H4 is fine', () => {
+    expect(htfOpposesSetup({ htf, h1Trend: bull, h4Trend: bull, direction: 'BUY', model: 'MOMENTUM', smcScore: null })).toBe(false);
+  });
+
+  test('mixed H1/H4 trends never veto', () => {
+    expect(htfOpposesSetup({ htf, h1Trend: bull, h4Trend: bear, direction: 'SELL', model: 'MOMENTUM', smcScore: null })).toBe(false);
+  });
+
+  test('range or null trend reads never veto', () => {
+    expect(htfOpposesSetup({ htf, h1Trend: 'range', h4Trend: 'range', direction: 'SELL', model: 'MOMENTUM', smcScore: null })).toBe(false);
+    expect(htfOpposesSetup({ htf, h1Trend: null, h4Trend: bull, direction: 'SELL', model: 'MOMENTUM', smcScore: null })).toBe(false);
+  });
+
+  test('tier-A SMC reversal (score >= 75) is the genuine-reversal exception', () => {
+    expect(htfOpposesSetup({ htf, h1Trend: bull, h4Trend: bull, direction: 'SELL', model: 'SMC_CONFLUENCE', smcScore: 78 })).toBe(false);
+    expect(htfOpposesSetup({ htf, h1Trend: bull, h4Trend: bull, direction: 'SELL', model: 'SMC_CONFLUENCE', smcScore: 74 })).toBe(true);
+  });
+
+  test('disabled layer never vetoes', () => {
+    expect(htfOpposesSetup({ htf: { ...htf, enabled: false }, h1Trend: bull, h4Trend: bull, direction: 'SELL', model: 'MOMENTUM', smcScore: null })).toBe(false);
+  });
+});
+
+describe('Task 36 — scalper engine integration (chase guard + HTF veto)', () => {
+  const H1 = 3600;
+  const H4 = 14400;
+  /** Production-posture rules: chase guard ON + HTF gate ON. */
+  const T36_RULES: ScalperRules = { ...buildScalperRules(), windowBars: 240, minBarsPerTf: 60 };
+
+  test('chase guard: an EXTENDED run no longer fires the momentum model (no chasing tops)', () => {
+    const evaluation = evaluateScalper(
+      baseInput({ m1: upTrendWindow(M1, 120), referencePrice: upLastClose(), rules: T36_RULES }),
+    );
+    // The extended ramp is exactly the 2025-10-21 anti-pattern: the momentum
+    // BUY must NOT be the emitting model any more.
+    expect(evaluation.evidence?.scalper?.model).not.toBe('MOMENTUM');
+    expect(evaluation.outcome === 'BUY_SETUP' && evaluation.evidence?.scalper?.model === 'MOMENTUM').toBe(false);
+  });
+
+  test('HTF veto: a counter-trend SELL against aligned bullish H1+H4 becomes WAIT [SCALPER_HTF_OPPOSED]', () => {
+    const evaluation = evaluateScalper(
+      baseInput({
+        m5: downTrendWindow(M5, 120),
+        referencePrice: downLastClose(),
+        rules: { ...T36_RULES, maxExtensionAtr: 0 }, // isolate the HTF gate
+        h1: upTrendWindow(H1, 130),
+        h4: upTrendWindow(H4, 130),
+      }),
+    );
+    expect(evaluation.outcome).toBe('WAIT');
+    expect(evaluation.reasonCodes).toContain('SCALPER_HTF_OPPOSED');
+    expect(evaluation.evidence?.scalper?.suppressedDirection).toBe('SELL');
+    expect(evidenceScalper(evaluation)?.htfTrend).toEqual({ h1: 'bullish', h4: 'bullish', opposed: true });
+    expect(evaluation.evidence?.htfContext).toEqual({ h1Trend: 'bullish', h4Trend: 'bullish' });
+  });
+
+  test('HTF continuation: a with-trend BUY passes the same aligned-bullish context untouched', () => {
+    const evaluation = evaluateScalper(
+      baseInput({
+        m1: upTrendWindow(M1, 120),
+        referencePrice: upLastClose(),
+        rules: { ...T36_RULES, maxExtensionAtr: 0 }, // isolate the HTF gate
+        h1: upTrendWindow(H1, 130),
+        h4: upTrendWindow(H4, 130),
+      }),
+    );
+    expect(evaluation.outcome).toBe('BUY_SETUP');
+    expect(evidenceScalper(evaluation)?.htfTrend).toEqual({ h1: 'bullish', h4: 'bullish', opposed: false });
+  });
+
+  test('empty HTF windows degrade honestly: trend null, no veto (legacy OR-logic intact)', () => {
+    const evaluation = evaluateScalper(
+      baseInput({
+        m5: downTrendWindow(M5, 120),
+        referencePrice: downLastClose(),
+        rules: { ...T36_RULES, maxExtensionAtr: 0 },
+      }),
+    );
+    expect(evaluation.outcome).toBe('SELL_SETUP');
+    expect(evidenceScalper(evaluation)?.htfTrend).toEqual({ h1: null, h4: null, opposed: false });
+  });
+
+  test('post-loss suppression: suppressSetup reports SCALPER_POST_LOSS_COOLDOWN', () => {
+    const raw = evaluateScalper(
+      baseInput({
+        m5: downTrendWindow(M5, 120),
+        referencePrice: downLastClose(),
+        rules: { ...T36_RULES, maxExtensionAtr: 0 },
+      }),
+    );
+    expect(raw.outcome).toBe('SELL_SETUP');
+    const suppressed = suppressSetup(raw, { duplicate: false, cooldownActive: false, postLossCooldown: true });
+    expect(suppressed.outcome).toBe('WAIT');
+    expect(suppressed.reasonCodes).toContain('SCALPER_POST_LOSS_COOLDOWN');
+    expect(suppressed.levels).toBeNull();
+    expect(suppressed.evidence?.scalper?.suppressedDirection).toBe('SELL');
+  });
+
+  test('fingerprint is stable across repeated identical evaluations (determinism, engine 14)', () => {
+    const input = baseInput({
+      m1: upTrendWindow(M1, 120),
+      referencePrice: upLastClose(),
+      rules: { ...T36_RULES, maxExtensionAtr: 0 },
+      h1: upTrendWindow(H1, 130),
+      h4: upTrendWindow(H4, 130),
+    });
+    expect(computeScalperFingerprint(input)).toBe(computeScalperFingerprint(input));
+  });
+});
+
+function evidenceScalper(evaluation: { evidence: { scalper?: ScalperEvidenceBlock } | null }): ScalperEvidenceBlock | null | undefined {
+  return evaluation.evidence?.scalper;
+}
 
 // ---------------------------------------------------------------------------
 

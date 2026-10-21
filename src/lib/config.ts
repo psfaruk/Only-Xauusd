@@ -218,6 +218,28 @@ export const config = {
       expirySecM1: Math.min(Math.max(300, num('SCALPER_EXPIRY_M1_SEC', 1_800)), 14_400),
       expirySecM5: Math.min(Math.max(300, num('SCALPER_EXPIRY_M5_SEC', 3_600)), 28_800),
       expirySecM15: Math.min(Math.max(600, num('SCALPER_EXPIRY_M15_SEC', 7_200)), 43_200),
+      /** ── Task 36 — higher-timeframe trend intelligence (reverse vs continue).
+       *  Empirical driver (2025-10-21): three consecutive auto-trades fought a
+       *  ~10-point H1 uptrend (SELL@4114.4 → SL, BUY@4119.9 late, BUY@4122.7
+       *  top) because M1/M5 judged in isolation. The HTF gate vetoes signals
+       *  that stand against an aligned H1+H4 trend UNLESS the SMC confluence
+       *  is tier A (a sweep+BOS-confirmed genuine reversal). */
+      htfEnabled: bool('SCALPER_HTF_ENABLED', true),
+      /** EMA periods for the H1/H4 trend read. */
+      htfEmaFastPeriod: Math.min(Math.max(5, num('SCALPER_HTF_EMA_FAST', 20)), 100),
+      htfEmaSlowPeriod: Math.min(Math.max(10, num('SCALPER_HTF_EMA_SLOW', 50)), 200),
+      /** Minimum closed H1/H4 bars for a trend read (below → trend null, no veto). */
+      htfMinBars: Math.min(Math.max(60, num('SCALPER_HTF_MIN_BARS', 120)), 1_000),
+      /** SMC tier-A counter-trend setups still pass (the "sure reversal" exception). */
+      htfCounterTrendMinScore: clampNum('SCALPER_HTF_COUNTER_MIN_SCORE', 75, 55, 100),
+      /** ── Task 36 — anti-chase guard: the momentum model additionally needs
+       *  the decision close WITHIN this many ATR of the fast EMA (buy the
+       *  pullback, never the top of an extended run). 0 disables the guard. */
+      maxExtensionAtr: clampNum('SCALPER_MAX_EXTENSION_ATR', 0.6, 0, 5),
+      /** ── Task 36 — post-loss circuit breaker (seconds). A realized loss on
+       *  one of OUR positions pauses NEW auto-executions for this long; the
+       *  scalper service reports SCALPER_POST_LOSS_COOLDOWN honestly. 0 = off. */
+      postLossCooldownSec: Math.min(Math.max(0, num('SCALPER_POST_LOSS_COOLDOWN_SEC', 900)), 7_200),
     },
     /** Phase 14 — the ICT/SMC ten-agent confluence engine layered onto the
      *  scalper (SMC_CONFLUENCE model). Pure agents never read config directly;
@@ -304,6 +326,32 @@ export const config = {
     maxToolRounds: Math.min(Math.max(1, num('CHAT_MAX_TOOL_ROUNDS', 3)), 5),
     /** Stricter per-IP rate limit for the (costlier) chat endpoint. */
     rateLimitPerMin: Math.min(Math.max(3, num('CHAT_RATE_LIMIT_PER_MIN', 12)), 60),
+  },
+  positionManager: {
+    /** ── Task 36 — software position manager (breakeven + trailing + time
+     *  stop). Runs inside the app scheduler; uses ONLY verified bridge paths
+     *  (positions probe + market CLOSE) — the broker-side SL/TP always remain
+     *  the hard protection. Empirical driver: TPs sat at 1.5R and never
+     *  filled while open profit swung +1R → 0 → −1R; the manager banks the
+     *  move at a trailing floor instead of round-tripping it. */
+    enabled: bool('POSITION_MANAGER_ENABLED', true),
+    /** Poll cadence for open positions, seconds (2–60). */
+    pollSec: Math.min(Math.max(2, num('POSITION_MANAGER_POLL_SEC', 5)), 60),
+    /** Move the software stop to entry + spread once floating profit ≥ this R. */
+    breakevenAtR: clampNum('POSITION_BREAKEVEN_AT_R', 1.0, 0.3, 5),
+    /** Start trailing once floating profit ≥ this R. */
+    trailAtR: clampNum('POSITION_TRAIL_AT_R', 1.5, 0.5, 10),
+    /** Trailing distance behind the best favorable price, in M1-ATR multiples. */
+    trailAtrMult: clampNum('POSITION_TRAIL_ATR_MULT', 1.0, 0.2, 5),
+    /** Time stop: close at market when a position is older than this many
+     *  minutes AND floating profit < 0.2 R (a dead trade frees the single
+     *  exposure slot). 0 disables. */
+    maxAgeMin: Math.min(Math.max(0, num('POSITION_MAX_AGE_MIN', 45)), 480),
+    /** Only positions whose broker comment starts with these prefixes are managed. */
+    managedCommentPrefixes: (process.env.POSITION_MANAGED_PREFIXES ?? 'xau-agent:,xau-auto:')
+      .split(',')
+      .map((p) => p.trim())
+      .filter((p) => p.length > 0),
   },
   risk: {
     /** Phase 7 deterministic risk gate (src/lib/risk/engine.ts). All values

@@ -9,10 +9,18 @@
  *                        latest four-agent verdicts (advisory only).
  *   ExecutionPanel     — Phase 11 approval-based execution: lock banner,
  *                        approval queue (approve/reject), open positions
- *                        (close), append-only execution log.
+ *                        (close), append-only execution log. Task 36-rt: the
+ *                        open-positions section renders the REALTIME channel
+ *                        (250 ms live price marking, 3 s position refresh,
+ *                        2 s account balance) whenever it is fresher than the
+ *                        15 s poll, and falls back to the polled view —
+ *                        honestly, never mixing the two.
  *
  * Deterministic data (signal verdicts, levels, risk checks) always comes from
- * the engine via props — this panel never computes a price or lot size.
+ * the engine via props — this panel never computes a price or lot size. The
+ * ONLY local arithmetic is the display-time mark-to-market of a live tick
+ * against a position's real entry (same 100 oz contract the tick-stream
+ * relay uses) — a rendering, never a trading decision.
  */
 
 import {
@@ -30,16 +38,18 @@ import {
   XCircle,
   Zap,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { bnDigits } from '@/lib/dashboard/candidate-display';
 import { fmtDhaka } from '@/lib/dashboard/i18n';
 import type {
   AiReviewAgent,
   AiReviewLatestResponse,
   ExecutionStateResponse,
 } from '@/lib/dashboard/types';
+import type { TickStreamLivePosition, TickStreamTick } from '@/hooks/use-tick-stream';
 
 // ---------------------------------------------------------------------------
 // Phase 6 — AI multi-agent review panel
@@ -200,6 +210,78 @@ function logStatusBn(s: string): string {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Task 36-rt — realtime open-position channel (live rendering helpers)
+// ---------------------------------------------------------------------------
+
+/** Optional live-positions bundle from the tick-stream socket (3 s cadence).
+ *  Non-null ONLY while it is fresher than the last 15 s poll — the parent
+ *  decides; null means "render the existing polled view unchanged". */
+export interface LiveExecutionPositions {
+  positions: TickStreamLivePosition[];
+  updatedAtMs: number;
+  stale: boolean;
+}
+
+/** Optional live-account bundle (2 s cadence; balance only when observed). */
+export interface LiveExecutionAccount {
+  balance: number;
+  currency: string | null;
+  updatedAtMs: number;
+}
+
+/** XAUUSDm contract: 1 lot = 100 oz — the SAME constant the tick-stream relay
+ *  uses for its floatingPnlUsd. Display-time mark-to-market ONLY (the live
+ *  250 ms tick against the position's REAL entry) — never a trading
+ *  computation; entries/lots/risk always come from the engine. */
+const GOLD_CONTRACT_OZ = 100;
+const LIVE_TICK_FRESH_MS = 10_000;
+
+function markToMarket(
+  p: TickStreamLivePosition,
+  tick: TickStreamTick | null,
+): { price: number | null; pnl: number | null } {
+  if (tick !== null && tick.symbol === p.symbol) {
+    const tickMs = Date.parse(tick.quoteTimeUtc);
+    if (Number.isFinite(tickMs) && Date.now() - tickMs < LIVE_TICK_FRESH_MS) {
+      // BUY closes at bid, SELL at ask — identical to the relay's formula.
+      const delta = p.direction === 'BUY' ? tick.bid - p.entryPrice : p.entryPrice - tick.ask;
+      return {
+        price: p.direction === 'BUY' ? tick.bid : tick.ask,
+        pnl: Math.round(delta * GOLD_CONTRACT_OZ * p.lots * 100) / 100,
+      };
+    }
+  }
+  // Relay-marked values (≤ 3 s old) or honest nulls — never fabricated.
+  return { price: p.currentPrice, pnl: p.floatingPnlUsd };
+}
+
+/** Bengali age of an open position, e.g. "৪ মিনিট" / "২ ঘণ্টা ১৫ মিনিট". */
+function ageBn(openTimeUtcSec: number, nowMs: number): string {
+  if (!Number.isFinite(openTimeUtcSec) || openTimeUtcSec <= 0) return '—';
+  const sec = Math.max(0, Math.floor(nowMs / 1000) - openTimeUtcSec);
+  if (sec < 60) return `${bnDigits(sec)} সেকেন্ড`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${bnDigits(min)} মিনিট`;
+  const hr = Math.floor(min / 60);
+  const remMin = min % 60;
+  return remMin > 0 ? `${bnDigits(hr)} ঘণ্টা ${bnDigits(remMin)} মিনিট` : `${bnDigits(hr)} ঘণ্টা`;
+}
+
+/** Pulsing লাইভ badge — shown only while the underlying realtime observation
+ *  is < 5 s old (the pulse is presentation; the gate is the honest age). */
+function LiveBadge({ testId }: { testId?: string }) {
+  return (
+    <span
+      data-testid={testId}
+      className="inline-flex shrink-0 items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-300"
+    >
+      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" aria-hidden />
+      লাইভ
+    </span>
+  );
+}
+
 export function ExecutionPanel({
   state,
   deciding,
@@ -207,6 +289,9 @@ export function ExecutionPanel({
   onDecide,
   onClose,
   error,
+  livePositions = null,
+  liveTick = null,
+  liveAccount = null,
 }: {
   state: ExecutionStateResponse | null;
   deciding: boolean;
@@ -214,8 +299,32 @@ export function ExecutionPanel({
   onDecide: (approvalId: string, decision: 'approve' | 'reject') => void;
   onClose: (positionId: string) => void;
   error?: string | null;
+  /** Task 36-rt — realtime positions (null ⇒ polled view unchanged). */
+  livePositions?: LiveExecutionPositions | null;
+  /** Task 36-rt — freshest 250 ms quote for live price/PnL marking. */
+  liveTick?: TickStreamTick | null;
+  /** Task 36-rt — realtime account balance (null ⇒ polled balance). */
+  liveAccount?: LiveExecutionAccount | null;
 }) {
   const s = state?.state ?? null;
+
+  // 1 s heartbeat while any realtime channel is displayed — keeps the লাইভ
+  // badge (< 5 s gate), the position age and the staleness fallback honest
+  // even when socket events stop arriving (prices themselves re-render at the
+  // 250 ms tick cadence from the parent). The timer callback owns all state
+  // updates — nothing is set synchronously inside the effect body.
+  const hasLiveChannel = livePositions !== null || liveAccount !== null;
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    if (!hasLiveChannel) return;
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [hasLiveChannel]);
+
+  // Balance: the realtime account channel wins only while fresher than the
+  // 15 s poll (the parent gates it); otherwise the polled value stands.
+  const liveBalance = liveAccount !== null ? liveAccount.balance : (s?.bridge.accountBalance ?? null);
+  const liveBalanceIsLive = liveAccount !== null && nowMs - liveAccount.updatedAtMs < 5000;
 
   return (
     <Card className="border-zinc-800 bg-zinc-950/60">
@@ -277,10 +386,13 @@ export function ExecutionPanel({
                       </span>
                     </>
                   )}
-                  {s.bridge.accountBalance !== null && (
+                  {liveBalance !== null && (
                     <>
                       <span className="text-zinc-700">•</span>
-                      <span>ব্যালেন্স {s.bridge.accountBalance.toFixed(2)}</span>
+                      <span className="inline-flex items-center gap-1.5">
+                        ব্যালেন্স <span className="font-mono">{liveBalance.toFixed(2)}</span>
+                        {liveBalanceIsLive && <LiveBadge testId="live-balance-badge" />}
+                      </span>
                     </>
                   )}
                   <span className="text-zinc-700">•</span>
@@ -374,10 +486,78 @@ export function ExecutionPanel({
           )}
         </section>
 
-        {/* Open positions */}
+        {/* Open positions — Task 36-rt: the realtime channel (3 s refresh, 250 ms
+         * price/PnL marking) whenever it is fresher than the last 15 s poll;
+         * the existing polled view renders unchanged as the honest fallback. */}
         <section aria-label="খোলা পজিশন">
-          <h4 className="mb-2 text-xs font-semibold text-zinc-300">খোলা পজিশন (লাইভ)</h4>
-          {!s || s.positions.length === 0 ? (
+          <h4 className="mb-2 flex items-center gap-2 text-xs font-semibold text-zinc-300">
+            খোলা পজিশন (লাইভ)
+            {livePositions !== null && nowMs - livePositions.updatedAtMs < 5000 && (
+              <LiveBadge testId="live-positions-badge" />
+            )}
+          </h4>
+          {livePositions !== null ? (
+            livePositions.positions.length === 0 ? (
+              <p data-testid="live-positions-list" className="rounded-lg border border-dashed border-zinc-800 p-3 text-xs text-zinc-500">
+                এই মুহূর্তে কোনো খোলা পজিশন নেই (রিয়েল-টাইম)।
+              </p>
+            ) : (
+              <div data-testid="live-positions-list" className="max-h-72 space-y-2 overflow-y-auto pr-1">
+                {livePositions.positions.map((p) => {
+                  const marked = markToMarket(p, liveTick);
+                  return (
+                    <div
+                      key={p.positionId}
+                      data-testid="live-position-row"
+                      className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-zinc-800 bg-zinc-900/50 p-3"
+                    >
+                      <Badge
+                        className={`border text-[10px] ${
+                          p.direction === 'BUY'
+                            ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                            : 'bg-red-500/15 text-red-300 border-red-500/30'
+                        }`}
+                      >
+                        {p.direction}
+                      </Badge>
+                      <span className="text-xs text-zinc-200">{p.symbol}</span>
+                      <span className="text-[11px] text-zinc-400">
+                        {p.lots} লট @ <span className="font-mono">{p.entryPrice}</span>
+                      </span>
+                      <span className="text-[11px] text-zinc-500">
+                        চলতি{' '}
+                        <span className="font-mono text-zinc-200">{marked.price !== null ? marked.price : '—'}</span>
+                      </span>
+                      {marked.pnl === null ? (
+                        <span data-testid="live-position-pnl" className="font-mono text-xs text-zinc-500">—</span>
+                      ) : (
+                        <span
+                          data-testid="live-position-pnl"
+                          className={`font-mono text-xs font-semibold ${
+                            marked.pnl > 0 ? 'text-emerald-400' : marked.pnl < 0 ? 'text-red-400' : 'text-zinc-300'
+                          }`}
+                        >
+                          {marked.pnl > 0 ? '+' : ''}
+                          {marked.pnl.toFixed(2)}
+                        </span>
+                      )}
+                      <span className="text-[10px] text-zinc-500">{ageBn(p.openTimeUtcSec, nowMs)}</span>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="ml-auto h-7 border-zinc-700 px-2.5 text-[11px]"
+                        onClick={() => onClose(p.positionId)}
+                        disabled={closingId !== null || !(s?.executionEnabled ?? false)}
+                        aria-label={`পজিশন ${p.positionId} ক্লোজ করুন`}
+                      >
+                        {closingId === p.positionId ? 'চলছে…' : 'ক্লোজ'}
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
+            )
+          ) : !s || s.positions.length === 0 ? (
             <p className="rounded-lg border border-dashed border-zinc-800 p-3 text-xs text-zinc-500">
               {s?.positionsError
                 ? `পজিশন তালিকা অনুপলব্ধ (${s.positionsError})`

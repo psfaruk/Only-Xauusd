@@ -227,6 +227,9 @@ function coreInput(nowUtcSec: number, rules: ScalperRules): ScalperCoreInput {
     m15: windowOf(candles, 'M15'),
     m5: windowOf(candles, 'M5'),
     m1: windowOf(candles, 'M1'),
+    // Task 36 — empty HTF windows: trend reads null, the veto never fires.
+    h1: { timeframe: 'H1', candles: [], source: 'bridge-mt5' },
+    h4: { timeframe: 'H4', candles: [], source: 'bridge-mt5' },
     referencePrice: candles[candles.length - 1].close,
     spreadPrice: 0.3,
     nowUtcSec,
@@ -312,7 +315,14 @@ describe('scalper v13 — news blackout gates every model', () => {
   });
 
   test('SMC layer disabled → no smc chips, no smc evidence, legacy models judge alone', () => {
-    const disabled: ScalperRules = { ...rules, smc: { ...rules.smc, enabled: false } };
+    // Legacy-mode rules: the pinned fallback cadence (momentum model) predates
+    // the Task-36 chase guard — disable it so this test keeps pinning what it
+    // was written to pin (the guard has its own tests in scalper-core.test.ts).
+    const disabled: ScalperRules = {
+      ...rules,
+      smc: { ...rules.smc, enabled: false },
+      maxExtensionAtr: 0,
+    };
     const evaluation = evaluateScalper(coreInput(NOW_SCALPER, disabled));
     for (const j of evaluation.evidence?.scalper?.tfJudgements ?? []) {
       expect(j.smc).toBeUndefined();

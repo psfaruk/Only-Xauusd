@@ -40,6 +40,15 @@ export function buildScalperRules(): ScalperRules {
       M5: s.expirySecM5,
       M15: s.expirySecM15,
     },
+    maxExtensionAtr: s.maxExtensionAtr,
+    postLossCooldownSec: s.postLossCooldownSec,
+    htf: {
+      enabled: s.htfEnabled,
+      emaFastPeriod: s.htfEmaFastPeriod,
+      emaSlowPeriod: s.htfEmaSlowPeriod,
+      minBars: s.htfMinBars,
+      counterTrendMinScore: s.htfCounterTrendMinScore,
+    },
     smc: {
       enabled: smc.enabled,
       newsBlackoutEnabled: smc.newsBlackoutEnabled,
@@ -85,7 +94,9 @@ export function buildScalperRules(): ScalperRules {
 
 /** Human-readable rule documentation (persisted + rendered in the UI). */
 export const SCALPER_DOC: string[] = [
-  'তিনটি শর্ট টাইমফ্রেম (M15, M5, M1) স্বাধীনভাবে বিচার হয় — যে কোনো একটি agree করলেই সিগন্যাল (OR-লজিক), কোনো উচ্চতর-টাইমফ্রেম গেট নেই।',
+  'তিনটি শর্ট টাইমফ্রেম (M15, M5, M1) স্বাধীনভাবে বিচার হয় — যে কোনো একটি agree করলেই সিগন্যাল (OR-লজিক)। Task 36: H1+H4 ট্রেন্ড একসাথে একদিকে থাকলে বিপরীত-দিকের সিগন্যাল আটকে যায় (SCALPER_HTF_OPPOSED) — শুধু টিয়ার-A SMC রিভার্সাল (স্কোর ≥ ৭৫) ব্যতিক্রম। কোথায় রিভার্স আর কোথায় কনটিনিউ — এটিই সেই বিচার।',
+  'মোমেন্টাম মডেলে অ্যান্টি-চেজ গার্ড (Task 36): দাম EMA9-এর চেয়ে ০.৬×ATR-এর বেশি দূরে গেলে সেই দিকে ঢুকতে নেই — পুলব্যাক এন্ট্রি, দৌড়নো টপ নয়।',
+  'Task 36 — পোস্ট-লস কুলডাউন: একটি লস হলে পরবর্তী ১৫ মিনিট নতুন অটো-এন্ট্রি বন্ধ (SCALPER_POST_LOSS_COOLDOWN) — রিভেঞ্জ ট্রেড ঠেকাতে। পজিশন ম্যানেজার: +১R-এ ব্রেকইভেন, +১.৫R-এ ট্রেইলিং স্টপ, ৪৫ মিনিটে ডেড-ট্রেড টাইম-স্টপ।',
   'Phase 14 — SMC/ICT কনফ্লুয়েন্স মডেল (অগ্রাধিকার): ৮টি এজেন্ট (স্ট্রাকচার ১৫ · লিকুইডিটি ২০ · POI ২০ · কি-লেভেল ১০ · প্রাইস-অ্যাকশন ১৫ · মোমেন্টাম ১০ · সেশন ৫ · AMD ৫ = ১০০) ওজন-যোগে স্কোর করে; টিয়ার A ≥ 75 (সিউর), B ≥ 55 (ডিফল্ট ইমিশন), C ≥ 40।',
   'SMC হার্ড ভিটো: নিউজ ব্ল্যাকআউট উইন্ডো, ০.৮×ATR-এর কাছে বিপরীত কি-লেভেল দেয়াল (SR_WALL), POI-এর বাইরে দাম (PRICE_BEYOND_POI), POI ভাঙা (POI_VIOLATED), শক্তিশালী বিপরীত মোমেন্টাম (MOMENTUM_OPPOSED)।',
   'SMC লেভেল: এন্ট্রি = POI জোনে লাইভ দাম; SL = সুইপ-উইক/জোন-প্রান্তের বাইরে ০.৩৫×ATR বাফার; টার্গেট = বিপরীত লিকুইডিটি পুল (সর্বোচ্চ ১.৫R ক্যাপ; ১R-এর কাছের ম্যাগনেট হলে SMC_TP_TOO_CLOSE)।',
