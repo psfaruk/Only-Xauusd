@@ -463,3 +463,23 @@ model ExecutionLog {
 
   @@index([signalId])
 }
+
+// ============================================================================
+// SETTINGS (Task 33/35) — UI-imported broker credentials (encrypted at rest).
+// Singleton row (id=1). The password NEVER lives in plaintext: it is stored
+// AES-256-GCM encrypted (iv:tag:cipher, base64) with the key in
+// db/settings.key (auto-generated, chmod 600, git-ignored). `revision`
+// increments on every save; the bridge reports its own applied revision so
+// the app can detect drift and re-push after bridge restarts.
+// ============================================================================
+
+model BrokerSettings {
+  id           Int      @id @default(1) // singleton
+  server       String
+  login        String
+  passwordEnc  String   // AES-256-GCM payload — never returned by any API
+  revision     Int      @default(1)
+  updatedBy    String   @default("ui") // ui | seed | env-migrate
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}

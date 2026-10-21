@@ -7,7 +7,7 @@
  * exactly one active view driven by this model.
  */
 
-export type TerminalView = 'dashboard' | 'chart' | 'chat' | 'history' | 'system';
+export type TerminalView = 'dashboard' | 'chart' | 'chat' | 'history' | 'system' | 'settings';
 
 export interface NavItem {
   id: TerminalView;
@@ -26,6 +26,9 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { id: 'chat', labelBn: 'এআই চ্যাট', shortBn: 'চ্যাট', testId: 'nav-chat' },
   { id: 'history', labelBn: 'সিগন্যাল', shortBn: 'সিগন্যাল', testId: 'nav-history' },
   { id: 'system', labelBn: 'সিস্টেম', shortBn: 'সিস্টেম', testId: 'nav-system' },
+  // Task 33/35 — সেটিংস: UI-import for Exness MT5 credentials (bridge
+  // re-credentials live; .env never touched again).
+  { id: 'settings', labelBn: 'সেটিংস', shortBn: 'সেটিংস', testId: 'nav-settings' },
 ] as const;
 
 export function isTerminalView(v: unknown): v is TerminalView {

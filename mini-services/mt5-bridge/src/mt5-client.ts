@@ -156,7 +156,7 @@ export interface PositionInfo {
   timeUpdateUtcSec: number;
   symbol: string;
   direction: "BUY" | "SELL";
-  lots: number;        // trade_volume ÷ 100000
+  lots: number;        // trade_volume ÷ 1e8 (empirical, 2025-10-21)
   priceOpen: number;
   priceClose: number;  // 0 while the position is open
   sl: number;
@@ -650,7 +650,10 @@ export class Mt5WsClient {
           timeUpdateUtcSec: rec.readUInt32LE(20),
           symbol: utf16(rec.subarray(24, 88)),
           direction: action === 0 ? "BUY" : "SELL",
-          lots: Number(rec.readBigUInt64LE(124)) / 100000,
+          // volume u64 @124 — ÷1e8, empirically calibrated 2025-10-21:
+          // a live 0.01-lot position returned raw 1,000,000 (the brief's
+          // ÷1e5 assumption would misreport it as 10 lots).
+          lots: Number(rec.readBigUInt64LE(124)) / 100000000,
           priceOpen: rec.readDoubleLE(92),
           priceClose: rec.readDoubleLE(100),
           sl: rec.readDoubleLE(108),

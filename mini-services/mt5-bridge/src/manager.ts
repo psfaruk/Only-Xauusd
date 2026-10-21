@@ -80,6 +80,8 @@ export interface BridgeStateSnapshot {
   orderRequests: number;
   ordersAccepted: number;
   lastOrderResult: OrderOutcomeRecord | null;
+  // Task 33/35 — runtime credential applications (drift detection)
+  settingsRevision: number;
 }
 
 const startedAtMs = Date.now();
@@ -104,6 +106,10 @@ let candleRequestsServed = 0;
 let candleCacheHits = 0;
 let loginMasked: string | null = null;
 let stopped = false;
+/** Task 33/35 — bumped every time credentials are applied at runtime via
+ *  applyCredentials(); reported in the status snapshot so the app can detect
+ *  drift (e.g. the bridge restarted with stale .env credentials) and re-push. */
+let settingsRevision = 0;
 
 // ── Phase 11 order layer state (all DEAD unless ordersEnabled) ───────────────
 
@@ -205,6 +211,7 @@ export function snapshot(): BridgeStateSnapshot {
     orderRequests,
     ordersAccepted,
     lastOrderResult,
+    settingsRevision,
   };
 }
 
@@ -363,6 +370,59 @@ export function stop() {
   if (heartbeatTimer) clearInterval(heartbeatTimer);
   if (reconnectTimer) clearTimeout(reconnectTimer);
   client?.close();
+}
+
+// ── Task 33/35 — live credential swap (UI সেটিংস tab) ───────────────────────
+
+export interface CredentialUpdate {
+  server: string;
+  login: number;
+  password: string;
+}
+
+/** Validate + apply new broker credentials at runtime: swap the config, tear
+ *  the current session down (without arming the auto-reconnect — it would
+ *  race this connect) and reconnect fresh. Throws an honest code-prefixed
+ *  error when the reconnect fails. The password never appears in any error,
+ *  log or the returned snapshot (masked login only). A failed apply leaves
+ *  the NEW credentials active (revision already bumped) — the background
+ *  reconnect keeps retrying them, exactly like a boot with those creds. */
+export async function applyCredentials(next: CredentialUpdate): Promise<BridgeStateSnapshot> {
+  if (!/^[A-Za-z0-9._-]{3,64}$/.test(next.server)) throw new Error("BAD_CREDENTIALS: invalid server name");
+  if (!Number.isInteger(next.login) || next.login <= 0) throw new Error("BAD_CREDENTIALS: invalid login");
+  if (typeof next.password !== "string" || next.password.length < 4) throw new Error("BAD_CREDENTIALS: invalid password");
+
+  config.server = next.server;
+  config.login = next.login;
+  config.password = next.password;
+  settingsRevision++;
+
+  // Tear down cleanly. `client` is nulled BEFORE close() so the close
+  // handler's `client === ws` guard fails → no auto-reconnect race.
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  const old = client;
+  client = null;
+  try { old?.close(); } catch { /* already closed */ }
+  if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+  if (accountTimer) { clearInterval(accountTimer); accountTimer = null; }
+  connecting = false;
+  account = null;
+  symbolTable = new Map();
+  quoteCache.clear();
+  loginMasked = null;
+  backoffMs = 2000;
+
+  // If a connect was already in flight it reads the NEW config values on its
+  // next gateway attempt; give it a moment to settle before connecting here.
+  for (let i = 0; connecting && i < 150; i++) {
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  // (the wait loop / close handlers may have re-assigned the module-level
+  // `client` — re-read it without the null-narrowing from the teardown above)
+  if (!(client as Mt5WsClient | null)?.isOpen) {
+    await connect(); // throws with the last gateway failure when all fail
+  }
+  return snapshot();
 }
 
 // ── candles ─────────────────────────────────────────────────────────────────
@@ -615,7 +675,7 @@ export async function closePosition(positionId: string): Promise<ClosePositionOu
   if (!client?.isOpen) throw new Error("NOT_CONNECTED: no authenticated broker session");
   if (typeof positionId !== "string" || !/^\d{1,20}$/.test(positionId)) throw new Error("BAD_POSITION_ID: positionId must be a numeric string");
 
-  const positions = await client.positions();
+  const positions = await fetchPositionsFresh();
   const pos = positions.find((p) => p.positionId === positionId);
   if (!pos) throw new Error(`POSITION_NOT_FOUND: ${positionId} is not an open position`);
   const info = symbolTable.get(pos.symbol);
@@ -641,7 +701,7 @@ export async function closePosition(positionId: string): Promise<ClosePositionOu
   if (r.accepted) {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        positionStillOpen = (await client.positions()).some((p) => p.positionId === positionId);
+        positionStillOpen = (await fetchPositionsFresh()).some((p) => p.positionId === positionId);
       } catch {
         positionStillOpen = null;
         break;
@@ -665,10 +725,43 @@ export async function closePosition(positionId: string): Promise<ClosePositionOu
  * server times; they are normalized to UTC with the live-measured offset
  * (same rule as quotes/candles — Exness trial ≈ UTC, verified ≈ 0).
  */
+
+// ── Task 35 — fresh-positions probe session (empirical fix, 2025-10-21) ────
+
+/**
+ * The gateway serves cmd-4 POSITIONS as the session's LOGIN-TIME snapshot:
+ * a long-lived session NEVER sees positions opened after its login (verified
+ * live — the main session stayed frozen at 0 positions while a fresh session
+ * returned the live one; the 07:37 auto-trade was invisible to /api/positions
+ * for its whole life because of this). Every positions read therefore opens
+ * a short-lived probe session: connect → auth → login → positions → close.
+ * Gateway fail-over mirrors connect(). Trade/close requests still go through
+ * the MAIN session (proven working — orders are accepted there).
+ */
+async function fetchPositionsFresh(): Promise<PositionInfo[]> {
+  let lastFail = "no gateway attempted";
+  for (const gw of config.gateways) {
+    let ws: Mt5WsClient | null = null;
+    try {
+      ws = await Mt5WsClient.connect(gw);
+      await ws.auth();
+      if (!config.login || !config.password) throw new Error("MT5_LOGIN / MT5_PASSWORD not configured");
+      await ws.login(config.login, config.password);
+      const raw = await ws.positions();
+      try { ws.close(); } catch { /* already closed */ }
+      return raw;
+    } catch (e) {
+      lastFail = e instanceof Error ? e.message : String(e);
+      try { ws?.close(); } catch { /* already closed */ }
+    }
+  }
+  throw new Error(`POSITIONS_PROBE_FAILED: all gateways failed — last: ${lastFail}`);
+}
+
 export async function listPositions(): Promise<PositionInfo[]> {
   if (!ordersEnabled) throw new Error("ORDER_LAYER_DISABLED: BRIDGE_ORDERS_ENABLED is not 'true'/'1'");
   if (!client?.isOpen) throw new Error("NOT_CONNECTED: no authenticated broker session");
-  const raw = await client.positions();
+  const raw = await fetchPositionsFresh();
   return raw.map((p) => ({
     ...p,
     timeCreateUtcSec: p.timeCreateUtcSec > 0 ? p.timeCreateUtcSec - brokerOffsetSec : 0,

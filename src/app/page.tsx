@@ -20,7 +20,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { BarChart3, Home, MessageCircle, ShieldCheck, Activity } from 'lucide-react';
+import { BarChart3, Home, MessageCircle, Settings as SettingsIcon, ShieldCheck, Activity } from 'lucide-react';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
@@ -30,6 +30,7 @@ import {
   type PriceDisplaySpec,
 } from '@/lib/market/price-display';
 import { NAV_ITEMS, type TerminalView } from '@/lib/dashboard/nav';
+import { BrokerSettingsView } from '@/components/terminal/BrokerSettingsView';
 import {
   buildChatHistory,
   canSendChat,
@@ -781,10 +782,17 @@ export default function TradingTerminal() {
                 <TabsTrigger value="system" className="data-[state=active]:bg-amber-500/15 data-[state=active]:text-amber-300">
                   সিস্টেম
                 </TabsTrigger>
+                {/* Task 33/35 — সেটিংস: Exness MT5 ক্রেডেনশিয়াল UI-import */}
+                <TabsTrigger value="settings" className="data-[state=active]:bg-amber-500/15 data-[state=active]:text-amber-300">
+                  সেটিংস
+                </TabsTrigger>
               </TabsList>
               <TabsContent value="history">{historyView}</TabsContent>
               <TabsContent value="analysis">{analysisView}</TabsContent>
               <TabsContent value="system">{systemView}</TabsContent>
+              <TabsContent value="settings">
+                <BrokerSettingsView />
+              </TabsContent>
             </Tabs>
           </div>
         </div>
@@ -835,6 +843,11 @@ export default function TradingTerminal() {
             )}
             {view === 'chat' && <div className="h-[calc(100dvh-11.5rem)] min-h-[420px]">{chatView}</div>}
             {view === 'history' && historyView}
+            {view === 'settings' && (
+              <div className="pb-2">
+                <BrokerSettingsView />
+              </div>
+            )}
             {view === 'system' && (
               <div className="space-y-4">
                 <AnalysisView
@@ -904,7 +917,7 @@ export default function TradingTerminal() {
         className="fixed inset-x-0 bottom-0 z-50 border-t border-zinc-800 bg-zinc-950/95 backdrop-blur lg:hidden"
         style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
       >
-        <div className="mx-auto grid max-w-lg grid-cols-5">
+        <div className="mx-auto grid max-w-lg grid-cols-6">
           {NAV_ITEMS.map((item) => {
             const active = view === item.id;
             const Icon =
@@ -912,7 +925,8 @@ export default function TradingTerminal() {
                 : item.id === 'chart' ? BarChart3
                   : item.id === 'chat' ? MessageCircle
                     : item.id === 'history' ? Activity
-                      : ShieldCheck;
+                      : item.id === 'settings' ? SettingsIcon
+                        : ShieldCheck;
             return (
               <button
                 key={item.id}

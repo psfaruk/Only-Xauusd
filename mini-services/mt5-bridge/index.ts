@@ -18,6 +18,15 @@
  *   GET  /api/positions                          (auth; 403 when disabled)
  *   POST /api/order                              (auth; 405 when disabled)
  *   POST /api/position-close                     (auth; 405 when disabled)
+ *
+ * TASK 33/35 — ADMIN CREDENTIAL SWAP (always available, auth-gated; NOT an
+ * order endpoint, so it works even when the order layer is disabled):
+ *   POST /admin/credentials {server,login,password} (auth: x-trader-key)
+ *   Tears down the broker session and reconnects with the given Exness
+ *   credentials (source: the app's সেটিংস tab / DB settings store). The
+ *   password never appears in any response, log or error — the response is
+ *   the post-reconnect status snapshot (masked login only) + the applied
+ *   settingsRevision for drift detection.
  * The order surface is limited BY CONSTRUCTION to market BUY/SELL with SL/TP,
  * close-by-position-id and position listing — no pending orders, no modify,
  * no cancel, no account transfers. Credentials never appear in responses,
@@ -29,6 +38,7 @@ import {
   connect, snapshot, getQuote, getSymbolInfo, listSymbols, resolvableWatchlist,
   fetchCandles, stop, config,
   ordersEnabled, maxOrderLots, placeMarketOrder, closePosition, listPositions,
+  applyCredentials,
 } from "./src/manager";
 
 const PORT = 3031;
@@ -40,6 +50,10 @@ const TOKEN = process.env.MT5_BRIDGE_TOKEN ?? "";
 const ORDER_POST_PATHS = new Set(["/api/order", "/api/position-close"]);
 const ORDER_BODY_FIELDS = new Set(["symbol", "type", "lots", "sl", "tp", "comment"]);
 const CLOSE_BODY_FIELDS = new Set(["positionId"]);
+/** Task 33/35 — admin credential swap path (config endpoint, NOT an order
+ * endpoint: always POST-able while the token is configured). */
+const ADMIN_CREDENTIALS_PATH = "/admin/credentials";
+const ADMIN_CREDENTIALS_FIELDS = new Set(["server", "login", "password"]);
 
 function json(_ctx: unknown, status: number, body: unknown, headers?: Record<string, string>): Response {
   return new Response(JSON.stringify(body), {
@@ -124,13 +138,19 @@ const server = Bun.serve({
     const path = url.pathname.replace(/\/+$/, "") || "/";
     const method = req.method.toUpperCase();
 
-    if (method !== "GET" && !(ordersEnabled && method === "POST" && ORDER_POST_PATHS.has(path))) {
+    if (
+      method !== "GET" &&
+      !(
+        method === "POST" &&
+        (path === ADMIN_CREDENTIALS_PATH || (ordersEnabled && ORDER_POST_PATHS.has(path)))
+      )
+    ) {
       return json(null, 405, {
         ok: false,
         error: "METHOD_NOT_ALLOWED",
         detail: ordersEnabled
-          ? "bridge methods: GET (market data) + POST /api/order + POST /api/position-close (Phase 11 order layer)"
-          : "read-only bridge: GET only",
+          ? "bridge methods: GET (market data) + POST /api/order + POST /api/position-close (Phase 11 order layer) + POST /admin/credentials (settings)"
+          : "read-only bridge: GET only (+ POST /admin/credentials for the settings store)",
       });
     }
 
@@ -151,6 +171,48 @@ const server = Bun.serve({
     // ── auth gate for everything below ──────────────────────────────────────
     if (!authorized(req)) {
       return json(null, 401, { ok: false, error: "UNAUTHORIZED", detail: "missing or invalid x-trader-key" });
+    }
+
+    // ── Task 33/35 — admin credential swap (settings-store push) ──────────
+    // Config endpoint, NOT an order endpoint: always available while the
+    // token is configured. Strict body {server, login, password}; the
+    // response carries the post-reconnect status with the login MASKED —
+    // the password never appears in any response, log or error.
+    if (path === ADMIN_CREDENTIALS_PATH && method === "POST") {
+      const body = await readStrictJsonBody(req, ADMIN_CREDENTIALS_FIELDS);
+      if (!body.ok) return body.response;
+      const server = typeof body.body.server === "string" ? body.body.server.trim() : "";
+      const loginNum = Number(body.body.login);
+      const password = typeof body.body.password === "string" ? body.body.password : "";
+      if (!/^[A-Za-z0-9._-]{3,64}$/.test(server) || !Number.isInteger(loginNum) || loginNum <= 0 || password.length < 4) {
+        return tjson(400, {
+          ok: false,
+          error: "BAD_CREDENTIALS",
+          detail: "server (3-64 chars, [A-Za-z0-9._-]), numeric login and password (>=4 chars) required",
+        });
+      }
+      try {
+        const snap = await applyCredentials({ server, login: loginNum, password });
+        return tjson(200, {
+          ok: true,
+          applied: true,
+          settingsRevision: snap.settingsRevision,
+          connected: snap.connected,
+          authenticated: snap.authenticated,
+          server: snap.server,
+          loginMasked: snap.loginMasked,
+          accountCurrency: snap.accountCurrency,
+          accountBalance: snap.accountBalance,
+          accountEquity: snap.accountEquity,
+          symbols: snap.symbolsLoaded,
+          reconnects: snap.reconnects,
+          lastError: snap.lastError,
+        });
+      } catch (e) {
+        const raw = e instanceof Error ? e.message : String(e);
+        const safe = raw.replace(/password\s*[:=]?\s*\S+/gi, "password ***");
+        return tjson(503, { ok: false, error: "RECONNECT_FAILED", detail: safe, settingsRevision: snapshot().settingsRevision });
+      }
     }
 
     if (path === "/api/status") {
@@ -190,6 +252,8 @@ const server = Bun.serve({
         orderRequests: s.orderRequests,
         ordersAccepted: s.ordersAccepted,
         lastOrderResult: s.lastOrderResult,
+        // Task 33/35 — applied-credential revision (drift detection)
+        settingsRevision: s.settingsRevision,
       });
     }
 

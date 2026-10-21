@@ -28,6 +28,24 @@ export async function register() {
   const intervalMs = Number(process.env.MARKET_SYNC_INTERVAL_MS ?? '0');
   const bridgeUrl = (process.env.MT5_BRIDGE_URL ?? '').trim();
 
+  // ── Task 33/35 — broker-credential drift sync (always on) ──────────────
+  // DB-stored credentials (সেটিংস tab) are the source of truth once saved.
+  // The bridge may (re)start with stale .env credentials — after app boot,
+  // and then once per scheduler tick, compare the DB revision with the
+  // bridge's applied revision and re-push when they drift. Fire-and-forget,
+  // error-isolated, never blocks the scheduler.
+  if (bridgeUrl && process.env.NEXT_RUNTIME === 'nodejs') {
+    const { syncBridgeCredentials } = await import('@/lib/settings');
+    const syncOnce = () =>
+      void syncBridgeCredentials()
+        .then((r) => {
+          if (r.pushed) console.log(`[settings-sync] ${r.reason}`);
+        })
+        .catch(() => undefined);
+    setTimeout(syncOnce, 10_000).unref?.();
+    setInterval(syncOnce, Math.max(60_000, intervalMs || 60_000)).unref?.();
+  }
+
   if (!Number.isFinite(intervalMs) || intervalMs <= 0 || !bridgeUrl) {
     console.log('[instrumentation] market sync scheduler: OFF (default) — enable with MARKET_SYNC_INTERVAL_MS + MT5_BRIDGE_URL');
     return;
