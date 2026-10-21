@@ -261,7 +261,7 @@ describe('scalper v13 — SMC_CONFLUENCE setup emission', () => {
     expect(lv.entryZoneHighText).toBe('2660.50'); // FVG top
     expect(lv.stopLoss).toBeLessThan(2647.5); // below the sweep wick low
     expect(lv.stopLoss < lv.entryReference && lv.entryReference < lv.target).toBe(true);
-    expect(lv.rewardRiskRatio).toBeCloseTo(1.5, 6); // fixed-RR cap (no opposing pool above)
+    expect(lv.rewardRiskRatio).toBeCloseTo(1.2, 6); // fixed-RR cap (Task 37: reachable first target; no opposing pool above)
   });
 
   test('full SMC evidence attached: verdict, EQL sweep, FVG POI, eight votes', () => {

@@ -4,7 +4,7 @@
  * Polls the mt5-bridge (:3031, x-trader-key auth) and broadcasts genuine
  * observations to socket.io clients:
  *
- *   · `tick`      — live XAUUSDm quote, polled every 250 ms (Task 36-rt — the
+ *   · `tick`      — live XAUUSDm quote, polled every 100 ms (Task 36-rt 250 ms → Task 37 100 ms — the
  *                   "millisecond" price cadence), emitted ONLY on change;
  *   · `positions` — open positions via GET /api/positions every 3 s (each
  *                   bridge call opens a fresh probe session, 0.5–2 s — strict
@@ -52,10 +52,10 @@ const PORT = 3041
 const SYMBOL = 'XAUUSDm'
 
 // Task 36-rt — millisecond-cadence realtime channels. The quote poll is the
-// price cadence (250 ms); the positions poll MUST stay ≥ 3 s (each bridge call
+// price cadence (100 ms); the positions poll MUST stay ≥ 3 s (each bridge call
 // opens a fresh probe session, 0.5–2 s — never concurrent, never faster);
 // the status poll also drives the `account` event cadence.
-const QUOTE_POLL_MS = 250
+const QUOTE_POLL_MS = 100
 const STATUS_POLL_MS = 2000
 const POSITIONS_POLL_MS = 3000
 const POSITIONS_TIMEOUT_MS = 8000 // probe sessions are slow (fresh login per read)
@@ -310,7 +310,7 @@ function parsePositionsResponse(body: unknown): { positions: RawBridgePosition[]
 }
 
 /** Mark every position to market against the LATEST cached quote (cached on
- *  every successful quote poll, i.e. ≤ 250 ms old as an observation). Quote
+ *  every successful quote poll, i.e. ≤ 100 ms old as an observation). Quote
  *  FRESHNESS is the quote's own broker timestamp (< 10 s) — during a market
  *  pause the honest result is null, never a stale mark presented as current. */
 function buildPositionsPayload(raw: { positions: RawBridgePosition[]; source: string }): PositionsPayload {

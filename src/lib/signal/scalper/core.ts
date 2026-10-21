@@ -171,6 +171,81 @@ export function htfOpposesSetup(args: {
 }
 
 // ---------------------------------------------------------------------------
+// Task 37 — the per-TF structure gate for the LEGACY reflexes
+// ---------------------------------------------------------------------------
+// The user's empirical complaint: "কোথায় রিভার্স করবে, কোথায় কনটিনিউ করবে —
+// এজেন্ট কাজ করছে না; স্টপ লস বেশি হিট হচ্ছে।" The legacy models judged on
+// indicator arithmetic alone: REVERSAL fired on a bare RSI turn (in a real
+// downtrend an oversold M1 RSI is CONTINUATION fuel, not a bottom) and
+// MOMENTUM bought counter-structure bounces. This gate re-uses the SAME
+// ten-agent evidence the SMC engine already computed on the TF's candles:
+//
+//   · MOMENTUM is a CONTINUATION model → it may only fire WITH the TF's
+//     structure (bullish trend for BUY, mirrored for SELL) or on a FRESH
+//     BOS in the direction (the structure just shifted — buying the new
+//     leg is continuation, not counter-trend). A hard counter-structure
+//     read (bearish trend vs a BUY) is refused → COUNTER_STRUCTURE.
+//     range/unclear trends carry no counter-evidence → allowed.
+//   · REVERSAL is a REVERSAL model → the RSI extreme + turn bar stays the
+//     TRIGGER, but it now needs institutional CONFIRMATION on the same
+//     candles: a fresh opposing-liquidity sweep (stop-hunt below/above the
+//     pool with a reclaiming close — smart money harvested the stops) or a
+//     fresh CHoCH in the direction (a confirmed close beyond the opposing
+//     structural swing). Without either → NO_REVERSAL_CONFIRM (the honest
+//     "এখানে রিভার্স নয়" verdict).
+//
+// The SMC layer disabled (or its evidence absent) → the gate steps aside
+// (honest degrade to the Phase-12 behaviour; nothing is fabricated).
+// PURE: candles-derived evidence + explicit parameters in, verdict out.
+
+export interface LegacyStructureGateInput {
+  model: 'MOMENTUM' | 'REVERSAL';
+  direction: 'BUY' | 'SELL';
+  /** The TF's own ten-agent evidence (null when the SMC layer is off). */
+  smcEvidence: SmcConfluenceEvidence | null;
+  params: Pick<ScalperRules['smc']['params'], 'maxBarsSinceEvent' | 'maxBarsSinceSweep'>;
+}
+
+export interface LegacyStructureGateResult {
+  allowed: boolean;
+  reason: 'COUNTER_STRUCTURE' | 'NO_REVERSAL_CONFIRM' | null;
+}
+
+export function legacyStructureGate(input: LegacyStructureGateInput): LegacyStructureGateResult {
+  const { model, direction, smcEvidence: ev, params } = input;
+  if (ev === null) return { allowed: true, reason: null }; // honest degrade
+
+  const bullish = direction === 'BUY';
+  const dirWord = bullish ? 'bullish' : 'bearish';
+  const lastEvent = ev.structure.lastEvent;
+  const barsSince = ev.structure.barsSinceEvent;
+  const eventFresh =
+    lastEvent !== null && barsSince !== null && barsSince >= 0 && barsSince <= params.maxBarsSinceEvent;
+
+  if (model === 'MOMENTUM') {
+    const trend = ev.structure.trend;
+    if (trend === 'range' || trend === 'unclear') return { allowed: true, reason: null };
+    if (trend === dirWord) return { allowed: true, reason: null }; // with the structure
+    // Counter-structure read — allowed ONLY when the most recent break is a
+    // fresh continuation BOS in the setup direction (the shift is confirmed).
+    if (eventFresh && lastEvent.type === 'BOS' && lastEvent.direction === dirWord) {
+      return { allowed: true, reason: null };
+    }
+    return { allowed: false, reason: 'COUNTER_STRUCTURE' };
+  }
+
+  // REVERSAL — confirmation (a) fresh sweep in the direction, (b) fresh CHoCH.
+  const sweepConfirmed = ev.liquidity.sweeps.some(
+    (s) => (bullish ? s.direction === 'BULLISH' : s.direction === 'BEARISH') && s.barsAgo <= params.maxBarsSinceSweep,
+  );
+  if (sweepConfirmed) return { allowed: true, reason: null };
+  if (eventFresh && lastEvent.type === 'CHoCH' && lastEvent.direction === dirWord) {
+    return { allowed: true, reason: null };
+  }
+  return { allowed: false, reason: 'NO_REVERSAL_CONFIRM' };
+}
+
+// ---------------------------------------------------------------------------
 // Window gates (fail-closed)
 // ---------------------------------------------------------------------------
 
@@ -370,31 +445,70 @@ function judgeTf(
     rsiVal < prevRsi &&
     decision.close < decision.open;
 
+  // ── Task 37 — the structure gate over the raw triggers. The ten-agent
+  //    evidence of THIS TF (already computed above when the SMC layer is
+  //    on) decides whether the trigger is allowed to become an agreement:
+  //    momentum = continuation (with the structure), reversal = confirmed
+  //    (sweep/CHoCH). A refused trigger is recorded honestly on the
+  //    judgement (gate) — the UI/audit show WHY the agent said no.
+  const gateParams = {
+    maxBarsSinceEvent: rules.smc.params.maxBarsSinceEvent,
+    maxBarsSinceSweep: rules.smc.params.maxBarsSinceSweep,
+  };
+  const momentumBuyGate = legacyStructureGate({
+    model: 'MOMENTUM', direction: 'BUY', smcEvidence: evaluation.smcEvidence, params: gateParams,
+  });
+  const momentumSellGate = legacyStructureGate({
+    model: 'MOMENTUM', direction: 'SELL', smcEvidence: evaluation.smcEvidence, params: gateParams,
+  });
+  const reversalBuyGate = legacyStructureGate({
+    model: 'REVERSAL', direction: 'BUY', smcEvidence: evaluation.smcEvidence, params: gateParams,
+  });
+  const reversalSellGate = legacyStructureGate({
+    model: 'REVERSAL', direction: 'SELL', smcEvidence: evaluation.smcEvidence, params: gateParams,
+  });
+  const allowMomentumBuy = momentumBuy && momentumBuyGate.allowed;
+  const allowMomentumSell = momentumSell && momentumSellGate.allowed;
+  const allowReversalBuy = reversalBuy && reversalBuyGate.allowed;
+  const allowReversalSell = reversalSell && reversalSellGate.allowed;
+
   // Momentum has priority within a TF (trend-following first).
-  if (momentumBuy) {
+  if (allowMomentumBuy) {
     judgement.agree = 'BUY';
     judgement.model = 'MOMENTUM';
     judgement.stage = 'MOMENTUM_BUY';
     evaluation.agree = 'BUY';
     evaluation.model = 'MOMENTUM';
-  } else if (momentumSell) {
+  } else if (allowMomentumSell) {
     judgement.agree = 'SELL';
     judgement.model = 'MOMENTUM';
     judgement.stage = 'MOMENTUM_SELL';
     evaluation.agree = 'SELL';
     evaluation.model = 'MOMENTUM';
-  } else if (reversalBuy) {
+  } else if (allowReversalBuy) {
     judgement.agree = 'BUY';
     judgement.model = 'REVERSAL';
     judgement.stage = 'REVERSAL_BUY';
     evaluation.agree = 'BUY';
     evaluation.model = 'REVERSAL';
-  } else if (reversalSell) {
+  } else if (allowReversalSell) {
     judgement.agree = 'SELL';
     judgement.model = 'REVERSAL';
     judgement.stage = 'REVERSAL_SELL';
     evaluation.agree = 'SELL';
     evaluation.model = 'REVERSAL';
+  } else if (momentumBuy || momentumSell || reversalBuy || reversalSell) {
+    // A raw trigger existed but the structure gate refused every one of
+    // them — record the refusal of the highest-priority raw trigger.
+    if (momentumBuy) {
+      judgement.gate = { model: 'MOMENTUM', direction: 'BUY', reason: momentumBuyGate.reason ?? 'COUNTER_STRUCTURE' };
+    } else if (momentumSell) {
+      judgement.gate = { model: 'MOMENTUM', direction: 'SELL', reason: momentumSellGate.reason ?? 'COUNTER_STRUCTURE' };
+    } else if (reversalBuy) {
+      judgement.gate = { model: 'REVERSAL', direction: 'BUY', reason: reversalBuyGate.reason ?? 'NO_REVERSAL_CONFIRM' };
+    } else {
+      judgement.gate = { model: 'REVERSAL', direction: 'SELL', reason: reversalSellGate.reason ?? 'NO_REVERSAL_CONFIRM' };
+    }
   }
   void prevBar;
   return evaluation;

@@ -118,9 +118,78 @@ function downLastClose(count = 120, base = 2650): number {
   return i % 4 < 3 ? o - 1.2 : o + 0.9;
 }
 
-/** Reversal window: long decline into an RSI extreme, then ONE up-close bar
- *  (the decision bar) — the turn-back the reversal model needs. */
-function reversalUpWindow(tfSec: number, count: number, base = 2650): SignalWindow {
+/** Task 37 — the CONFIRMED stop-hunt reversal fixture. Down legs with small
+ *  bounces form confirmed swing lows (SELL_SIDE pools); the fixture ends
+ *  with an EXPLICIT final segment [8 down bars → 3 bounce bars → decision
+ *  bar] so the last leg bottom is a CONFIRMED swing low (3 higher lows to
+ *  its right) whose pool becomes visible exactly at the decision bar. The
+ *  decision bar dives below that bottom (wick pierce) and closes strongly
+ *  back above it — a BULLISH sweep (stop hunt + reclaim): the institutional
+ *  confirmation the reversal model now demands. RSI stays so deep (< 22
+ *  even after the up-close) that the momentum SELL band can never fire. */
+function sweepReversalUpWindow(tfSec: number, count: number, base = 2650): SignalWindow {
+  const out: AnalysisCandle[] = [];
+  let price = base;
+  let i = 0;
+  const push = (o: number, h: number, l: number, c: number) => {
+    out.push(candle(NOW - (count - i) * tfSec, Number(o.toFixed(2)), Number(h.toFixed(2)), Number(l.toFixed(2)), Number(c.toFixed(2))));
+    i++;
+  };
+  // Legs of [8 down −1.2, 3 bounce +0.25] until only the final segment remains.
+  const finalSegment = 8 + 3 + 1; // down bars + bounce bars + decision bar
+  while (out.length + 11 <= count - finalSegment) {
+    for (let d = 0; d < 8; d++) {
+      const o = price; const c = o - 1.2;
+      push(o, o + 0.15, c - 0.15, c);
+      price = c;
+    }
+    for (let u = 0; u < 3; u++) {
+      const o = price; const c = o + 0.25;
+      push(o, c + 0.15, o - 0.15, c);
+      price = c;
+    }
+  }
+  // Pad with down bars up to EXACTLY count − finalSegment (deterministic
+  // chronology — the decision bar must remain the LAST bar at NOW − tfSec).
+  while (out.length < count - finalSegment) {
+    const o = price; const c = o - 1.2;
+    push(o, o + 0.15, c - 0.15, c);
+    price = c;
+  }
+  // Explicit final segment: 8 down bars into the leg bottom …
+  for (let d = 0; d < 8; d++) {
+    const o = price; const c = o - 1.2;
+    push(o, o + 0.15, c - 0.15, c);
+    price = c;
+  }
+  const bottom = out[out.length - 1].low; // the swing low to be hunted
+  // … 3 bounce bars (higher lows — they CONFIRM the swing low) …
+  for (let u = 0; u < 3; u++) {
+    const o = price; const c = o + 0.25;
+    push(o, c + 0.15, bottom + 0.05 + u * 0.25, c);
+    price = c;
+  }
+  // … decision bar: dive below the confirmed bottom, close strongly back
+  // above it (spring + reclaim → BULLISH sweep + RSI turn on one bar).
+  const sweepOpen = bottom + 0.1;
+  const sweepLow = bottom - 1.0;
+  const sweepClose = bottom + 1.2;
+  out.push(
+    candle(
+      NOW - tfSec,
+      Number(sweepOpen.toFixed(2)),
+      Number((sweepClose + 0.2).toFixed(2)),
+      Number(sweepLow.toFixed(2)),
+      Number(sweepClose.toFixed(2)),
+    ),
+  );
+  return { timeframe: tfSec === M1 ? 'M1' : tfSec === M5 ? 'M5' : 'M15', candles: out, source: 'mt5-broker' };
+}
+
+/** Task 37 — the BARE RSI turn fixture (the old naive reversal shape): a
+ *  monotone decline into an RSI extreme plus one up-close bar — NO swing
+ *  structure, NO sweep, NO CHoCH. The structure gate must refuse it. */
+function bareRsiTurnWindow(tfSec: number, count: number, base = 2650): SignalWindow {
   const out: AnalysisCandle[] = [];
   const decline = count - 1;
   for (let i = 0; i < decline; i++) {
@@ -229,12 +298,33 @@ describe('Phase 12 scalper — OR-logic', () => {
     expect(evidenceStage(evaluation, 'M5')).toBe('MOMENTUM_SELL');
   });
 
-  test('reversal BUY fires after an oversold extreme + turn-back', () => {
+  test('reversal BUY fires on a swept-low + reclaim (Task 37 confirmed stop-hunt)', () => {
+    const w = sweepReversalUpWindow(M1, 120);
     const evaluation = evaluateScalper(
-      baseInput({ m1: reversalUpWindow(M1, 120), referencePrice: 2530 }),
+      baseInput({ m1: w, referencePrice: w.candles[w.candles.length - 1].close }),
     );
     expect(evaluation.outcome).toBe('BUY_SETUP');
     expect(evidenceStage(evaluation, 'M1')).toBe('REVERSAL_BUY');
+    expect(evaluation.evidence?.scalper?.sourceTimeframe).toBe('M1');
+    // The confirmation is in the evidence: a fresh BULLISH sweep on the M1.
+    const smc = evaluation.evidence?.smc;
+    expect(smc?.liquidity.sweeps.some((s) => s.direction === 'BULLISH' && s.barsAgo <= 8)).toBe(true);
+  });
+
+  test('bare RSI turn without sweep/CHoCH is REFUSED — NO_REVERSAL_CONFIRM (Task 37)', () => {
+    // The old naive shape: monotone decline + one up-close bar. No swings
+    // form, so no liquidity pool is ever swept and no CHoCH confirms —
+    // the structure gate blocks the reversal trigger and the judgement
+    // records WHY (the honest "এখানে রিভার্স নয়" verdict).
+    const w = bareRsiTurnWindow(M1, 120);
+    const evaluation = evaluateScalper(
+      baseInput({ m1: w, referencePrice: w.candles[w.candles.length - 1].close }),
+    );
+    expect(evaluation.outcome).toBe('NO_SETUP');
+    expect(evaluation.reasonCodes).toEqual(['SCALPER_NO_AGREE']);
+    const m1 = evaluation.evidence?.scalper?.tfJudgements.find((j) => j.timeframe === 'M1');
+    expect(m1?.stage).toBe('NO_AGREE');
+    expect(m1?.gate).toEqual({ model: 'REVERSAL', direction: 'BUY', reason: 'NO_REVERSAL_CONFIRM' });
   });
 });
 

@@ -348,6 +348,13 @@ export const scalperStageBn: Record<string, string> = {
   NO_AGREE: 'agree নেই',
 };
 
+/** Task 37 — why the structure gate refused a raw legacy trigger (the agent's
+ *  honest "এখানে রিভার্স নয় / কাউন্টার-স্ট্রাকচার" reasoning, shown per TF). */
+export const scalperGateBn: Record<string, string> = {
+  COUNTER_STRUCTURE: 'কাঠামোর বিপরীত — গেটে আটকেছে',
+  NO_REVERSAL_CONFIRM: 'রিভার্স কনফার্ম নেই (সুইপ/CHoCH) — গেটে আটকেছে',
+};
+
 export const scalperModelBn: Record<string, string> = {
   SMC_CONFLUENCE: 'SMC/ICT কনফ্লুয়েন্স (১০-এজেন্ট ইঞ্জিন)',
   MOMENTUM: 'মোমেন্টাম (EMA9/21 + RSI ব্যান্ড)',

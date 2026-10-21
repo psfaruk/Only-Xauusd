@@ -448,6 +448,12 @@ export interface ScalperTfJudgementView {
   agree: 'BUY' | 'SELL' | null;
   model: 'MOMENTUM' | 'REVERSAL' | 'SMC_CONFLUENCE' | null;
   stage: 'SMC_BUY' | 'SMC_SELL' | 'MOMENTUM_BUY' | 'MOMENTUM_SELL' | 'REVERSAL_BUY' | 'REVERSAL_SELL' | 'NO_AGREE';
+  /** Task 37 — why a raw legacy trigger was refused by the structure gate. */
+  gate?: {
+    model: 'MOMENTUM' | 'REVERSAL';
+    direction: 'BUY' | 'SELL';
+    reason: 'COUNTER_STRUCTURE' | 'NO_REVERSAL_CONFIRM';
+  };
   decisionCandleTimeUtc: string;
   indicators: {
     emaFast: number | null;

@@ -27,6 +27,7 @@ import { PriceLevelText } from './bits';
 import {
   bnForCode,
   fmtDhaka,
+  scalperGateBn,
   scalperModelBn,
   scalperStageBn,
   scalperTfLabelBn,
@@ -85,9 +86,20 @@ function TfChip({ j }: { j: ScalperTfJudgementView }) {
           <span className={smcTierLetterClass(j.smc.tier)}>{j.smc.tier ?? '—'}</span>
         </p>
       )}
+      {/* Task 37 — the structure gate's refusal reason: the agent's honest
+          “এখানে রিভার্স নয় / কাঠামোর বিপরীত” verdict, per TF. */}
+      {j.gate && (
+        <p
+          className="mt-0.5 text-[10px] leading-relaxed text-amber-400/90"
+          data-testid={`scalper-tf-gate-${j.timeframe}`}
+        >
+          {scalperGateBn[j.gate.reason] ?? j.gate.reason}
+        </p>
+      )}
       <p className="sr-only">
         {`${scalperTfLabelBn[j.timeframe] ?? j.timeframe}: ${scalperStageBn[j.stage] ?? j.stage}`}
         {j.smc ? ` — SMC স্কোর ${j.smc.score}, টিয়ার ${j.smc.tier ?? 'নেই'}` : ''}
+        {j.gate ? ` — ${scalperGateBn[j.gate.reason] ?? j.gate.reason}` : ''}
       </p>
     </div>
   );

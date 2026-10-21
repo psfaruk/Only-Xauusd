@@ -129,6 +129,15 @@ export interface ScalperTfJudgement {
   model: 'MOMENTUM' | 'REVERSAL' | 'SMC_CONFLUENCE' | null;
   /** Per-TF honest stage code (always present — UI renders all three TFs). */
   stage: 'SMC_BUY' | 'SMC_SELL' | 'MOMENTUM_BUY' | 'MOMENTUM_SELL' | 'REVERSAL_BUY' | 'REVERSAL_SELL' | 'NO_AGREE';
+  /** Task 37 — why a raw legacy trigger was REFUSED by the structure gate
+   *  (the honest "এখানে রিভার্স নয় / কাউন্টার-স্ট্রাকচার" verdict). Present
+   *  only when this TF's momentum/reversal trigger fired raw but the gate
+   *  blocked it; the audit trail + UI render the agent's reasoning. */
+  gate?: {
+    model: 'MOMENTUM' | 'REVERSAL';
+    direction: 'BUY' | 'SELL';
+    reason: 'COUNTER_STRUCTURE' | 'NO_REVERSAL_CONFIRM';
+  };
   decisionCandleTimeUtc: string;
   indicators: {
     emaFast: number | null;

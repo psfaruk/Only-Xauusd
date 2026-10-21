@@ -204,10 +204,15 @@ export const config = {
       /** Reversal RSI extremes. */
       reversalRsiOversold: clampNum('SCALPER_REVERSAL_RSI_OVERSOLD', 32, 10, 45),
       reversalRsiOverbought: clampNum('SCALPER_REVERSAL_RSI_OVERBOUGHT', 68, 55, 90),
-      /** SL distance in ATR multiples beyond the decision close. */
-      slAtrMult: clampNum('SCALPER_SL_ATR_MULT', 1.2, 0.3, 5),
-      /** Fixed reward/risk multiple. */
-      rewardRisk: clampNum('SCALPER_REWARD_RISK', 1.5, 0.5, 5),
+      /** SL distance in ATR multiples beyond the decision close. Task 37:
+       *  1.2 → 1.5 — gold's M1/M5 noise (spread + micro-wick) regularly
+       *  exceeded the old stop; the wider floor survives the noise that
+       *  farmed the SL hits (the position manager banks the move instead). */
+      slAtrMult: clampNum('SCALPER_SL_ATR_MULT', 1.5, 0.3, 5),
+      /** Fixed reward/risk multiple. Task 37: 1.5 → 1.2 — a reachable first
+       *  target (the old 1.5R TP rarely filled before a retrace); the trail
+       *  (position manager, arms 1.5R) captures anything beyond it. */
+      rewardRisk: clampNum('SCALPER_REWARD_RISK', 1.2, 0.5, 5),
       /** Max accepted spread (price units). */
       maxSpreadPrice: clampNum('SCALPER_MAX_SPREAD', 0.6, 0.1, 5),
       /** Minimum SL distance (price units) — below this the setup is skipped. */
@@ -265,8 +270,10 @@ export const config = {
       fvgMinGapAtr: clampNum('SMC_FVG_MIN_GAP_ATR', 0.2, 0.05, 2),
       /** POI entry tolerance beyond the zone edge, in ATR multiples. */
       entryToleranceAtr: clampNum('SMC_ENTRY_TOLERANCE_ATR', 0.35, 0.05, 2),
-      /** SL buffer beyond sweep wick / POI extreme, in ATR multiples. */
-      slAtrBuffer: clampNum('SMC_SL_ATR_BUFFER', 0.35, 0.05, 2),
+      /** SL buffer beyond sweep wick / POI extreme, in ATR multiples.
+       *  Task 37: 0.35 → 0.5 — a touch more room past the structural anchor
+       *  so a retest of the swept level does not take the stop out. */
+      slAtrBuffer: clampNum('SMC_SL_ATR_BUFFER', 0.5, 0.05, 2),
       /** Max POI tests before the zone is exhausted. */
       poiMaxTests: Math.min(Math.max(1, num('SMC_POI_MAX_TESTS', 3)), 10),
       /** Displacement candle body threshold (ATR mult). */
