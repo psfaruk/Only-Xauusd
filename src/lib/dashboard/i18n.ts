@@ -155,17 +155,17 @@ export function fmtAge(sec: number | null | undefined): string {
 export function qualityStateBadgeClass(state: string): string {
   switch (state) {
     case 'VALID':
-      return 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400';
+      return 'border-up/40 bg-up/10 text-up';
     case 'WARNING':
-      return 'border-amber-500/40 bg-amber-500/10 text-amber-400';
+      return 'border-sun/40 bg-sun/10 text-sun';
     case 'STALE':
-      return 'border-orange-500/40 bg-orange-500/10 text-orange-400';
+      return 'border-warn/40 bg-warn/10 text-warn';
     case 'MISSING':
-      return 'border-red-500/40 bg-red-500/10 text-red-400';
+      return 'border-down/40 bg-down/10 text-down';
     case 'INVALID':
-      return 'border-red-600/50 bg-red-600/15 text-red-300';
+      return 'border-down/50 bg-down/15 text-down';
     default:
-      return 'border-zinc-600/50 bg-zinc-700/20 text-zinc-400'; // UNAVAILABLE
+      return 'border-border-strong/50 bg-muted text-content'; // UNAVAILABLE
   }
 }
 
@@ -198,10 +198,10 @@ export const analysisStatusBn: Record<string, string> = {
 };
 
 export const analysisStatusClass: Record<string, string> = {
-  completed: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400',
-  blocked: 'border-amber-500/40 bg-amber-500/10 text-amber-400',
-  failed: 'border-red-500/40 bg-red-500/10 text-red-300',
-  pending: 'border-zinc-600/50 bg-zinc-700/20 text-zinc-400',
+  completed: 'border-up/40 bg-up/10 text-up',
+  blocked: 'border-sun/40 bg-sun/10 text-sun',
+  failed: 'border-down/40 bg-down/10 text-down',
+  pending: 'border-border-strong/50 bg-muted text-content',
 };
 
 export const trendBn: Record<string, string> = {
@@ -258,17 +258,17 @@ export const groupLabel: Record<string, string> = {
 export function auditStatusBadgeClass(status: string): string {
   switch (status) {
     case 'PASS':
-      return 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400';
+      return 'border-up/40 bg-up/10 text-up';
     case 'WARN':
-      return 'border-amber-500/40 bg-amber-500/10 text-amber-400';
+      return 'border-sun/40 bg-sun/10 text-sun';
     case 'FAIL':
-      return 'border-red-500/40 bg-red-500/10 text-red-400';
+      return 'border-down/40 bg-down/10 text-down';
     case 'BLOCKED':
-      return 'border-orange-500/40 bg-orange-500/10 text-orange-400';
+      return 'border-warn/40 bg-warn/10 text-warn';
     case 'NOT_APPLICABLE':
-      return 'border-zinc-600/50 bg-zinc-700/20 text-zinc-500';
+      return 'border-border-strong/50 bg-muted text-muted-foreground';
     default:
-      return 'border-zinc-600/50 bg-zinc-700/20 text-zinc-400'; // NOT_TESTED
+      return 'border-border-strong/50 bg-muted text-content'; // NOT_TESTED
   }
 }
 
@@ -285,30 +285,30 @@ export const signalOutcomeBn: Record<string, string> = {
 export function signalOutcomeBadgeClass(outcome: string): string {
   switch (outcome) {
     case 'BUY_SETUP':
-      return 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400';
+      return 'border-up/40 bg-up/10 text-up';
     case 'SELL_SETUP':
-      return 'border-red-500/40 bg-red-500/10 text-red-400';
+      return 'border-down/40 bg-down/10 text-down';
     case 'WAIT':
-      return 'border-amber-500/40 bg-amber-500/10 text-amber-400';
+      return 'border-sun/40 bg-sun/10 text-sun';
     case 'NO_SETUP':
-      return 'border-zinc-600/50 bg-zinc-700/20 text-zinc-400';
+      return 'border-border-strong/50 bg-muted text-content';
     case 'BLOCKED':
-      return 'border-orange-500/40 bg-orange-500/10 text-orange-400';
+      return 'border-warn/40 bg-warn/10 text-warn';
     default:
-      return 'border-red-600/50 bg-red-600/15 text-red-300';
+      return 'border-down/50 bg-down/15 text-down';
   }
 }
 
 export function levelBadgeClass(level: string): string {
   switch (level) {
     case 'error':
-      return 'border-red-500/40 bg-red-500/10 text-red-400';
+      return 'border-down/40 bg-down/10 text-down';
     case 'warn':
-      return 'border-amber-500/40 bg-amber-500/10 text-amber-400';
+      return 'border-sun/40 bg-sun/10 text-sun';
     case 'info':
-      return 'border-zinc-500/40 bg-zinc-500/10 text-zinc-300';
+      return 'border-border-strong/40 bg-muted-foreground/10 text-content';
     default:
-      return 'border-zinc-700 bg-zinc-800/50 text-zinc-500';
+      return 'border-border-strong bg-surface text-muted-foreground';
   }
 }
 

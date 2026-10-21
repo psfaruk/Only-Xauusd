@@ -3,11 +3,30 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* ============================================================================
+ * XAUUSD AI Trading Agent — Design System (Task 39, UI-03 "Sky Terminal")
+ * ----------------------------------------------------------------------------
+ * Four visual themes as requested:
+ *   1. Sky blue  (#38BDF8 / #0284C7 / #7DD3FC) — primary brand & interactions
+ *   2. Sunlight  (#FBBF24 / #B45309)           — restrained highlight accent
+ *   3. Dark      (#0B1220 / #111C2E / #162338) — graphite/navy terminal depth
+ *   4. White     (#FFFFFF / #F4F8FC)            — clean light-mode surfaces
+ *
+ * Layered surface model (both themes):
+ *   terminal  → page background        (dark #0B1220 / light #F4F8FC)
+ *   panel     → sidebar & major panels (dark #111C2E / light #FFFFFF)
+ *   surface   → cards & chips          (dark #162338 / light #FFFFFF)
+ *   muted     → subtle inset surfaces  (dark #17253C / light #E9F1F9)
+ *
+ * Status colors are ALWAYS paired with a label/icon, never color alone:
+ *   up (market bullish), down (bearish/error), warn (degraded), sun (accent).
+ * ========================================================================== */
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-bengali), ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: var(--font-mono-code), ui-monospace, "SFMono-Regular", monospace;
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -37,79 +56,128 @@
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
+
+  /* ---- Task 39 terminal surface & status tokens (theme-aware utilities:
+   * bg-terminal, bg-panel, bg-surface, text-content, text-brand, text-sun,
+   * text-up, text-down, text-warn, border-border-strong, bg-up/10, …) ----- */
+  --color-terminal: var(--terminal);
+  --color-panel: var(--panel);
+  --color-surface: var(--surface);
+  --color-content: var(--content);
+  --color-border-strong: var(--border-strong);
+  --color-brand: var(--brand);
+  --color-sun: var(--sun);
+  --color-on-sun: var(--on-sun);
+  --color-up: var(--up);
+  --color-down: var(--down);
+  --color-warn: var(--warn);
+
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
 }
 
+/* --------------------------------- LIGHT ---------------------------------- */
 :root {
-  --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --radius: 0.75rem; /* 12px cards; controls resolve to 8–10px */
+  --background: #f4f8fc;
+  --foreground: #172033;
+  --card: #ffffff;
+  --card-foreground: #172033;
+  --popover: #ffffff;
+  --popover-foreground: #172033;
+  --primary: #0284c7; /* deep sky blue — buttons on light surfaces */
+  --primary-foreground: #ffffff;
+  --secondary: #e3edf7;
+  --secondary-foreground: #172033;
+  --muted: #e9f1f9;
+  --muted-foreground: #64748b;
+  --accent: #e0f2fe; /* pale sky selection */
+  --accent-foreground: #0c2a40;
+  --destructive: #dc2626;
+  --border: #dce5f0;
+  --input: #c9d6e6;
+  --ring: #0284c7;
+  --chart-1: #0284c7;
+  --chart-2: #b45309;
+  --chart-3: #047857;
+  --chart-4: #dc2626;
+  --chart-5: #64748b;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #172033;
+  --sidebar-primary: #0284c7;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #e0f2fe;
+  --sidebar-accent-foreground: #0c2a40;
+  --sidebar-border: #dce5f0;
+  --sidebar-ring: #0284c7;
+
+  /* terminal tokens */
+  --terminal: #f4f8fc;
+  --panel: #ffffff;
+  --surface: #ffffff;
+  --content: #3b4a63;
+  --border-strong: #b9c9dc;
+  --brand: #0369a1; /* sky blue, contrast-safe on white */
+  --sun: #b45309; /* sunlight amber, contrast-safe on white */
+  --on-sun: #fffbeb;
+  --up: #047857;
+  --down: #dc2626;
+  --warn: #c2410c;
+  --scrollbar-thumb: #c3d2e3;
+  --scrollbar-thumb-hover: #a8bccf;
 }
 
+/* ---------------------------------- DARK ----------------------------------
+ * The PRIMARY trading-terminal experience. */
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --background: #0b1220;
+  --foreground: #eaf2ff;
+  --card: #162338;
+  --card-foreground: #eaf2ff;
+  --popover: #131f33;
+  --popover-foreground: #eaf2ff;
+  --primary: #38bdf8; /* sky blue */
+  --primary-foreground: #06283d;
+  --secondary: #1b2a42;
+  --secondary-foreground: #cfe3f7;
+  --muted: #17253c;
+  --muted-foreground: #9fb0c7;
+  --accent: #1c2e4a; /* sky-tinted hover */
+  --accent-foreground: #eaf2ff;
+  --destructive: #ef4444;
+  --border: #26364d;
+  --input: #2c3f59;
+  --ring: #38bdf8;
+  --chart-1: #38bdf8;
+  --chart-2: #fbbf24;
+  --chart-3: #34d399;
+  --chart-4: #f87171;
+  --chart-5: #9fb0c7;
+  --sidebar: #111c2e;
+  --sidebar-foreground: #eaf2ff;
+  --sidebar-primary: #38bdf8;
+  --sidebar-primary-foreground: #06283d;
+  --sidebar-accent: #1c2e4a;
+  --sidebar-accent-foreground: #eaf2ff;
+  --sidebar-border: #26364d;
+  --sidebar-ring: #38bdf8;
+
+  /* terminal tokens */
+  --terminal: #0b1220;
+  --panel: #111c2e;
+  --surface: #162338;
+  --content: #c3d2e8;
+  --border-strong: #3a4f6b;
+  --brand: #7dd3fc; /* sky blue, contrast-safe on dark */
+  --sun: #fbbf24; /* sunlight amber */
+  --on-sun: #231303;
+  --up: #34d399;
+  --down: #f87171;
+  --warn: #fb923c;
+  --scrollbar-thumb: #33465f;
+  --scrollbar-thumb-hover: #45596f;
 }
 
 @layer base {
@@ -118,13 +186,25 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-feature-settings: "tnum" off;
+  }
+  /* Rapidly changing numerals (prices, spreads, P&L) render tabular. */
+  .tabular-nums,
+  .font-mono {
+    font-variant-numeric: tabular-nums;
   }
 }
 
-/* Phase 10 — slim custom scrollbar for validation lists (max-h + overflow). */
+/* App-shell metric: sticky header height at lg+ (row1 56px + quote strip
+ * 33px) — consumed by the desktop sidebar's sticky offset. */
+:root {
+  --header-height: 89px;
+}
+
+/* Slim token-aware scrollbar for validation lists / logs (max-h + overflow). */
 .custom-scrollbar {
   scrollbar-width: thin;
-  scrollbar-color: #52525b transparent;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 .custom-scrollbar::-webkit-scrollbar {
   width: 6px;
@@ -134,9 +214,17 @@
   background: transparent;
 }
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background-color: #52525b;
+  background-color: var(--scrollbar-thumb);
   border-radius: 9999px;
 }
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background-color: #71717a;
+  background-color: var(--scrollbar-thumb-hover);
+}
+
+/* Respect users who prefer reduced motion: disable ambient pulses/blinks. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-pulse,
+  .animate-ping {
+    animation: none !important;
+  }
 }

@@ -22,7 +22,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { BarChart3, Home, MessageCircle, Settings as SettingsIcon, ShieldCheck, Activity } from 'lucide-react';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
 import { useTickStream } from '@/hooks/use-tick-stream';
 import {
@@ -60,6 +59,9 @@ import type {
 } from '@/lib/dashboard/types';
 import { bnForCode, syncStatusBn } from '@/lib/dashboard/i18n';
 import { TerminalHeader } from '@/components/terminal/TerminalHeader';
+import { AppSidebar } from '@/components/terminal/AppSidebar';
+import { CommandPalette } from '@/components/terminal/CommandPalette';
+import { HeroStrip } from '@/components/terminal/HeroStrip';
 import { ChartPanel } from '@/components/terminal/ChartPanel';
 import { CandidateSignalCard } from '@/components/terminal/CandidateSignalCard';
 import { ScalperSignalCard } from '@/components/terminal/ScalperSignalCard';
@@ -127,6 +129,8 @@ export default function TradingTerminal() {
   // ---- Navigation state --------------------------------------------------------
   const [view, setView] = useState<TerminalView>('dashboard');
   const [chatSheetOpen, setChatSheetOpen] = useState(false);
+  /** Task 39 — command palette (global search / toolbox) open state. */
+  const [paletteOpen, setPaletteOpen] = useState(false);
   /** bumped by the refresh loop so the chart refetches too. */
   const [refreshTick, setRefreshTick] = useState(0);
   /** Task 36-rt — wall-clock of the last COMPLETED refresh sweep. The realtime
@@ -735,27 +739,36 @@ export default function TradingTerminal() {
   );
 
   const loadErrorBanner = loadError ? (
-    <div role="alert" className="rounded-xl border border-red-500/40 bg-red-500/10 p-3 text-xs text-red-300">
+    <div role="alert" className="rounded-xl border border-down/40 bg-down/10 p-3 text-xs text-down">
       ডেটা রিফ্রেশ ব্যর্থ ({loadError}) — ১৫ সেকেন্ড পরে আবার চেষ্টা হবে। পুরনো ডেটা দেখানো হচ্ছে, কিছু বানানো হয়নি।
     </div>
   ) : null;
 
   return (
-    <div className="flex min-h-screen flex-col bg-zinc-950 text-zinc-100">
+    <div className="flex min-h-screen flex-col bg-terminal text-foreground">
       <TerminalHeader
         health={health}
         dataHealth={dataHealth}
         priceSpec={priceSpec}
         chatOpen={chatSheetOpen}
         onOpenChat={() => setChatSheetOpen(true)}
+        onOpenSearch={() => setPaletteOpen(true)}
       />
 
-      <main className="flex-1">
+      <div className="flex flex-1">
+        {/* ============ Desktop sidebar navigation (lg+) ============ */}
+        <AppSidebar view={view} onViewChange={setView} health={health} />
+
+        <main className="min-w-0 flex-1">
         {/* ================= Desktop workspace (lg+) ================= */}
         <div className="hidden lg:block">
           <div className="mx-auto w-full max-w-[1600px] space-y-4 px-6 py-4">
             {loadErrorBanner}
-            <div className="grid grid-cols-[minmax(0,1fr)_380px] gap-4">
+            {(view === 'dashboard' || view === 'chart') && (
+              <>
+              {/* Task 39 — market hero anchor (real quote payload only) */}
+              <HeroStrip dataHealth={dataHealth} priceSpec={priceSpec} loading={loading} />
+              <div className="grid grid-cols-[minmax(0,1fr)_380px] gap-4">
               <ChartPanel
                 symbol={SYMBOL}
                 priceSpec={priceSpec}
@@ -805,30 +818,18 @@ export default function TradingTerminal() {
             </div>
 
             <SystemMiniCards health={health} marketStatus={marketStatus} loading={loading} marketError={apiErrors.market ?? null} />
+            </>
+            )}
 
-            <Tabs defaultValue="history" className="space-y-4">
-              <TabsList className="h-auto w-full max-w-full flex-nowrap bg-zinc-900/60 p-1">
-                <TabsTrigger value="history" className="data-[state=active]:bg-amber-500/15 data-[state=active]:text-amber-300">
-                  সিগন্যাল ইতিহাস
-                </TabsTrigger>
-                <TabsTrigger value="analysis" className="data-[state=active]:bg-amber-500/15 data-[state=active]:text-amber-300">
-                  বিশ্লেষণ
-                </TabsTrigger>
-                <TabsTrigger value="system" className="data-[state=active]:bg-amber-500/15 data-[state=active]:text-amber-300">
-                  সিস্টেম
-                </TabsTrigger>
-                {/* Task 33/35 — সেটিংস: Exness MT5 ক্রেডেনশিয়াল UI-import */}
-                <TabsTrigger value="settings" className="data-[state=active]:bg-amber-500/15 data-[state=active]:text-amber-300">
-                  সেটিংস
-                </TabsTrigger>
-              </TabsList>
-              <TabsContent value="history">{historyView}</TabsContent>
-              <TabsContent value="analysis">{analysisView}</TabsContent>
-              <TabsContent value="system">{systemView}</TabsContent>
-              <TabsContent value="settings">
+            {/* Task 39 — desktop views switch via the sidebar (no more tabs) */}
+            {view === 'history' && historyView}
+            {view === 'analysis' && analysisView}
+            {view === 'system' && systemView}
+            {view === 'settings' && (
+              <div className="space-y-4">
                 <BrokerSettingsView />
-              </TabsContent>
-            </Tabs>
+              </div>
+            )}
           </div>
         </div>
 
@@ -838,6 +839,7 @@ export default function TradingTerminal() {
             {loadErrorBanner}
             {view === 'dashboard' && (
               <div className="space-y-4">
+                <HeroStrip dataHealth={dataHealth} priceSpec={priceSpec} loading={loading} />
                 {/* Phase 12 — the live scalper card on top of the mobile
                  * dashboard (primary signal surface). */}
                 <ScalperSignalCard
@@ -903,15 +905,16 @@ export default function TradingTerminal() {
             )}
           </div>
         </div>
-      </main>
+        </main>
+      </div>
 
       {/* ================= Desktop chat Sheet (chart stays visible) ================= */}
       <div className="hidden lg:block">
         <Sheet open={chatSheetOpen} onOpenChange={setChatSheetOpen}>
-          <SheetContent side="right" className="w-[420px] border-zinc-800 bg-zinc-950 p-0 sm:max-w-[420px]" data-testid="chat-sheet">
-            <SheetHeader className="border-b border-zinc-800 px-4 py-3">
-              <SheetTitle className="flex items-center gap-2 text-sm text-zinc-100">
-                <MessageCircle className="h-4 w-4 text-amber-400" aria-hidden /> বাংলা এআই চ্যাট
+          <SheetContent side="right" className="w-[420px] border-border bg-terminal p-0 sm:max-w-[420px]" data-testid="chat-sheet">
+            <SheetHeader className="border-b border-border px-4 py-3">
+              <SheetTitle className="flex items-center gap-2 text-sm text-foreground">
+                <MessageCircle className="h-4 w-4 text-brand" aria-hidden /> বাংলা এআই চ্যাট
               </SheetTitle>
               <SheetDescription className="sr-only">
                 Read-only টুল-ভিত্তিক সহকারী — সিস্টেম স্ট্যাটাস, বাজার ডেটা ও সর্বশেষ মূল্যায়ন নিয়ে বাংলায় প্রশ্ন করুন। ট্রেড চালানোর ক্ষমতা নেই।
@@ -922,22 +925,36 @@ export default function TradingTerminal() {
         </Sheet>
       </div>
 
+      {/* ================= Command palette (global search + toolbox) ================= */}
+      <CommandPalette
+        open={paletteOpen}
+        onOpenChange={setPaletteOpen}
+        onNavigate={setView}
+        onOpenChat={() => setChatSheetOpen(true)}
+        onRunSync={() => void runSyncNow()}
+        onRunAnalysis={() => void runAnalysisNow()}
+        onRunSignal={() => void runSignalNow()}
+        onRunScalper={() => void runScalperNow()}
+        onRunVerify={() => void runVerify()}
+        onRunAiReview={() => void runAiReview()}
+      />
+
       {/* ================= Footer (sticky bottom) ================= */}
-      <footer className="mt-auto border-t border-zinc-800 bg-zinc-950">
-        <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-2 px-4 pb-20 pt-4 text-xs text-zinc-500 sm:px-6 lg:pb-4 md:flex-row md:items-center md:justify-between">
+      <footer className="mt-auto border-t border-border bg-panel">
+        <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-2 px-4 pb-20 pt-4 text-xs text-muted-foreground sm:px-6 lg:pb-4 md:flex-row md:items-center md:justify-between">
           <p className="flex items-center gap-1.5">
-            <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" aria-hidden />
+            <ShieldCheck className="h-3.5 w-3.5 text-up" aria-hidden />
             XAUUSD AI Trading Agent · {health?.phaseLabel ?? 'Phase —'} ·{' '}
             {health && !health.executionLocked
               ? 'লাইভ ডেমো ট্রেডিং সচল — সিগন্যাল অনুযায়ী অর্ডার যায়'
               : 'রিড-ওনলি মোড'}
           </p>
-          <p className="font-mono text-[11px] text-zinc-400">
+          <p className="font-mono text-[11px] text-content">
             Next.js 16 · TypeScript · Prisma/SQLite · z-ai-web-dev-sdk (glm-4-plus)
           </p>
           {/* Honest live posture derived from the backend state — no stale
            * release-gate messaging (Phase 12: the app is fully operational). */}
-          <p className="text-zinc-400">
+          <p className="text-content">
             {health && !health.executionLocked
               ? 'স্ক্যাল্পার M1·M5·M15 সিগন্যাল সচল — রিস্ক-চেক পাস করলে অটো-অর্ডার কার্যকর হয়'
               : `Live Trading: Phase ${health?.executionGatePhase ?? 11} গেট পাস হলে চালু হবে`}
@@ -949,7 +966,7 @@ export default function TradingTerminal() {
       <nav
         aria-label="প্রধান নেভিগেশন"
         data-testid="bottom-nav"
-        className="fixed inset-x-0 bottom-0 z-50 border-t border-zinc-800 bg-zinc-950/95 backdrop-blur lg:hidden"
+        className="fixed inset-x-0 bottom-0 z-50 border-t border-border bg-panel/95 backdrop-blur lg:hidden"
         style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
       >
         <div className="mx-auto grid max-w-lg grid-cols-6">
@@ -972,13 +989,13 @@ export default function TradingTerminal() {
                 data-view={item.id}
                 aria-label={item.labelBn}
                 className={`flex min-h-[56px] flex-col items-center justify-center gap-0.5 px-1 py-1.5 text-[10px] transition-colors ${
-                  active ? 'text-amber-300' : 'text-zinc-500 hover:text-zinc-300'
+                  active ? 'text-brand' : 'text-muted-foreground hover:text-content'
                 }`}
               >
-                <Icon className={`h-5 w-5 ${active ? 'text-amber-400' : ''}`} aria-hidden />
+                <Icon className={`h-5 w-5 ${active ? 'text-brand' : ''}`} aria-hidden />
                 <span className="leading-none">{item.labelBn}</span>
                 <span
-                  className={`mt-0.5 h-0.5 w-6 rounded-full ${active ? 'bg-amber-400' : 'bg-transparent'}`}
+                  className={`mt-0.5 h-0.5 w-6 rounded-full ${active ? 'bg-brand' : 'bg-transparent'}`}
                   aria-hidden
                 />
               </button>

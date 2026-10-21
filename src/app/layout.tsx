@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Hind_Siliguri, JetBrains_Mono } from "next/font/google";
+import { ThemeProvider } from "next-themes";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
 
@@ -17,7 +18,7 @@ const codeMono = JetBrains_Mono({
 export const metadata: Metadata = {
   title: "XAUUSD AI Trading Agent — Trading Terminal",
   description:
-    "GLM-চালিত XAUUSD ট্রেডিং টার্মিনাল — ডিটারমিনিস্টিক মার্কেট-স্ট্রাকচার ইঞ্জিন, লাইভ MT5 ডেটা ও বাংলা AI চ্যাট। Read-only, no order execution.",
+    "GLM-চালিত XAUUSD ট্রেডিং টার্মিনাল — ডিটারমিনিস্টিক মার্কেট-স্ট্রাকচার ইঞ্জিন, লাইভ MT5 ডেটা ও বাংলা AI চ্যাট।",
   keywords: [
     "XAUUSD",
     "GLM",
@@ -41,8 +42,18 @@ export default function RootLayout({
       <body
         className={`${bengaliSans.variable} ${codeMono.variable} antialiased bg-background text-foreground`}
       >
-        {children}
-        <Toaster />
+        {/* Task 39 (UI-03) — dark mode is the PRIMARY terminal experience;
+         * light mode is fully designed via the same token system. The class
+         * on <html> is SSR-default "dark" so there is no theme flash. */}
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="dark"
+          enableSystem
+          disableTransitionOnChange
+        >
+          {children}
+          <Toaster />
+        </ThemeProvider>
       </body>
     </html>
   );

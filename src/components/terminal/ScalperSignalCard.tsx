@@ -20,10 +20,10 @@
  * the SMC section renders ONLY from persisted evidence, never fabricated.
  */
 
-import { Layers, Loader2, RefreshCw, ShieldAlert, Timer, Zap } from 'lucide-react';
+import { CheckCircle2, Layers, Loader2, RefreshCw, ShieldAlert, Timer, Zap } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { PriceLevelText } from './bits';
+import { OutcomeBadgeIcon, PriceLevelText, outcomeBadgeTokenClass } from './bits';
 import {
   bnForCode,
   fmtDhaka,
@@ -31,7 +31,6 @@ import {
   scalperModelBn,
   scalperStageBn,
   scalperTfLabelBn,
-  signalOutcomeBadgeClass,
   smcAgentBn,
   smcTierBn,
   smcVetoBn,
@@ -45,10 +44,10 @@ import type { PriceDisplaySpec } from '@/lib/market/price-display';
 
 /** Tiny colored tier letter (per-TF chips): A emerald, B amber, C zinc. */
 function smcTierLetterClass(tier: 'A' | 'B' | 'C' | null): string {
-  if (tier === 'A') return 'text-emerald-400';
-  if (tier === 'B') return 'text-amber-400';
-  if (tier === 'C') return 'text-zinc-400';
-  return 'text-zinc-500';
+  if (tier === 'A') return 'text-up';
+  if (tier === 'B') return 'text-sun';
+  if (tier === 'C') return 'text-content';
+  return 'text-muted-foreground';
 }
 
 function TfChip({ j }: { j: ScalperTfJudgementView }) {
@@ -56,41 +55,44 @@ function TfChip({ j }: { j: ScalperTfJudgementView }) {
   const buy = j.agree === 'BUY';
   return (
     <div
-      className={`rounded-lg border px-2.5 py-2 ${
+      className={`flex min-w-0 flex-col gap-1 rounded-lg border px-2.5 py-2 ${
         agreeing
           ? buy
-            ? 'border-emerald-500/40 bg-emerald-500/10'
-            : 'border-red-500/40 bg-red-500/10'
-          : 'border-zinc-800 bg-zinc-900/50'
+            ? 'border-up/40 bg-up/10'
+            : 'border-down/40 bg-down/10'
+          : 'border-border bg-surface'
       }`}
       data-testid={`scalper-tf-${j.timeframe}`}
     >
-      <div className="flex items-center justify-between gap-2">
-        <span className="font-mono text-xs font-semibold text-zinc-200">{j.timeframe}</span>
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-2 gap-y-0.5">
+        <span className="shrink-0 font-mono text-xs font-semibold text-foreground/90">{j.timeframe}</span>
         <span
-          className={`text-[11px] font-medium ${
-            agreeing ? (buy ? 'text-emerald-400' : 'text-red-400') : 'text-zinc-500'
+          className={`min-w-0 break-words text-[11px] font-medium leading-snug ${
+            agreeing ? (buy ? 'text-up' : 'text-down') : 'text-muted-foreground'
           }`}
         >
           {scalperStageBn[j.stage] ?? j.stage}
         </span>
       </div>
-      <p className="mt-1 font-mono text-[10px] leading-relaxed text-zinc-500">
-        RSI {j.indicators.rsi !== null ? j.indicators.rsi.toFixed(1) : '—'} · ATR{' '}
-        {j.indicators.atr !== null ? j.indicators.atr.toFixed(2) : '—'}
+      {/* Task 39 overlap fix (compact rail + narrow mobile): the indicator
+          values stack VERTICALLY inside a flex-column chip and each metric is
+          an atomic no-wrap span on a wrapping row — a narrow container can
+          never push two text bands into the same pixels again. */}
+      <p className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5 font-mono text-[10px] leading-normal text-muted-foreground">
+        <span className="whitespace-nowrap">RSI {j.indicators.rsi !== null ? j.indicators.rsi.toFixed(1) : '—'}</span>
+        <span className="whitespace-nowrap">ATR {j.indicators.atr !== null ? j.indicators.atr.toFixed(2) : '—'}</span>
+        {/* Phase 14 — this TF's SMC confluence summary (only when the layer ran) */}
+        {j.smc && (
+          <span className="whitespace-nowrap">
+            SMC {j.smc.score} · <span className={smcTierLetterClass(j.smc.tier)}>{j.smc.tier ?? '—'}</span>
+          </span>
+        )}
       </p>
-      {/* Phase 14 — this TF's SMC confluence summary (only when the layer ran) */}
-      {j.smc && (
-        <p className="mt-0.5 font-mono text-[10px] leading-relaxed text-zinc-500">
-          SMC {j.smc.score} ·{' '}
-          <span className={smcTierLetterClass(j.smc.tier)}>{j.smc.tier ?? '—'}</span>
-        </p>
-      )}
       {/* Task 37 — the structure gate's refusal reason: the agent's honest
           “এখানে রিভার্স নয় / কাঠামোর বিপরীত” verdict, per TF. */}
       {j.gate && (
         <p
-          className="mt-0.5 text-[10px] leading-relaxed text-amber-400/90"
+          className="break-words text-[10px] leading-relaxed text-sun/90"
           data-testid={`scalper-tf-gate-${j.timeframe}`}
         >
           {scalperGateBn[j.gate.reason] ?? j.gate.reason}
@@ -115,19 +117,19 @@ function SmcConfluenceSection({ smc }: { smc: SmcConfluenceView }) {
   const tier = smc.tier;
   const scorePct = Math.min(100, Math.max(0, smc.totalScore));
   const meterFill =
-    scorePct >= 75 ? 'bg-emerald-500' : scorePct >= 55 ? 'bg-amber-500' : 'bg-zinc-500';
+    scorePct >= 75 ? 'bg-up' : scorePct >= 55 ? 'bg-sun' : 'bg-muted-foreground';
   const tierBadgeClass =
     tier === 'A'
-      ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
+      ? 'border-up/40 bg-up/10 text-up'
       : tier === 'B'
-        ? 'border-amber-500/40 bg-amber-500/10 text-amber-400'
-        : 'border-zinc-500/40 bg-zinc-500/10 text-zinc-300';
+        ? 'border-sun/40 bg-sun/10 text-sun'
+        : 'border-border-strong/40 bg-muted-foreground/10 text-content';
   const dirBadgeClass =
     dir === 'BUY'
-      ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
+      ? 'border-up/40 bg-up/10 text-up'
       : dir === 'SELL'
-        ? 'border-red-500/40 bg-red-500/10 text-red-400'
-        : 'border-zinc-500/40 bg-zinc-500/10 text-zinc-300';
+        ? 'border-down/40 bg-down/10 text-down'
+        : 'border-border-strong/40 bg-muted-foreground/10 text-content';
 
   // Top 3 audit reasons = the highest-scoring agents that actually scored.
   const topVotes = smc.votes
@@ -163,17 +165,17 @@ function SmcConfluenceSection({ smc }: { smc: SmcConfluenceView }) {
 
   return (
     <div
-      className="space-y-2 rounded-lg border border-zinc-800 bg-zinc-900/50 p-2.5"
+      className="space-y-2 rounded-lg border border-border bg-surface p-3"
       data-testid="smc-confluence-section"
     >
       {/* Header: title + tier + direction */}
       <div className="flex flex-wrap items-center gap-1.5">
-        <Layers className="h-3.5 w-3.5 shrink-0 text-amber-400" aria-hidden />
-        <h3 className="text-xs font-semibold text-zinc-100">SMC কনফ্লুয়েন্স (১০-এজেন্ট ইঞ্জিন)</h3>
-        <Badge variant="outline" className={tierBadgeClass}>
+        <Layers className="h-3.5 w-3.5 shrink-0 text-sun" aria-hidden />
+        <h3 className="text-xs font-semibold text-foreground">SMC কনফ্লুয়েন্স (১০-এজেন্ট ইঞ্জিন)</h3>
+        <Badge variant="outline" className={`text-[11px] ${tierBadgeClass}`}>
           {tier !== null ? (smcTierBn[tier] ?? tier) : 'টিয়ার নেই'}
         </Badge>
-        <Badge variant="outline" className={dirBadgeClass}>
+        <Badge variant="outline" className={`text-[11px] ${dirBadgeClass}`}>
           {dir === 'BUY' ? 'BUY' : dir === 'SELL' ? 'SELL' : 'দিক অনির্ণেয়'}
         </Badge>
       </div>
@@ -181,7 +183,7 @@ function SmcConfluenceSection({ smc }: { smc: SmcConfluenceView }) {
       {/* Confluence meter (0–100, tier-colored fill) */}
       <div className="flex items-center gap-2">
         <div
-          className="h-2 min-w-0 flex-1 rounded-full bg-zinc-800"
+          className="h-2 min-w-0 flex-1 rounded-full bg-muted"
           role="meter"
           aria-label="SMC কনফ্লুয়েন্স স্কোর"
           aria-valuenow={Math.round(scorePct)}
@@ -191,7 +193,7 @@ function SmcConfluenceSection({ smc }: { smc: SmcConfluenceView }) {
         >
           <div className={`h-2 rounded-full ${meterFill}`} style={{ width: `${scorePct}%` }} />
         </div>
-        <p className="shrink-0 font-mono text-[10px] text-zinc-400">স্কোর {smc.totalScore}/১০০</p>
+        <p className="shrink-0 font-mono text-[10px] text-content">স্কোর {smc.totalScore}/১০০</p>
       </div>
 
       {/* Eight-agent vote grid (border follows the verdict direction) */}
@@ -200,34 +202,36 @@ function SmcConfluenceSection({ smc }: { smc: SmcConfluenceView }) {
           const pct = v.weight > 0 ? Math.min(100, Math.max(0, (v.score / v.weight) * 100)) : 0;
           const fill =
             v.score <= 0
-              ? 'bg-zinc-700'
+              ? 'bg-muted'
               : pct >= 75
-                ? 'bg-emerald-500'
+                ? 'bg-up'
                 : pct >= 55
-                  ? 'bg-amber-500'
-                  : 'bg-zinc-500';
+                  ? 'bg-sun'
+                  : 'bg-muted-foreground';
           const border =
             dir !== null && v.vote === dir
-              ? 'border-emerald-500/30'
+              ? 'border-up/30'
               : dir !== null && v.vote !== 'NEUTRAL'
-                ? 'border-red-500/30'
-                : 'border-zinc-800';
+                ? 'border-down/30'
+                : 'border-border';
           return (
             <div
               key={v.agent}
-              className={`rounded-md border ${border} bg-zinc-900/60 px-2 py-1.5`}
+              className={`min-w-0 rounded-md border ${border} bg-panel px-2 py-2`}
               title={v.reasonEn}
             >
-              <div className="flex items-baseline justify-between gap-1">
-                <span className="min-w-0 text-[10px] leading-tight text-zinc-300">
-                  {smcAgentBn[v.agent] ?? v.agent}
-                </span>
-                <span className="shrink-0 font-mono text-[10px] text-zinc-400">
+              {/* name on its own band — never collides with the score below */}
+              <p className="min-w-0 break-words text-[10px] leading-snug text-content">
+                {smcAgentBn[v.agent] ?? v.agent}
+              </p>
+              {/* score + meter on a second band, separated by real spacing */}
+              <div className="mt-1.5 flex items-center gap-1.5">
+                <div className="h-1 min-w-0 flex-1 rounded-full bg-muted">
+                  <div className={`h-1 rounded-full ${fill}`} style={{ width: `${pct}%` }} />
+                </div>
+                <span className="shrink-0 font-mono text-[10px] tabular-nums text-content">
                   {v.score}/{v.weight}
                 </span>
-              </div>
-              <div className="mt-1 h-1 w-full rounded-full bg-zinc-800">
-                <div className={`h-1 rounded-full ${fill}`} style={{ width: `${pct}%` }} />
               </div>
             </div>
           );
@@ -236,13 +240,13 @@ function SmcConfluenceSection({ smc }: { smc: SmcConfluenceView }) {
 
       {/* Hard vetoes — a veto always blocks emission regardless of score */}
       {smc.vetoes.length > 0 && (
-        <div className="flex flex-wrap items-center gap-1.5 rounded-md border border-red-500/30 bg-red-500/5 px-2 py-1.5">
-          <ShieldAlert className="h-3.5 w-3.5 shrink-0 text-red-400" aria-hidden />
-          <span className="text-[10px] font-semibold text-red-300">হার্ড ভিটো:</span>
+        <div className="flex flex-wrap items-center gap-1.5 rounded-md border border-down/40 bg-down/10 px-2 py-1.5">
+          <ShieldAlert className="h-3.5 w-3.5 shrink-0 text-down" aria-hidden />
+          <span className="text-[10px] font-semibold text-down">হার্ড ভিটো:</span>
           {smc.vetoes.map((v) => (
             <span
               key={v}
-              className="rounded border border-red-500/30 bg-red-500/10 px-1.5 py-0.5 text-[10px] text-red-300"
+              className="rounded-md border border-down/40 bg-down/10 px-1.5 py-0.5 text-[10px] text-down"
             >
               {smcVetoBn[v] ?? v}
             </span>
@@ -254,22 +258,22 @@ function SmcConfluenceSection({ smc }: { smc: SmcConfluenceView }) {
       <div className="flex flex-wrap items-center gap-1" data-testid="smc-evidence-strip">
         {sweep !== null ? (
           <span
-            className={`rounded border px-1.5 py-0.5 text-[10px] ${
+            className={`rounded-md border px-1.5 py-0.5 text-[10px] ${
               sweepMatchesDir
-                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
-                : 'border-zinc-700 bg-zinc-800/60 text-zinc-400'
+                ? 'border-up/40 bg-up/10 text-up'
+                : 'border-border bg-panel text-content'
             }`}
           >
             সুইপ: {sweep.direction === 'BULLISH' ? 'সেল-সাইড কাটা ✓' : 'বাই-সাইড কাটা ✓'} @{' '}
             <span className="font-mono">{sweep.levelText}</span> ({sweep.barsAgo} বার আগে)
           </span>
         ) : (
-          <span className="rounded border border-zinc-700 bg-zinc-800/60 px-1.5 py-0.5 text-[10px] text-zinc-400">
+          <span className="rounded-md border border-border bg-panel px-1.5 py-0.5 text-[10px] text-content">
             সুইপ: নেই
           </span>
         )}
         {poiZone !== null ? (
-          <span className="rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-300">
+          <span className="rounded-md border border-sun/40 bg-sun/10 px-1.5 py-0.5 text-[10px] text-sun">
             POI: {poiZone.kind}{' '}
             <span className="font-mono">
               {poiZone.bottomText}–{poiZone.topText}
@@ -281,40 +285,40 @@ function SmcConfluenceSection({ smc }: { smc: SmcConfluenceView }) {
                 : ' (মিটিগেটেড)'}
           </span>
         ) : (
-          <span className="rounded border border-zinc-700 bg-zinc-800/60 px-1.5 py-0.5 text-[10px] text-zinc-400">
+          <span className="rounded-md border border-border bg-panel px-1.5 py-0.5 text-[10px] text-content">
             POI: নেই
           </span>
         )}
         {lastEvent !== null ? (
-          <span className="rounded border border-zinc-700 bg-zinc-800/60 px-1.5 py-0.5 text-[10px] text-zinc-400">
+          <span className="rounded-md border border-border bg-panel px-1.5 py-0.5 text-[10px] text-content">
             কাঠামো: {lastEvent.type} {lastEvent.direction} @{' '}
             <span className="font-mono">{lastEvent.levelText}</span>
           </span>
         ) : (
-          <span className="rounded border border-zinc-700 bg-zinc-800/60 px-1.5 py-0.5 text-[10px] text-zinc-400">
+          <span className="rounded-md border border-border bg-panel px-1.5 py-0.5 text-[10px] text-content">
             কাঠামো: ইভেন্ট নেই
           </span>
         )}
         {pattern !== null ? (
-          <span className="rounded border border-zinc-700 bg-zinc-800/60 px-1.5 py-0.5 text-[10px] text-zinc-400">
+          <span className="rounded-md border border-border bg-panel px-1.5 py-0.5 text-[10px] text-content">
             প্যাটার্ন: {pattern.kind} (<span className="font-mono">{pattern.strength.toFixed(2)}</span>)
           </span>
         ) : (
-          <span className="rounded border border-zinc-700 bg-zinc-800/60 px-1.5 py-0.5 text-[10px] text-zinc-400">
+          <span className="rounded-md border border-border bg-panel px-1.5 py-0.5 text-[10px] text-content">
             প্যাটার্ন: নেই
           </span>
         )}
         <span
-          className={`rounded border px-1.5 py-0.5 text-[10px] ${
+          className={`rounded-md border px-1.5 py-0.5 text-[10px] ${
             killzone !== null
-              ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
-              : 'border-zinc-700 bg-zinc-800/60 text-zinc-400'
+              ? 'border-up/40 bg-up/10 text-up'
+              : 'border-border bg-panel text-content'
           }`}
         >
           সেশন: {smc.session.active}
           {killzone !== null ? ` · ${killzone === 'LONDON_KZ' ? 'লন্ডন কিলজোন' : 'NY কিলজোন'}` : ''}
         </span>
-        <span className="rounded border border-zinc-700 bg-zinc-800/60 px-1.5 py-0.5 text-[10px] text-zinc-400">
+        <span className="rounded-md border border-border bg-panel px-1.5 py-0.5 text-[10px] text-content">
           AMD: {smc.amd.phase}
           {smc.amd.signature !== null ? ` · ${smc.amd.signature}` : ''}
         </span>
@@ -324,7 +328,7 @@ function SmcConfluenceSection({ smc }: { smc: SmcConfluenceView }) {
       {topVotes.length > 0 && (
         <div className="space-y-0.5">
           {topVotes.map((v) => (
-            <p key={`why-${v.agent}`} className="text-[10px] leading-relaxed text-zinc-500">
+            <p key={`why-${v.agent}`} className="text-[10px] leading-relaxed text-muted-foreground">
               · {smcAgentBn[v.agent] ?? v.agent}: {v.reasonEn}
             </p>
           ))}
@@ -361,41 +365,44 @@ export function ScalperSignalCard({
   return (
     <section
       aria-label="স্ক্যাল্পার সিগন্যাল (M1 M5 M15)"
-      className="flex flex-col rounded-xl border border-amber-500/30 bg-zinc-900/40"
+      className="flex flex-col rounded-xl border border-border bg-panel"
       data-testid="scalper-signal-card"
     >
-      <div className="flex flex-wrap items-center gap-2 border-b border-zinc-800/80 px-3 py-2">
-        <Zap className="h-4 w-4 text-amber-400" aria-hidden />
-        <h2 className="text-sm font-semibold text-zinc-100">স্ক্যাল্পার সিগন্যাল</h2>
-        <Badge variant="outline" className="border-amber-500/40 bg-amber-500/10 text-amber-300">
-          M1 · M5 · M15
-        </Badge>
-        {autoArmed && (
-          <Badge variant="outline" className="border-emerald-500/40 bg-emerald-500/10 text-emerald-400">
-            অটো-এক্সিকিউশন সচল
+      <div className="flex min-w-0 flex-wrap items-center gap-2 border-b border-border px-4 py-3">
+        <Zap className="h-4 w-4 shrink-0 text-sun" aria-hidden />
+        <h2 className="min-w-0 text-sm font-semibold text-foreground">স্ক্যাল্পার সিগন্যাল</h2>
+        <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1.5">
+          <Badge variant="outline" className="border-sun/40 bg-sun/10 text-[11px] text-sun">
+            M1 · M5 · M15
           </Badge>
-        )}
-        {s && (
-          <Badge variant="outline" className={`ml-auto ${signalOutcomeBadgeClass(s.outcome)}`}>
-            {s.outcome}
-          </Badge>
-        )}
+          {autoArmed && (
+            <Badge variant="outline" className="border-up/40 bg-up/10 text-[11px] text-up">
+              <CheckCircle2 className="h-3 w-3" aria-hidden /> অটো-এক্সিকিউশন সচল
+            </Badge>
+          )}
+          {s && (
+            <Badge variant="outline" className={`text-[11px] ${outcomeBadgeTokenClass(s.outcome)}`}>
+              <OutcomeBadgeIcon outcome={s.outcome} />
+              {s.outcome}
+            </Badge>
+          )}
+        </div>
       </div>
 
-      <div className="flex-1 space-y-3 p-3">
+      <div className="flex-1 space-y-4 p-4">
         {error ? (
-          <p className="rounded-lg border border-red-500/30 bg-red-500/5 p-2.5 text-xs leading-relaxed text-zinc-400" role="alert">
-            স্ক্যাল্পার API এখন অনুপলব্ধ — <span className="font-mono text-red-300">{error}</span>।{' '}
+          <p className="rounded-lg border border-down/40 bg-down/10 p-3 text-xs leading-relaxed text-content" role="alert">
+            স্ক্যাল্পার API এখন অনুপলব্ধ — <span className="font-mono text-down">{error}</span>।{' '}
             {bnForCode(error)} শিডিউল্ড লুপ চালু থাকলে সংযোগ ফিরলে ফলাফল আসবে।
           </p>
         ) : loading && !scalper ? (
           <div className="space-y-2">
-            <div className="h-4 w-2/3 animate-pulse rounded bg-zinc-800" />
-            <div className="h-4 w-1/2 animate-pulse rounded bg-zinc-800" />
-            <div className="h-10 w-full animate-pulse rounded bg-zinc-800" />
+            <div className="h-4 w-2/3 animate-pulse rounded bg-surface" />
+            <div className="h-4 w-1/2 animate-pulse rounded bg-surface" />
+            <div className="h-10 w-full animate-pulse rounded bg-surface" />
           </div>
         ) : !scalper ? null : !s ? (
-          <p className="text-xs leading-relaxed text-zinc-500">
+          <p className="text-xs leading-relaxed text-muted-foreground">
             এখনো কোনো স্ক্যাল্পার মূল্যায়ন হয়নি — ১-মিনিট শিডিউল্ড লুপ থেকে প্রথম ফলাফল এক মিনিটের মধ্যে আসবে (সৎ খালি অবস্থা)।
           </p>
         ) : (
@@ -422,29 +429,29 @@ export function ScalperSignalCard({
               };
               return (
                 <div
-                  className={`flex flex-wrap items-center gap-1.5 rounded-lg border p-2 text-[11px] ${
+                  className={`flex min-w-0 flex-wrap items-center gap-1.5 rounded-lg border p-2 text-[11px] ${
                     htf.opposed
-                      ? 'border-amber-500/40 bg-amber-500/5'
-                      : 'border-zinc-800 bg-zinc-900/60'
+                      ? 'border-sun/40 bg-sun/5'
+                      : 'border-border bg-surface'
                   }`}
                   data-testid="scalper-htf-trend"
                 >
-                  <span className="text-zinc-500">HTF প্রসঙ্গ (কনটিনিউ-বিচার):</span>
+                  <span className="text-muted-foreground">HTF প্রসঙ্গ (কনটিনিউ-বিচার):</span>
                   <span className="font-mono">
                     H1{' '}
-                    <span className={htf.h1 === 'bullish' ? 'text-emerald-400' : htf.h1 === 'bearish' ? 'text-red-400' : 'text-zinc-400'}>
+                    <span className={htf.h1 === 'bullish' ? 'text-up' : htf.h1 === 'bearish' ? 'text-down' : 'text-content'}>
                       {htf.h1 ? trendBn[htf.h1] : '—'}
                     </span>
                   </span>
-                  <span className="text-zinc-600">·</span>
+                  <span className="text-muted-foreground">·</span>
                   <span className="font-mono">
                     H4{' '}
-                    <span className={htf.h4 === 'bullish' ? 'text-emerald-400' : htf.h4 === 'bearish' ? 'text-red-400' : 'text-zinc-400'}>
+                    <span className={htf.h4 === 'bullish' ? 'text-up' : htf.h4 === 'bearish' ? 'text-down' : 'text-content'}>
                       {htf.h4 ? trendBn[htf.h4] : '—'}
                     </span>
                   </span>
                   {htf.opposed && (
-                    <span className="text-amber-300">
+                    <span className="min-w-0 break-words text-sun">
                       — ট্রেন্ডের বিপরীত সিগন্যাল আটকানো (SCALPER_HTF_OPPOSED)
                     </span>
                   )}
@@ -459,17 +466,17 @@ export function ScalperSignalCard({
             {/* Verdict line + reason codes */}
             <div className="space-y-1.5">
               {s.outcome === 'NO_SETUP' && (
-                <p className="text-xs text-zinc-400">{bnForCode('SCALPER_NO_AGREE')}</p>
+                <p className="text-xs text-content">{bnForCode('SCALPER_NO_AGREE')}</p>
               )}
               {s.reasonCodes.map((code) => (
-                <p key={code} className="text-xs leading-relaxed text-zinc-400">
-                  <span className="font-mono text-[10px] text-zinc-500">{code}</span> — {bnForCode(code)}
+                <p key={code} className="text-xs leading-relaxed text-content">
+                  <span className="font-mono text-[10px] text-muted-foreground">{code}</span> — {bnForCode(code)}
                 </p>
               ))}
               {s.outcome !== 'NO_SETUP' && s.reasonCodes.length === 0 && s.levels && (
-                <p className="text-xs leading-relaxed text-zinc-300">
+                <p className="text-xs leading-relaxed text-content">
                   সেটআপ নির্গত — উৎস{' '}
-                  <span className="font-mono text-amber-300">{s.evidence?.scalper?.sourceTimeframe ?? '—'}</span>
+                  <span className="font-mono text-sun">{s.evidence?.scalper?.sourceTimeframe ?? '—'}</span>
                   {s.evidence?.scalper?.model ? ` · ${scalperModelBn[s.evidence.scalper.model] ?? s.evidence.scalper.model}` : ''}
                   {s.evidence?.scalper?.model === 'SMC_CONFLUENCE' && smcEvidence?.tier != null
                     ? ` · ${smcTierBn[smcEvidence.tier] ?? ''}`
@@ -483,44 +490,44 @@ export function ScalperSignalCard({
             {/* Levels — ONLY when the evaluation produced them. SMC setups
              * carry a real POI entry ZONE alongside the live reference. */}
             {s.levels ? (
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" data-testid="scalper-levels">
-                <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2">
-                  <p className="text-[10px] text-zinc-500">দিক</p>
-                  <p className={`font-mono text-sm ${s.levels.direction === 'BUY' ? 'text-emerald-400' : 'text-red-400'}`}>
+              <div className="grid grid-cols-2 gap-2" data-testid="scalper-levels">
+                <div className="min-w-0 rounded-lg border border-border bg-surface p-2">
+                  <p className="text-[10px] leading-snug text-muted-foreground">দিক</p>
+                  <p className={`mt-0.5 font-mono text-sm font-semibold ${s.levels.direction === 'BUY' ? 'text-up' : 'text-down'}`}>
                     {s.levels.direction === 'BUY' ? 'BUY (লং)' : 'SELL (শর্ট)'}
                   </p>
                 </div>
-                <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2">
+                <div className="min-w-0 rounded-lg border border-border bg-surface p-2">
                   {s.levels.entryZoneLow !== s.levels.entryZoneHigh ? (
                     <>
-                      <p className="text-[10px] text-zinc-500">এন্ট্রি জোন (POI)</p>
-                      <p className="font-mono text-sm text-zinc-200">
+                      <p className="text-[10px] leading-snug text-muted-foreground">এন্ট্রি জোন (POI)</p>
+                      <p className="break-words font-mono text-sm font-semibold text-foreground/90">
                         <PriceLevelText value={s.levels.entryZoneLow} spec={priceSpec} />
-                        <span className="text-zinc-500">–</span>
+                        <span className="text-muted-foreground">–</span>
                         <PriceLevelText value={s.levels.entryZoneHigh} spec={priceSpec} />
                       </p>
-                      <p className="mt-0.5 font-mono text-[10px] leading-relaxed text-zinc-500">
+                      <p className="mt-0.5 font-mono text-[10px] leading-relaxed text-muted-foreground">
                         লাইভ এন্ট্রি <PriceLevelText value={s.levels.entryReference} spec={priceSpec} />
                       </p>
                     </>
                   ) : (
                     <>
-                      <p className="text-[10px] text-zinc-500">এন্ট্রি</p>
-                      <p className="font-mono text-sm text-zinc-200">
+                      <p className="text-[10px] leading-snug text-muted-foreground">এন্ট্রি</p>
+                      <p className="break-words font-mono text-sm font-semibold text-foreground/90">
                         <PriceLevelText value={s.levels.entryReference} spec={priceSpec} />
                       </p>
                     </>
                   )}
                 </div>
-                <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2">
-                  <p className="text-[10px] text-zinc-500">স্টপ-লস</p>
-                  <p className="font-mono text-sm text-red-300">
+                <div className="min-w-0 rounded-lg border border-border bg-surface p-2">
+                  <p className="text-[10px] leading-snug text-muted-foreground">স্টপ-লস</p>
+                  <p className="mt-0.5 break-words font-mono text-sm font-semibold text-down">
                     <PriceLevelText value={s.levels.stopLoss} spec={priceSpec} />
                   </p>
                 </div>
-                <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2">
-                  <p className="text-[10px] text-zinc-500">টার্গেট (R:R 1:{s.levels.rewardRiskRatio.toFixed(2)})</p>
-                  <p className="font-mono text-sm text-emerald-300">
+                <div className="min-w-0 rounded-lg border border-border bg-surface p-2">
+                  <p className="text-[10px] leading-snug text-muted-foreground">টার্গেট (R:R 1:{s.levels.rewardRiskRatio.toFixed(2)})</p>
+                  <p className="mt-0.5 break-words font-mono text-sm font-semibold text-up">
                     <PriceLevelText value={s.levels.target} spec={priceSpec} />
                   </p>
                 </div>
@@ -529,52 +536,52 @@ export function ScalperSignalCard({
 
             {/* Meta + cadence counter */}
             <div className="grid grid-cols-2 gap-2 text-[11px]">
-              <div>
-                <p className="text-zinc-500">সিদ্ধান্ত ক্যান্ডেল</p>
-                <p className="font-mono text-zinc-200">
+              <div className="min-w-0">
+                <p className="leading-snug text-muted-foreground">সিদ্ধান্ত ক্যান্ডেল</p>
+                <p className="break-words font-mono leading-snug text-foreground/90">
                   {s.decisionCandleTimeUtc ? fmtDhaka(s.decisionCandleTimeUtc) : '—'}
                 </p>
               </div>
-              <div>
-                <p className="text-zinc-500">মূল্যায়ন সময় (ঢাকা)</p>
-                <p className="font-mono text-zinc-200">{fmtDhaka(s.createdAt)}</p>
+              <div className="min-w-0">
+                <p className="leading-snug text-muted-foreground">মূল্যায়ন সময় (ঢাকা)</p>
+                <p className="break-words font-mono leading-snug text-foreground/90">{fmtDhaka(s.createdAt)}</p>
               </div>
-              <div>
-                <p className="text-zinc-500">শেষ ১ ঘণ্টায় সিগন্যাল</p>
-                <p className={`font-mono ${lastHour >= 5 ? 'text-emerald-400' : 'text-zinc-200'}`}>
-                  {lastHour}টি <span className="text-zinc-500">(লক্ষ্য ৫–৭)</span>
+              <div className="min-w-0">
+                <p className="leading-snug text-muted-foreground">শেষ ১ ঘণ্টায় সিগন্যাল</p>
+                <p className={`font-mono leading-snug ${lastHour >= 5 ? 'text-up' : 'text-foreground/90'}`}>
+                  {lastHour}টি <span className="text-muted-foreground">(লক্ষ্য ৫–৭)</span>
                 </p>
               </div>
-              <div>
-                <p className="text-zinc-500">কুলডাউন</p>
-                <p className="font-mono text-zinc-200">৮ মিনিট</p>
+              <div className="min-w-0">
+                <p className="leading-snug text-muted-foreground">কুলডাউন</p>
+                <p className="font-mono leading-snug text-foreground/90">৮ মিনিট</p>
               </div>
             </div>
 
             {/* Recent setups strip */}
             {!compact && recent.length > 0 && (
               <div data-testid="scalper-recent-setups">
-                <p className="mb-1 flex items-center gap-1 text-[10px] font-medium text-zinc-500">
+                <p className="mb-1 flex items-center gap-1 text-[10px] font-medium text-muted-foreground">
                   <Timer className="h-3 w-3" aria-hidden /> সাম্প্রতিক সেটআপ (শেষ ১ ঘণ্টা)
                 </p>
                 <div className="max-h-36 space-y-1 overflow-y-auto pr-1 custom-scrollbar">
                   {recent.slice(0, 8).map((r) => (
                     <div
                       key={r.id}
-                      className="flex items-center gap-2 rounded-md border border-zinc-800/80 bg-zinc-900/40 px-2 py-1.5 text-[11px]"
+                      className="flex min-w-0 items-center gap-2 rounded-md border border-border bg-surface px-2 py-1.5 text-[11px]"
                     >
                       <span
                         className={`font-mono font-semibold ${
-                          r.outcome === 'BUY_SETUP' ? 'text-emerald-400' : 'text-red-400'
+                          r.outcome === 'BUY_SETUP' ? 'text-up' : 'text-down'
                         }`}
                       >
                         {r.outcome === 'BUY_SETUP' ? 'BUY' : 'SELL'}
                       </span>
-                      <span className="font-mono text-zinc-500">{r.sourceTimeframe ?? '—'}</span>
-                      <span className="text-zinc-400">
+                      <span className="font-mono text-muted-foreground">{r.sourceTimeframe ?? '—'}</span>
+                      <span className="text-content">
                         {r.model === 'SMC_CONFLUENCE' ? 'SMC' : r.model === 'REVERSAL' ? 'রিভার্সাল' : 'মোমেন্টাম'}
                       </span>
-                      <span className="ml-auto font-mono text-zinc-500">{fmtDhaka(r.createdAt)}</span>
+                      <span className="ml-auto font-mono text-muted-foreground">{fmtDhaka(r.createdAt)}</span>
                     </div>
                   ))}
                 </div>
@@ -582,23 +589,24 @@ export function ScalperSignalCard({
             )}
           </>
         )}
+      </div>
 
-        <div className="flex items-center gap-2 border-t border-zinc-800/60 pt-2">
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-8 border-amber-500/30 text-amber-300 hover:text-amber-200"
-            onClick={onRun}
-            disabled={running}
-            data-testid="scalper-run-button"
-          >
-            {running ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" aria-hidden /> : <RefreshCw className="mr-1 h-3.5 w-3.5" aria-hidden />}
-            এখনই মূল্যায়ন
-          </Button>
-          <p className="text-[10px] leading-tight text-zinc-500">
-            যে কোনো একটি টাইমফ্রেম agree করলেই সিগন্যাল — ১-মিনিট লুপে স্বয়ংক্রিয়।
-          </p>
-        </div>
+      {/* Action footer — section separation via border, never an extra box */}
+      <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 border-t border-border px-4 py-3">
+        <Button
+          size="sm"
+          variant="outline"
+          className="min-h-10 border-sun/40 text-sun hover:text-sun"
+          onClick={onRun}
+          disabled={running}
+          data-testid="scalper-run-button"
+        >
+          {running ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden />}
+          এখনই মূল্যায়ন
+        </Button>
+        <p className="min-w-0 flex-1 basis-40 text-[11px] leading-snug text-muted-foreground">
+          যে কোনো একটি টাইমফ্রেম agree করলেই সিগন্যাল — ১-মিনিট লুপে স্বয়ংক্রিয়।
+        </p>
       </div>
     </section>
   );

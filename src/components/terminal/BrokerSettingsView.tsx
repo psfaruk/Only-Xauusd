@@ -20,9 +20,11 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import {
+  AlertTriangle,
   BadgeCheck,
   Eye,
   EyeOff,
+  Hourglass,
   KeyRound,
   Loader2,
   Lock,
@@ -30,13 +32,16 @@ import {
   Save,
   Server,
   ShieldCheck,
+  Unplug,
   User,
+  XCircle,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
 
 interface BridgeState {
@@ -206,67 +211,86 @@ export function BrokerSettingsView() {
   return (
     <div className="space-y-4" data-testid="broker-settings-root">
       {/* ── bridge connection state ─────────────────────────────────────── */}
-      <Card className="border-zinc-800 bg-zinc-900/60" data-testid="settings-bridge-card">
-        <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2 text-base font-semibold text-zinc-100">
-            <Server className="h-4 w-4 text-amber-400" aria-hidden />
+      <Card className="border-border bg-panel dark:shadow-none" data-testid="settings-bridge-card">
+        <CardHeader className="flex flex-row items-center justify-between gap-2 pb-3">
+          <CardTitle className="flex items-center gap-2 text-base font-semibold text-foreground">
+            <Server className="h-4 w-4 text-sun" aria-hidden />
             ব্রোকার সংযোগ
-            <Button
-              variant="ghost"
-              size="sm"
-              className="ml-auto h-8 gap-1.5 px-2.5 text-xs text-zinc-400 hover:text-zinc-200"
-              onClick={() => void load(true)}
-              disabled={refreshing}
-              aria-label="সংযোগ অবস্থা রিফ্রেশ করুন"
-              data-testid="settings-refresh"
-            >
-              {refreshing ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-              ) : (
-                <RefreshCw className="h-3.5 w-3.5" aria-hidden />
-              )}
-              রিফ্রেশ
-            </Button>
           </CardTitle>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-10 gap-1.5 px-3 text-xs font-medium text-content hover:bg-accent hover:text-foreground"
+            onClick={() => void load(true)}
+            disabled={refreshing}
+            aria-label="সংযোগ অবস্থা রিফ্রেশ করুন"
+            data-testid="settings-refresh"
+          >
+            {refreshing ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+            ) : (
+              <RefreshCw className="h-3.5 w-3.5" aria-hidden />
+            )}
+            রিফ্রেশ
+          </Button>
         </CardHeader>
         <CardContent className="space-y-3">
           {loading ? (
-            <div className="flex items-center gap-2 text-sm text-zinc-400" data-testid="settings-loading">
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> লোড হচ্ছে…
+            <div className="space-y-3" data-testid="settings-loading">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                {['সংযোগ', 'সার্ভার', 'লগইন', 'প্রয়োগকৃত রিভিশন'].map((label) => (
+                  <div key={label} className="min-w-0 space-y-1.5">
+                    <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</p>
+                    <Skeleton className="h-6 w-full max-w-[120px]" />
+                  </div>
+                ))}
+              </div>
+              <p className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> লোড হচ্ছে…
+              </p>
             </div>
           ) : loadError ? (
-            <p className="text-sm text-red-400" role="alert" data-testid="settings-load-error">
-              {loadError}
-            </p>
+            <div
+              className="flex items-start gap-2 rounded-lg border border-down/40 bg-down/10 px-3 py-2.5 text-sm text-down"
+              role="alert"
+              data-testid="settings-load-error"
+            >
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+              <p className="min-w-0 leading-relaxed">{loadError}</p>
+            </div>
           ) : (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4" data-testid="settings-bridge-grid">
-              <div className="space-y-1">
-                <p className="text-[11px] uppercase tracking-wide text-zinc-500">সংযোগ</p>
+              <div className="min-w-0 space-y-1">
+                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">সংযোগ</p>
                 {authenticated ? (
-                  <Badge className="border-emerald-500/30 bg-emerald-500/15 text-emerald-300">
+                  <Badge className="border-up/40 bg-up/10 text-[11px] text-up">
                     <BadgeCheck className="mr-1 h-3 w-3" aria-hidden /> সংযুক্ত ও প্রমাণীকৃত
                   </Badge>
                 ) : connected ? (
-                  <Badge className="border-amber-500/30 bg-amber-500/15 text-amber-300">সংযুক্ত (অপেক্ষমাণ)</Badge>
+                  <Badge className="border-sun/40 bg-sun/10 text-[11px] text-sun">
+                    <Hourglass className="mr-1 h-3 w-3" aria-hidden /> সংযুক্ত (অপেক্ষমাণ)
+                  </Badge>
                 ) : (
-                  <Badge className="border-red-500/30 bg-red-500/15 text-red-300">বিচ্ছিন্ন</Badge>
+                  <Badge className="border-down/40 bg-down/10 text-[11px] text-down">
+                    <Unplug className="mr-1 h-3 w-3" aria-hidden /> বিচ্ছিন্ন
+                  </Badge>
                 )}
               </div>
-              <div className="space-y-1">
-                <p className="text-[11px] uppercase tracking-wide text-zinc-500">সার্ভার</p>
-                <p className="font-mono text-sm text-zinc-200" data-testid="settings-bridge-server">
+              <div className="min-w-0 space-y-1">
+                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">সার্ভার</p>
+                <p className="break-all font-mono text-sm text-foreground" data-testid="settings-bridge-server">
                   {bridge?.server ?? data?.envFallback?.server ?? '—'}
                 </p>
               </div>
-              <div className="space-y-1">
-                <p className="text-[11px] uppercase tracking-wide text-zinc-500">লগইন</p>
-                <p className="font-mono text-sm text-zinc-200" data-testid="settings-bridge-login">
+              <div className="min-w-0 space-y-1">
+                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">লগইন</p>
+                <p className="break-all font-mono text-sm text-foreground" data-testid="settings-bridge-login">
                   {bridge?.loginMasked ?? '—'}
                 </p>
               </div>
-              <div className="space-y-1">
-                <p className="text-[11px] uppercase tracking-wide text-zinc-500">প্রয়োগকৃত রিভিশন</p>
-                <p className="font-mono text-sm text-zinc-200" data-testid="settings-bridge-revision">
+              <div className="min-w-0 space-y-1">
+                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">প্রয়োগকৃত রিভিশন</p>
+                <p className="break-all font-mono text-sm text-foreground" data-testid="settings-bridge-revision">
                   {bridge?.settingsRevision ?? '—'}
                 </p>
               </div>
@@ -275,25 +299,28 @@ export function BrokerSettingsView() {
 
           {/* Active source honesty line */}
           {!loading && !loadError && data && (
-            <p className="text-xs text-zinc-500" data-testid="settings-source-note">
+            <p
+              className="rounded-lg border border-border bg-muted/50 px-3 py-2 text-xs leading-relaxed text-muted-foreground"
+              data-testid="settings-source-note"
+            >
               {data.activeSource === 'db' && data.settings && (
                 <>
                   সক্রিয় ক্রেডেনশিয়ালের উৎস:{' '}
-                  <span className="text-zinc-300">সেটিংস ট্যাব (ডেটাবেজ, রিভিশন {data.settings.revision})</span>
+                  <span className="text-content">সেটিংস ট্যাব (ডেটাবেজ, রিভিশন {data.settings.revision})</span>
                   {data.settings.passwordUnreadable && (
-                    <span className="text-amber-400"> — সংরক্ষিত পাসওয়ার্ড পড়া যাচ্ছে না, আবার সংরক্ষণ করুন</span>
+                    <span className="text-sun"> — সংরক্ষিত পাসওয়ার্ড পড়া যাচ্ছে না, আবার সংরক্ষণ করুন</span>
                   )}
                 </>
               )}
               {data.activeSource === 'env' && data.envFallback && (
                 <>
                   সক্রিয় ক্রেডেনশিয়ালের উৎস:{' '}
-                  <span className="text-zinc-300">সার্ভার .env ({data.envFallback.server} · {data.envFallback.loginMasked})</span>{' '}
+                  <span className="text-content">সার্ভার .env ({data.envFallback.server} · {data.envFallback.loginMasked})</span>{' '}
                   — নিচের ফর্মে সংরক্ষণ করলে ভবিষ্যতে শুধু UI থেকে বদলাতে পারবেন
                 </>
               )}
               {data.activeSource === 'none' && (
-                <span className="text-amber-400">
+                <span className="text-sun">
                   কোনো ক্রেডেনশিয়াল কনফিগার করা নেই — নিচের ফর্মে Exness লগইন দিন
                 </span>
               )}
@@ -303,33 +330,39 @@ export function BrokerSettingsView() {
       </Card>
 
       {/* ── credentials form ────────────────────────────────────────────── */}
-      <Card className="border-zinc-800 bg-zinc-900/60" data-testid="settings-form-card">
+      <Card className="border-border bg-panel dark:shadow-none" data-testid="settings-form-card">
         <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2 text-base font-semibold text-zinc-100">
-            <KeyRound className="h-4 w-4 text-amber-400" aria-hidden />
+          <CardTitle className="flex items-center gap-2 text-base font-semibold text-foreground">
+            <KeyRound className="h-4 w-4 text-sun" aria-hidden />
             Exness MT5 ক্রেডেনশিয়াল
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="broker-server" className="text-zinc-300">
-                সার্ভার <span className="text-zinc-500">(যেমন Exness-MT5Trial6)</span>
+            <div className="min-w-0 space-y-2">
+              <Label
+                htmlFor="broker-server"
+                className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
+              >
+                সার্ভার <span className="font-normal normal-case tracking-normal text-muted-foreground/70">(যেমন Exness-MT5Trial6)</span>
               </Label>
               <Input
                 id="broker-server"
                 value={server}
                 onChange={(e) => setServer(e.target.value)}
                 placeholder="Exness-MT5Trial6"
-                className="border-zinc-700 bg-zinc-950/60 font-mono text-sm text-zinc-100"
+                className="h-10 max-w-full rounded-lg border-border bg-muted font-mono text-sm text-foreground focus-visible:ring-2 focus-visible:ring-ring dark:bg-muted"
                 autoComplete="off"
                 spellCheck={false}
                 data-testid="settings-input-server"
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="broker-login" className="text-zinc-300">
-                লগইন <span className="text-zinc-500">(নম্বর)</span>
+            <div className="min-w-0 space-y-2">
+              <Label
+                htmlFor="broker-login"
+                className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
+              >
+                লগইন <span className="font-normal normal-case tracking-normal text-muted-foreground/70">(নম্বর)</span>
               </Label>
               <Input
                 id="broker-login"
@@ -337,14 +370,17 @@ export function BrokerSettingsView() {
                 onChange={(e) => setLogin(e.target.value.replace(/[^0-9]/g, ''))}
                 placeholder="৪১৪…"
                 inputMode="numeric"
-                className="border-zinc-700 bg-zinc-950/60 font-mono text-sm text-zinc-100"
+                className="h-10 max-w-full rounded-lg border-border bg-muted font-mono text-sm text-foreground focus-visible:ring-2 focus-visible:ring-ring dark:bg-muted"
                 autoComplete="off"
                 data-testid="settings-input-login"
               />
             </div>
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="broker-password" className="text-zinc-300">
+          <div className="min-w-0 space-y-2">
+            <Label
+              htmlFor="broker-password"
+              className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
+            >
               পাসওয়ার্ড
             </Label>
             <div className="relative">
@@ -354,14 +390,14 @@ export function BrokerSettingsView() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Exness অ্যাকাউন্ট পাসওয়ার্ড"
-                className="border-zinc-700 bg-zinc-950/60 pr-11 font-mono text-sm text-zinc-100"
+                className="h-10 max-w-full rounded-lg border-border bg-muted pr-12 font-mono text-sm text-foreground focus-visible:ring-2 focus-visible:ring-ring dark:bg-muted"
                 autoComplete="new-password"
                 data-testid="settings-input-password"
               />
               <button
                 type="button"
                 onClick={() => setShowPassword((v) => !v)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1.5 text-zinc-500 hover:text-zinc-300 focus:outline-none focus:ring-2 focus:ring-amber-500/40"
+                className="absolute inset-y-0 right-0 flex w-10 items-center justify-center rounded-r-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 aria-label={showPassword ? 'পাসওয়ার্ড লুকান' : 'পাসওয়ার্ড দেখান'}
                 data-testid="settings-password-toggle"
               >
@@ -374,7 +410,7 @@ export function BrokerSettingsView() {
             <Button
               onClick={() => void onSave()}
               disabled={saving || loading}
-              className="gap-2 bg-amber-500 text-zinc-950 hover:bg-amber-400 disabled:opacity-50"
+              className="h-10 gap-2 px-5 font-medium"
               data-testid="settings-save-button"
             >
               {saving ? (
@@ -387,7 +423,7 @@ export function BrokerSettingsView() {
                 </>
               )}
             </Button>
-            <p className="text-xs text-zinc-500">
+            <p className="min-w-[180px] flex-1 text-xs leading-relaxed text-muted-foreground">
               সংরক্ষণ করলে ব্রিজ সাথে সাথে নতুন ক্রেডেনশিয়াল দিয়ে পুনঃসংযুক্ত হয় — কোনো রিস্টার্ট লাগে না।
             </p>
           </div>
@@ -396,41 +432,48 @@ export function BrokerSettingsView() {
             <div
               role="status"
               aria-live="polite"
-              className={`rounded-md border px-3 py-2 text-sm ${
+              className={`flex items-start gap-2 rounded-lg border px-3 py-2.5 text-sm ${
                 saveResult.kind === 'ok'
-                  ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+                  ? 'border-up/40 bg-up/10 text-up'
                   : saveResult.kind === 'warn'
-                    ? 'border-amber-500/30 bg-amber-500/10 text-amber-300'
-                    : 'border-red-500/30 bg-red-500/10 text-red-300'
+                    ? 'border-sun/40 bg-sun/10 text-sun'
+                    : 'border-down/40 bg-down/10 text-down'
               }`}
               data-testid="settings-save-result"
             >
-              {saveResult.text}
+              {saveResult.kind === 'ok' ? (
+                <BadgeCheck className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+              ) : saveResult.kind === 'warn' ? (
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+              ) : (
+                <XCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+              )}
+              <p className="min-w-0 leading-relaxed">{saveResult.text}</p>
             </div>
           )}
         </CardContent>
       </Card>
 
       {/* ── security notes ──────────────────────────────────────────────── */}
-      <Card className="border-zinc-800 bg-zinc-900/60" data-testid="settings-security-card">
+      <Card className="border-border bg-panel dark:shadow-none" data-testid="settings-security-card">
         <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2 text-base font-semibold text-zinc-100">
-            <ShieldCheck className="h-4 w-4 text-emerald-400" aria-hidden />
+          <CardTitle className="flex items-center gap-2 text-base font-semibold text-foreground">
+            <ShieldCheck className="h-4 w-4 text-up" aria-hidden />
             নিরাপত্তা
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <ul className="space-y-2 text-sm text-zinc-400">
+          <ul className="space-y-2.5 text-[13px] leading-relaxed text-content">
             <li className="flex items-start gap-2">
-              <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-zinc-500" aria-hidden />
+              <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
               পাসওয়ার্ড AES-256-GCM দিয়ে এনক্রিপ্ট হয়ে ডেটাবেজে থাকে — কোনো API কখনো এটি ফেরত দেয় না (মাস্কডও না)।
             </li>
             <li className="flex items-start gap-2">
-              <User className="mt-0.5 h-3.5 w-3.5 shrink-0 text-zinc-500" aria-hidden />
+              <User className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
               লগইন নম্বর শুধু মাস্কড আকারে দেখানো হয় (যেমন ৪১৪•••৭০) — UI, API ও লগে।
             </li>
             <li className="flex items-start gap-2">
-              <Server className="mt-0.5 h-3.5 w-3.5 shrink-0 text-zinc-500" aria-hidden />
+              <Server className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
               প্রথমবারের আগে .env-এর ক্রেডেনশিয়াল কাজ করে; একবার এখানে সংরক্ষণ করলে UI-ই একমাত্র উৎস।
             </li>
           </ul>

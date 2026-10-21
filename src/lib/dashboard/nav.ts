@@ -7,7 +7,7 @@
  * exactly one active view driven by this model.
  */
 
-export type TerminalView = 'dashboard' | 'chart' | 'chat' | 'history' | 'system' | 'settings';
+export type TerminalView = 'dashboard' | 'chart' | 'chat' | 'history' | 'analysis' | 'system' | 'settings';
 
 export interface NavItem {
   id: TerminalView;

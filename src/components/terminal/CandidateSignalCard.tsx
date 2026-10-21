@@ -15,14 +15,13 @@
 
 import { FlaskConical, Info } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-import { PriceLevelText } from './bits';
+import { LevelBox, OutcomeBadgeIcon, PriceLevelText, outcomeBadgeTokenClass } from './bits';
 import { buildCandidatePaperStrip } from '@/lib/dashboard/candidate-display';
 import {
   bnForCode,
   candidateModelBn,
   fmtDhaka,
   signalOutcomeBn,
-  signalOutcomeBadgeClass,
 } from '@/lib/dashboard/i18n';
 import type { SignalLatestResponse } from '@/lib/dashboard/types';
 import type { PriceDisplaySpec } from '@/lib/market/price-display';
@@ -51,74 +50,75 @@ export function CandidateSignalCard({
     <section
       aria-label="ক্যান্ডিডেট সিগন্যাল (গবেষণা)"
       data-testid="candidate-signal-card"
-      className="flex flex-col rounded-xl border border-amber-500/25 bg-zinc-900/40"
+      className="flex flex-col rounded-xl border border-border bg-panel"
     >
-      <div className="flex flex-wrap items-center gap-2 border-b border-zinc-800/80 px-3 py-2">
-        <FlaskConical className="h-4 w-4 text-amber-400" aria-hidden />
-        <h2 className="text-sm font-semibold text-zinc-100">ক্যান্ডিডেট সিগন্যাল</h2>
+      <div className="flex min-w-0 flex-wrap items-center gap-2 border-b border-border px-4 py-3">
+        <FlaskConical className="h-4 w-4 shrink-0 text-sun" aria-hidden />
+        <h2 className="min-w-0 text-sm font-semibold text-foreground">ক্যান্ডিডেট সিগন্যাল</h2>
         <Badge
           variant="outline"
           data-testid="candidate-research-badge"
-          className="border-amber-500/50 bg-amber-500/5 text-amber-300"
+          className="border-sun/50 bg-sun/10 text-[11px] text-sun"
         >
           গবেষণা
         </Badge>
         {candidate && (
           <Badge
             variant="outline"
-            className={`ml-auto ${signalOutcomeBadgeClass(candidate.evaluation.outcome)}`}
+            className={`ml-auto text-[11px] ${outcomeBadgeTokenClass(candidate.evaluation.outcome)}`}
             data-testid="candidate-outcome-badge"
           >
+            <OutcomeBadgeIcon outcome={candidate.evaluation.outcome} />
             {signalOutcomeBn[candidate.evaluation.outcome] ?? candidate.evaluation.outcome}
           </Badge>
         )}
       </div>
       {strategyVersion && (
-        <p className="border-b border-zinc-800/60 px-3 py-1.5 font-mono text-[10px] text-zinc-500" data-testid="candidate-strategy-version">
+        <p className="border-b border-border px-4 py-1.5 font-mono text-[10px] text-muted-foreground" data-testid="candidate-strategy-version">
           {strategyVersion}
         </p>
       )}
 
-      <div className="flex-1 space-y-3 p-3">
+      <div className="flex-1 space-y-4 p-4">
         {error ? (
-          <p className="rounded-lg border border-red-500/30 bg-red-500/5 p-2.5 text-xs leading-relaxed text-zinc-400" role="alert">
-            ক্যান্ডিডেট ডেটা এখন অনুপলব্ধ — বেসলাইন সিগন্যালের সাথে একই API সংযোগ (<span className="font-mono text-red-300">{error}</span>)। সংযোগ ফিরলে এখানে ফলাফল আসবে।
+          <p className="rounded-lg border border-down/40 bg-down/10 p-3 text-xs leading-relaxed text-content" role="alert">
+            ক্যান্ডিডেট ডেটা এখন অনুপলব্ধ — বেসলাইন সিগন্যালের সাথে একই API সংযোগ (<span className="font-mono text-down">{error}</span>)। সংযোগ ফিরলে এখানে ফলাফল আসবে।
           </p>
         ) : loading && !signalLatest ? (
           <div className="space-y-2" aria-hidden>
-            <div className="h-4 w-2/3 animate-pulse rounded bg-zinc-800" />
-            <div className="h-4 w-1/2 animate-pulse rounded bg-zinc-800" />
-            <div className="h-8 w-full animate-pulse rounded bg-zinc-800" />
+            <div className="h-4 w-2/3 animate-pulse rounded bg-surface" />
+            <div className="h-4 w-1/2 animate-pulse rounded bg-surface" />
+            <div className="h-8 w-full animate-pulse rounded bg-surface" />
           </div>
         ) : !candidate ? (
-          <p className="text-xs leading-relaxed text-zinc-500" data-testid="candidate-empty-state">
+          <p className="text-xs leading-relaxed text-muted-foreground" data-testid="candidate-empty-state">
             প্রথম ক্যান্ডিডেট মূল্যায়ন পরবর্তী সাইকেলে আসবে — এখানে কিছু বানানো হয় না (সৎ খালি অবস্থা)।
           </p>
         ) : (
           <>
             {/* Meta: decision candle + evaluation time + model badge */}
             <div className="grid grid-cols-2 gap-2 text-[11px]">
-              <div>
-                <p className="text-zinc-500">সিদ্ধান্ত ক্যান্ডেল (M15)</p>
-                <p className="font-mono text-zinc-200">
+              <div className="min-w-0">
+                <p className="leading-snug text-muted-foreground">সিদ্ধান্ত ক্যান্ডেল (M15)</p>
+                <p className="break-words font-mono leading-snug text-foreground/90">
                   {candidate.evaluation.decisionCandleTimeUtc ? fmtDhaka(candidate.evaluation.decisionCandleTimeUtc) : '—'}
                 </p>
               </div>
-              <div>
-                <p className="text-zinc-500">মূল্যায়ন সময় (ঢাকা)</p>
-                <p className="font-mono text-zinc-200">{fmtDhaka(candidate.evaluation.createdAt)}</p>
+              <div className="min-w-0">
+                <p className="leading-snug text-muted-foreground">মূল্যায়ন সময় (ঢাকা)</p>
+                <p className="break-words font-mono leading-snug text-foreground/90">{fmtDhaka(candidate.evaluation.createdAt)}</p>
               </div>
             </div>
             {isSetup && candidate.model && (
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
                 <Badge
                   variant="outline"
                   data-testid="candidate-model-badge"
-                  className="border-amber-500/40 bg-amber-500/10 text-amber-300"
+                  className="border-sun/40 bg-sun/10 text-[11px] text-sun"
                 >
                   {candidateModelBn[candidate.model] ?? `মডেল ${candidate.model}`}
                 </Badge>
-                <span className="text-[10px] leading-relaxed text-zinc-500">
+                <span className="min-w-0 break-words text-[10px] leading-relaxed text-muted-foreground">
                   — এই সেটআপটি যে মডেল থেকে এসেছে (A = কাঠামো-রিটেস্ট, B = পুলব্যাক, C = রেঞ্জ-সুইপ)।
                 </span>
               </div>
@@ -130,7 +130,7 @@ export function CandidateSignalCard({
                 <LevelBox
                   label="দিক"
                   value={candidate.levels.direction === 'BUY' ? 'BUY (লং)' : 'SELL (শর্ট)'}
-                  cls={candidate.levels.direction === 'BUY' ? 'text-emerald-400' : 'text-red-400'}
+                  cls={candidate.levels.direction === 'BUY' ? 'text-up' : 'text-down'}
                 />
                 <LevelBox
                   label="এন্ট্রি রেফারেন্স"
@@ -139,17 +139,17 @@ export function CandidateSignalCard({
                 <LevelBox
                   label="স্টপ-লস"
                   value={<PriceLevelText value={candidate.levels.stopLoss} spec={priceSpec} />}
-                  cls="text-red-300"
+                  cls="text-down"
                 />
                 <LevelBox
                   label={`টার্গেট (R:R 1:${candidate.levels.rewardRiskRatio.toFixed(2)})`}
                   value={<PriceLevelText value={candidate.levels.target} spec={priceSpec} />}
-                  cls="text-emerald-300"
+                  cls="text-up"
                 />
                 <LevelBox
                   label="ইনভ্যালিডেশন লেভেল"
                   value={<PriceLevelText value={candidate.levels.invalidationLevel} spec={priceSpec} />}
-                  cls="text-amber-300"
+                  cls="text-sun"
                 />
                 <LevelBox
                   label="মেয়াদ"
@@ -157,7 +157,7 @@ export function CandidateSignalCard({
                 />
               </div>
             ) : (
-              <p className="text-[11px] leading-relaxed text-zinc-500">
+              <p className="text-[11px] leading-relaxed text-muted-foreground">
                 এই ফলাফলে কোনো লেভেল নেই — শুধুমাত্র BUY_SETUP/SELL_SETUP হলে সম্পূর্ণ লেভেল দেওয়া হয়।
               </p>
             )}
@@ -169,13 +169,13 @@ export function CandidateSignalCard({
                   <li
                     key={c}
                     title={c}
-                    className="rounded-full border border-amber-500/25 bg-amber-500/5 px-2 py-1 text-[10px] leading-relaxed text-zinc-400"
+                    className="rounded-full border border-sun/25 bg-sun/5 px-2 py-1 text-[10px] leading-relaxed text-content"
                   >
-                    <span className="font-mono text-amber-400">{c}</span> — {bnForCode(c)}
+                    <span className="font-mono text-sun">{c}</span> — {bnForCode(c)}
                   </li>
                 ))}
                 {compact && candidate.evaluation.reasonCodes.length > 3 && (
-                  <li className="px-1 py-1 text-[10px] text-zinc-400">
+                  <li className="px-1 py-1 text-[10px] text-content">
                     +{candidate.evaluation.reasonCodes.length - 3}টি কোড — সিগন্যাল ভিউতে সম্পূর্ণ তালিকা
                   </li>
                 )}
@@ -185,52 +185,52 @@ export function CandidateSignalCard({
             {/* Forward-paper strip (research-only protocol tracking) */}
             {paper && (
               <div
-                className="space-y-1.5 rounded-lg border border-zinc-800 bg-zinc-950/60 p-2.5"
+                className="space-y-1.5 rounded-lg border border-border bg-surface p-3"
                 role="region"
                 aria-label="ফরোয়ার্ড পেপার (ক্যান্ডিডেট)"
                 data-testid="candidate-paper-stats"
               >
-                <p className="flex items-center gap-1.5 text-[11px] font-semibold text-zinc-300">
-                  <Info className="h-3.5 w-3.5 text-amber-400" aria-hidden /> ফরোয়ার্ড পেপার (ক্যান্ডিডেট)
+                <p className="flex items-center gap-1.5 text-[11px] font-semibold text-content">
+                  <Info className="h-3.5 w-3.5 text-sun" aria-hidden /> ফরোয়ার্ড পেপার (ক্যান্ডিডেট)
                   <span
-                    className="font-normal text-zinc-500"
+                    className="font-normal text-muted-foreground"
                     title="phase11-candidate-forward/1 প্রোটোকল — প্রতিটি ক্যান্ডিডেট সেটআপ সম্পূর্ণ হলে তাদের SL/TP/মেয়াদ ফলাফল কাগজে (পেপারে) অনুসরণ করা হয়। কোনো আসল ট্রেড হয় না।"
                   >
                     (প্রোটোকল ট্র্যাকিং)
                   </span>
                 </p>
                 {paper.isEmpty ? (
-                  <p className="text-[11px] leading-relaxed text-zinc-500" data-testid="candidate-paper-empty">
+                  <p className="text-[11px] leading-relaxed text-muted-foreground" data-testid="candidate-paper-empty">
                     {paper.emptyLine}
                   </p>
                 ) : (
                   <>
-                    <p className="text-[11px] leading-relaxed text-zinc-400">{paper.countsLine}</p>
-                    <p className="text-[11px] leading-relaxed text-zinc-400">{paper.resolvedLine}</p>
+                    <p className="text-[11px] leading-relaxed text-content">{paper.countsLine}</p>
+                    <p className="text-[11px] leading-relaxed text-content">{paper.resolvedLine}</p>
                     {paper.unobservableLine && (
-                      <p className="text-[10px] leading-relaxed text-zinc-500">{paper.unobservableLine}</p>
+                      <p className="text-[10px] leading-relaxed text-muted-foreground">{paper.unobservableLine}</p>
                     )}
                   </>
                 )}
-                <p className="text-[11px] leading-relaxed text-zinc-400" data-testid="candidate-paper-floor">
+                <p className="text-[11px] leading-relaxed text-content" data-testid="candidate-paper-floor">
                   {paper.floorLine}
                 </p>
                 <p className="flex flex-wrap items-center gap-1.5 text-[11px]">
-                  <span className="text-zinc-500">রায়:</span>
+                  <span className="text-muted-foreground">রায়:</span>
                   <Badge
                     variant="outline"
                     data-testid="candidate-paper-verdict"
-                    className={
+                    className={`text-[11px] ${
                       candidate.paperStats.verdict?.conclusion === 'CONTINUE_FORWARD_RESEARCH'
-                        ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
-                        : 'border-amber-500/40 bg-amber-500/10 text-amber-400'
-                    }
+                        ? 'border-up/40 bg-up/10 text-up'
+                        : 'border-sun/40 bg-sun/10 text-sun'
+                    }`}
                   >
                     {paper.conclusionLabel}
                   </Badge>
                 </p>
                 {paper.stopLine && (
-                  <p className="rounded border border-red-500/30 bg-red-500/5 p-1.5 text-[10px] leading-relaxed text-red-300" role="alert">
+                  <p className="rounded-md border border-down/40 bg-down/10 p-1.5 text-[10px] leading-relaxed text-down" role="alert">
                     {paper.stopLine}
                   </p>
                 )}
@@ -241,24 +241,15 @@ export function CandidateSignalCard({
       </div>
 
       {/* Explainer — the candidate never trades */}
-      <div className="border-t border-zinc-800/80 p-2.5">
+      <div className="border-t border-border px-4 py-3">
         <p
-          className="text-[10px] leading-relaxed text-zinc-500"
+          className="text-[10px] leading-relaxed text-muted-foreground"
           title="ক্যান্ডিডেট কৌশলটি বেসলাইনের থেকে আলাদা — আলাদা টেবিলে, আলাদা আঙ্গুলছাপ-নামস্থানে সংরক্ষিত। প্রতি মূল্যায়ন-সাইকেলে বেসলাইনের পাশাপাশি চলে এবং ফলাফল কেবল গবেষণার জন্য; এই গবেষণা-কৌশলটি থেকে কোনো অর্ডার কখনো যায় না (লাইভ অর্ডার কেবল স্ক্যাল্পার পাইপলাইন থেকে)।"
         >
           গবেষণা ব্যাখ্যা: ক্যান্ডিডেট একটি পৃথক গবেষণা-কৌশল — বেসলাইনের পাশাপাশি প্রতি সাইকেলে চলে;{' '}
-          <span className="text-amber-400/90">এটি কখনো ট্রেড করে না</span> এবং বেসলাইন সিগন্যালের সাথে মেশানো হয় না।
+          <span className="text-sun/90">এটি কখনো ট্রেড করে না</span> এবং বেসলাইন সিগন্যালের সাথে মেশানো হয় না।
         </p>
       </div>
     </section>
-  );
-}
-
-function LevelBox({ label, value, cls }: { label: string; value: React.ReactNode; cls?: string }) {
-  return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-2">
-      <p className="text-[10px] text-zinc-500">{label}</p>
-      <p className={`mt-0.5 font-mono text-xs font-semibold ${cls ?? 'text-zinc-200'}`}>{value}</p>
-    </div>
   );
 }

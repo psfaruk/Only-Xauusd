@@ -51,6 +51,40 @@ import type { PriceDisplaySpec } from '@/lib/market/price-display';
 
 const EMA_COLORS = { ema20: '#fbbf24', ema50: '#fb923c', ema200: '#f472b6' } as const;
 
+/**
+ * Task 39 (UI-03) — theme-aware chart chrome. Reads the design tokens from
+ * the document root so the chart follows the active sky-terminal theme
+ * (dark navy ⇄ clean white). Candle bodies/wicks and EMA lines stay constant
+ * (data-encoding colors that read well on both surfaces).
+ */
+function chartChrome() {
+  const v = (name: string, fallback: string) =>
+    getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+  const panel = v('--panel', '#111c2e');
+  const content = v('--content', '#c3d2e8');
+  const muted = v('--muted', '#17253c');
+  const mutedFg = v('--muted-foreground', '#9fb0c7');
+  const surface = v('--surface', '#162338');
+  const border = v('--border', '#26364d');
+  return {
+    layout: {
+      background: { type: ColorType.Solid, color: panel },
+      textColor: content,
+    },
+    grid: {
+      vertLines: { color: muted },
+      horzLines: { color: muted },
+    },
+    crosshair: {
+      mode: CrosshairMode.Normal,
+      vertLine: { color: mutedFg, labelBackgroundColor: surface },
+      horzLine: { color: mutedFg, labelBackgroundColor: surface },
+    },
+    rightPriceScale: { borderColor: border },
+    timeScale: { borderColor: border },
+  } as const;
+}
+
 export function ChartPanel({
   symbol,
   priceSpec,
@@ -171,23 +205,13 @@ export function ChartPanel({
 
     const chart = createChart(container, {
       autoSize: true,
+      ...chartChrome(),
       layout: {
-        background: { type: ColorType.Solid, color: '#09090b' },
-        textColor: '#a1a1aa',
+        ...chartChrome().layout,
         fontFamily: 'var(--font-bengali), system-ui, sans-serif',
         attributionLogo: false,
       },
-      grid: {
-        vertLines: { color: '#18181b' },
-        horzLines: { color: '#18181b' },
-      },
-      crosshair: {
-        mode: CrosshairMode.Normal,
-        vertLine: { color: '#52525b', labelBackgroundColor: '#3f3f46' },
-        horzLine: { color: '#52525b', labelBackgroundColor: '#3f3f46' },
-      },
-      rightPriceScale: { borderColor: '#27272a' },
-      timeScale: { borderColor: '#27272a', timeVisible: true, secondsVisible: false, rightOffset: 4 },
+      timeScale: { ...chartChrome().timeScale, timeVisible: true, secondsVisible: false, rightOffset: 4 },
       localization: {
         // UTC labels — honest timestamps (Dhaka conversion shown in text UI)
         timeFormatter: (t: Time) => new Date((t as number) * 1000).toISOString().slice(11, 16) + ' UTC',
@@ -199,8 +223,8 @@ export function ChartPanel({
       downColor: '#dc2626',
       borderUpColor: '#16a34a',
       borderDownColor: '#dc2626',
-      wickUpColor: '#4ade80',
-      wickDownColor: '#f87171',
+      wickUpColor: '#22c55e',
+      wickDownColor: '#ef4444',
       priceLineVisible: true,
       priceLineColor: '#fbbf24',
       priceLineStyle: LineStyle.Dotted,
@@ -231,6 +255,30 @@ export function ChartPanel({
       markersRef.current = null;
       priceLinesRef.current = [];
     };
+  }, []);
+
+  // ---- Task 39 — theme sync: re-apply chart chrome when the theme flips -----
+  // A MutationObserver on <html class> is used deliberately: next-themes
+  // flips the class in a PARENT effect (after child effects), so reacting to
+  // `resolvedTheme` would read the OLD computed colors. The observer fires
+  // AFTER the class mutation, so chartChrome() always reads the live theme.
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    const apply = () => {
+      try {
+        chart.applyOptions(chartChrome());
+      } catch {
+        // chart already disposed during theme transition
+      }
+    };
+    apply();
+    const observer = new MutationObserver(apply);
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['class'],
+    });
+    return () => observer.disconnect();
   }, []);
 
   // ---- Data → series ----------------------------------------------------------
@@ -277,7 +325,7 @@ export function ChartPanel({
           color: e.direction === 'bullish' ? '#22c55e' : '#ef4444',
           shape: e.direction === 'bullish' ? 'arrowUp' : 'arrowDown',
           text: `${e.type} ${e.direction === 'bullish' ? '↑' : '↓'}`,
-          size: 1,
+          size: 2,
         });
       }
     }
@@ -362,13 +410,13 @@ export function ChartPanel({
   return (
     <section
       aria-label="XAUUSDm ক্যান্ডেলস্টিক চার্ট"
-      className="flex h-full flex-col rounded-xl border border-zinc-800 bg-zinc-900/40"
+      className="flex h-full flex-col rounded-xl border border-border bg-panel"
       data-testid="chart-panel"
     >
       {/* Toolbar: timeframes + toggles */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-zinc-800/80 px-3 py-2">
+      <div className="flex flex-wrap items-center gap-2 border-b border-border/80 px-3 py-2">
         <div
-          className="flex overflow-hidden rounded-lg border border-zinc-700"
+          className="flex overflow-hidden rounded-lg border border-border-strong"
           role="tablist"
           aria-label="টাইমফ্রেম নির্বাচন"
         >
@@ -382,8 +430,8 @@ export function ChartPanel({
               onClick={() => setTf(t)}
               className={`min-h-[24px] min-w-[44px] px-2.5 py-1 font-mono text-xs font-semibold transition-colors ${
                 tf === t
-                  ? 'bg-amber-500/20 text-amber-300'
-                  : 'bg-zinc-900/60 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
+                  ? 'bg-sun/20 text-sun'
+                  : 'bg-panel text-content hover:bg-surface hover:text-foreground/90'
               }`}
             >
               {t}
@@ -403,8 +451,8 @@ export function ChartPanel({
               title={e.pts ? `${e.label} দেখান/লুকান` : `${e.label}: পর্যাপ্ত ইতিহাস নেই (সৎ অবস্থা)`}
               className={`min-h-[24px] rounded-full border px-2 py-0.5 font-mono text-[10px] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
                 e.show && e.pts
-                  ? 'border-zinc-600 bg-zinc-800/80 text-zinc-200'
-                  : 'border-zinc-800 bg-transparent text-zinc-600'
+                  ? 'border-border-strong bg-surface text-foreground/90'
+                  : 'border-border bg-transparent text-muted-foreground'
               }`}
             >
               <span
@@ -425,7 +473,7 @@ export function ChartPanel({
             disabled={loading}
             aria-label="চার্ট ডেটা রিফ্রেশ"
             data-testid="chart-refresh"
-            className="h-7 w-7 p-0 text-zinc-400 hover:text-amber-300"
+            className="h-7 w-7 p-0 text-content hover:text-sun"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} aria-hidden />
           </Button>
@@ -434,23 +482,23 @@ export function ChartPanel({
 
       {/* OHLC legend row (real last candle; tick-merged when the live stream is flowing) */}
       {lastCandle && (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-1.5 font-mono text-[11px] text-zinc-400" data-testid="chart-legend">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-1.5 font-mono text-[11px] text-content" data-testid="chart-legend">
           {liveLanded && (
-            <span className="flex items-center gap-1 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-400" title="টিক-স্ট্রিম থেকে রিয়েল-টাইম আপডেট (শুধু প্রেজেন্টেশন — সার্ভার ডেটাই সত্য)">
+            <span className="flex items-center gap-1 rounded-full border border-up/40 bg-up/10 px-1.5 py-0.5 text-[9px] font-semibold text-up" title="টিক-স্ট্রিম থেকে রিয়েল-টাইম আপডেট (শুধু প্রেজেন্টেশন — সার্ভার ডেটাই সত্য)">
               <span className="relative inline-flex h-1.5 w-1.5">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-up opacity-75" />
+                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-up" />
               </span>
               লাইভ
             </span>
           )}
-          <span className="text-zinc-500">{new Date(lastCandle.t * 1000).toISOString().slice(0, 16).replace('T', ' ')} UTC{lastCandle.forming ? ' · ফর্মিং' : ''}</span>
-          <span>O <span className="text-zinc-200">{lastCandle.o.toFixed(priceSpec.verified && data?.digits ? data.digits : 2)}</span></span>
-          <span>H <span className="text-zinc-200">{lastCandle.h.toFixed(priceSpec.verified && data?.digits ? data.digits : 2)}</span></span>
-          <span>L <span className="text-zinc-200">{lastCandle.l.toFixed(priceSpec.verified && data?.digits ? data.digits : 2)}</span></span>
-          <span>C <span className={lastCandle.c >= lastCandle.o ? 'text-emerald-400' : 'text-red-400'}>{lastCandle.c.toFixed(priceSpec.verified && data?.digits ? data.digits : 2)}</span></span>
+          <span className="text-muted-foreground">{new Date(lastCandle.t * 1000).toISOString().slice(0, 16).replace('T', ' ')} UTC{lastCandle.forming ? ' · ফর্মিং' : ''}</span>
+          <span>O <span className="text-foreground/90">{lastCandle.o.toFixed(priceSpec.verified && data?.digits ? data.digits : 2)}</span></span>
+          <span>H <span className="text-foreground/90">{lastCandle.h.toFixed(priceSpec.verified && data?.digits ? data.digits : 2)}</span></span>
+          <span>L <span className="text-foreground/90">{lastCandle.l.toFixed(priceSpec.verified && data?.digits ? data.digits : 2)}</span></span>
+          <span>C <span className={lastCandle.c >= lastCandle.o ? 'text-up' : 'text-down'}>{lastCandle.c.toFixed(priceSpec.verified && data?.digits ? data.digits : 2)}</span></span>
           {changeVsPrev !== null && (
-            <span className={changeVsPrev >= 0 ? 'text-emerald-400' : 'text-red-400'}>
+            <span className={changeVsPrev >= 0 ? 'text-up' : 'text-down'}>
               {changeVsPrev >= 0 ? '▲' : '▼'} {Math.abs(changeVsPrev).toFixed(priceSpec.verified && data?.digits ? data.digits : 2)}
             </span>
           )}
@@ -462,9 +510,9 @@ export function ChartPanel({
         <div ref={containerRef} className={`w-full ${heightClass}`} role="img" aria-label={`${symbol} ${tf} ক্যান্ডেলস্টিক চার্ট`} />
 
         {loading && data === null && (
-          <div className="absolute inset-0 flex items-center justify-center bg-zinc-950/70">
+          <div className="absolute inset-0 flex items-center justify-center bg-terminal">
             <Skeleton className="h-full w-full rounded-none" />
-            <span className="absolute text-xs text-zinc-400">ব্রোকার-যাচাইকৃত ক্যান্ডেল লোড হচ্ছে…</span>
+            <span className="absolute text-xs text-content">ব্রোকার-যাচাইকৃত ক্যান্ডেল লোড হচ্ছে…</span>
           </div>
         )}
 
@@ -472,21 +520,21 @@ export function ChartPanel({
          * previous TF's chart still on screen, dim it + spinner so the frame
          * is never mistaken for the newly-selected timeframe's data. */}
         {loading && data !== null && (
-          <div className="absolute inset-0 flex items-center justify-center bg-zinc-950/60" role="status" aria-label="নতুন টাইমফ্রেম লোড হচ্ছে">
-            <span className="flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900/90 px-3 py-2 text-xs text-zinc-300">
-              <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-400" aria-hidden />
+          <div className="absolute inset-0 flex items-center justify-center bg-terminal" role="status" aria-label="নতুন টাইমফ্রেম লোড হচ্ছে">
+            <span className="flex items-center gap-2 rounded-lg border border-border-strong bg-panel px-3 py-2 text-xs text-content">
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-sun" aria-hidden />
               {tf} ডেটা লোড হচ্ছে…
             </span>
           </div>
         )}
 
         {error && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-zinc-950/85 p-6 text-center" role="alert">
-            <AlertTriangle className="h-8 w-8 text-red-400" aria-hidden />
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-terminal p-6 text-center" role="alert">
+            <AlertTriangle className="h-8 w-8 text-down" aria-hidden />
             <div>
-              <p className="text-sm font-semibold text-red-300">চার্ট ডেটা আনা যায়নি</p>
-              <p className="mt-1 font-mono text-xs text-zinc-400">{error}</p>
-              <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+              <p className="text-sm font-semibold text-down">চার্ট ডেটা আনা যায়নি</p>
+              <p className="mt-1 font-mono text-xs text-content">{error}</p>
+              <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
                 কোনো ডেটা বানানো হয়নি — সংযোগ ফিরলে আবার চেষ্টা করুন।
               </p>
             </div>
@@ -497,22 +545,22 @@ export function ChartPanel({
         )}
 
         {!loading && !error && data && freshness === 'empty' && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-zinc-950/85 p-6 text-center" role="status">
-            <LineChart className="h-8 w-8 text-zinc-600" aria-hidden />
-            <p className="text-sm text-zinc-400">এই টাইমফ্রেমে এখনো কোনো ক্যান্ডেল সংরক্ষিত হয়নি — সৎ খালি অবস্থা।</p>
-            <p className="text-[11px] text-zinc-500">শিডিউল্ড সিঙ্ক (প্রতি ৫ মিনিট) ক্যান্ডেল জমালে চার্ট স্বয়ংক্রিয়ভাবে আসবে।</p>
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-terminal p-6 text-center" role="status">
+            <LineChart className="h-8 w-8 text-muted-foreground" aria-hidden />
+            <p className="text-sm text-content">এই টাইমফ্রেমে এখনো কোনো ক্যান্ডেল সংরক্ষিত হয়নি — সৎ খালি অবস্থা।</p>
+            <p className="text-[11px] text-muted-foreground">শিডিউল্ড সিঙ্ক (প্রতি ৫ মিনিট) ক্যান্ডেল জমালে চার্ট স্বয়ংক্রিয়ভাবে আসবে।</p>
           </div>
         )}
 
         {data && freshness === 'stale' && (
-          <div className="absolute left-3 top-3 flex items-center gap-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 px-2.5 py-1.5 text-[11px] text-amber-300" role="status">
+          <div className="absolute left-3 top-3 flex items-center gap-1.5 rounded-lg border border-sun/40 bg-sun/10 px-2.5 py-1.5 text-[11px] text-sun" role="status">
             <AlertTriangle className="h-3.5 w-3.5" aria-hidden />
             ডেটা পুরোনো (STALE) — শেষ বন্ধ ক্যান্ডেল {data.meta.lastClosedUtcSec ? fmtDhaka(new Date(data.meta.lastClosedUtcSec * 1000).toISOString()) : '—'}
           </div>
         )}
 
         {disconnected && !error && (
-          <div className="absolute right-3 top-3 flex items-center gap-1.5 rounded-lg border border-red-500/40 bg-red-500/10 px-2.5 py-1.5 text-[11px] text-red-300" role="status">
+          <div className="absolute right-3 top-3 flex items-center gap-1.5 rounded-lg border border-down/40 bg-down/10 px-2.5 py-1.5 text-[11px] text-down" role="status">
             <WifiOff className="h-3.5 w-3.5" aria-hidden />
             ব্রিজ সংযোগ বিচ্ছিন্ন — দেখানো ক্যান্ডেলগুলো সংরক্ষিত ইতিহাস (সতেজ নয়)
           </div>
@@ -521,28 +569,28 @@ export function ChartPanel({
 
       {/* Structure summary (from the same deterministic engine payload) */}
       {showSummary && data && data.meta.closedCount > 0 && (
-        <div className="flex flex-wrap items-center gap-2 border-t border-zinc-800/80 px-3 py-2 text-[11px]" data-testid="chart-summary">
+        <div className="flex flex-wrap items-center gap-2 border-t border-border/80 px-3 py-2 text-[11px]" data-testid="chart-summary">
           <Badge
             variant="outline"
             className={
               data.structure.trend === 'bullish'
-                ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
+                ? 'border-up/40 bg-up/10 text-up'
                 : data.structure.trend === 'bearish'
-                  ? 'border-red-500/40 bg-red-500/10 text-red-300'
-                  : 'border-zinc-600/50 bg-zinc-700/20 text-zinc-400'
+                  ? 'border-down/40 bg-down/10 text-down'
+                  : 'border-border-strong/50 bg-muted text-content'
             }
           >
             {tf} কাঠামো: {trendBn[data.structure.trend] ?? data.structure.trend}
           </Badge>
-          <span className="font-mono text-zinc-500">
+          <span className="font-mono text-muted-foreground">
             {data.structure.highLabel}/{data.structure.lowLabel}
           </span>
           {data.events.length > 0 && (() => {
             const e = data.events[data.events.length - 1];
             return (
-              <span className="text-zinc-400">
+              <span className="text-content">
                 সর্বশেষ ইভেন্ট:{' '}
-                <span className={e.direction === 'bullish' ? 'text-emerald-400' : 'text-red-400'}>
+                <span className={e.direction === 'bullish' ? 'text-up' : 'text-down'}>
                   {e.type} {directionBn[e.direction] ?? e.direction}
                 </span>{' '}
                 @ <PriceLevelText value={e.level} spec={priceSpec} className="font-mono" />
@@ -550,19 +598,19 @@ export function ChartPanel({
             );
           })()}
           {data.levels.lastSwingHigh && (
-            <span className="text-zinc-500">
-              S/R হাই <PriceLevelText value={data.levels.lastSwingHigh.price} spec={priceSpec} className="font-mono text-zinc-300" />
+            <span className="text-muted-foreground">
+              S/R হাই <PriceLevelText value={data.levels.lastSwingHigh.price} spec={priceSpec} className="font-mono text-content" />
             </span>
           )}
           {data.levels.lastSwingLow && (
-            <span className="text-zinc-500">
-              S/R লো <PriceLevelText value={data.levels.lastSwingLow.price} spec={priceSpec} className="font-mono text-zinc-300" />
+            <span className="text-muted-foreground">
+              S/R লো <PriceLevelText value={data.levels.lastSwingLow.price} spec={priceSpec} className="font-mono text-content" />
             </span>
           )}
-          <span className="ml-auto text-zinc-400">
+          <span className="ml-auto text-content">
             {data.meta.closedCount} বন্ধ ক্যান্ডেল{data.meta.formingIncluded ? ' + ১টি ফর্মিং' : ''}
             {data.meta.insufficient.length > 0 && (
-              <span className="ml-1 text-amber-500/80" title="পর্যাপ্ত ইতিহাস নেই — সৎ অবস্থা">
+              <span className="ml-1 text-sun/80" title="পর্যাপ্ত ইতিহাস নেই — সৎ অবস্থা">
                 · {data.meta.insufficient.join('/')} অনুপলব্ধ
               </span>
             )}
@@ -592,8 +640,8 @@ function ToggleChip({
       data-testid={dataTestId}
       className={`min-h-[24px] rounded-full border px-2 py-0.5 text-[10px] transition-colors ${
         active
-          ? 'border-zinc-600 bg-zinc-800/80 text-zinc-200'
-          : 'border-zinc-800 bg-transparent text-zinc-600'
+          ? 'border-border-strong bg-surface text-foreground/90'
+          : 'border-border bg-transparent text-muted-foreground'
       }`}
     >
       {label}
