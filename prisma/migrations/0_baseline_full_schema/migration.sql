@@ -401,3 +401,15 @@ CREATE INDEX "RiskCheck_signalId_idx" ON "RiskCheck"("signalId");
 -- CreateIndex
 CREATE INDEX "ExecutionLog_signalId_idx" ON "ExecutionLog"("signalId");
 
+
+-- CreateTable (Task 33/35 — BrokerSettings: UI-imported credentials, AES-256-GCM at rest)
+CREATE TABLE "BrokerSettings" (
+    "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT DEFAULT 1,
+    "server" TEXT NOT NULL,
+    "login" TEXT NOT NULL,
+    "passwordEnc" TEXT NOT NULL,
+    "revision" INTEGER NOT NULL DEFAULT 1,
+    "updatedBy" TEXT NOT NULL DEFAULT 'ui',
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL
+);

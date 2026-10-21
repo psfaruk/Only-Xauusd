@@ -12,7 +12,10 @@
  * baseline (0_baseline_full_schema) generated from the schema itself.
  *
  * Phase 11-E (2026-10-20): PaperCandidateOutcome added ADDITIVELY to both the
- * schema and the consolidated baseline — the pinned list is now 17 tables.
+ * schema and the consolidated baseline — the pinned list became 17 tables.
+ *
+ * Task 33/35 (2026-10-21): BrokerSettings added ADDITIVELY to both the schema
+ * and the consolidated baseline — the pinned list is now 18 tables.
  *
  * This test proves, on every run, that a brand-new database provisioned with
  * `prisma migrate deploy` receives EXACTLY the application tables defined
@@ -34,6 +37,7 @@ const APP_TABLES = [
   'AiReview',
   'AnalysisRun',
   'BacktestRun',
+  'BrokerSettings',
   'DataQualityIssue',
   'ExecutionLog',
   'MarketCandle',
@@ -75,7 +79,7 @@ function runPrisma(args: string[], dbUrl: string) {
 }
 
 describe('migration chain integrity (master audit fix E1)', () => {
-  test('prisma migrate deploy on a fresh DB creates exactly the 16 schema tables', () => {
+  test('prisma migrate deploy on a fresh DB creates exactly the 18 schema tables', () => {
     const dir = mkdtempSync(join(tmpdir(), 'mig-chain-'));
     const dbFile = join(dir, 'scratch.db');
     try {
