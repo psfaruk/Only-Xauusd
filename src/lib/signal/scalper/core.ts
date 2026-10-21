@@ -412,18 +412,27 @@ function judgeTf(
   //    the fast EMA — buy the pullback leg, never the top of an extended
   //    run (the empirical SL-farm: 2025-10-21 BUY@4119.9/4122.7 chasing a
   //    ~10-point rally). 0 disables the guard (legacy behaviour).
+  //    Task 38 (backtest-driven): momentumEnabled=false kills the reflex
+  //    entirely; momentumSourceTfOnly restricts it to one TF (M1/M5
+  //    micro-trend momentum was the single biggest bleeder: 39 trades,
+  //    33% win, −8.64R over 34h of replayed gold).
+  const momentumAllowed =
+    rules.momentumEnabled !== false &&
+    (rules.momentumSourceTfOnly == null || rules.momentumSourceTfOnly === tf);
   const extensionOk = (price: number, ema: number, side: 'BUY' | 'SELL'): boolean => {
     if (!(rules.maxExtensionAtr > 0) || atrVal === null) return true;
     const extension = side === 'BUY' ? price - ema : ema - price;
     return extension <= rules.maxExtensionAtr * atrVal;
   };
   const momentumBuy =
+    momentumAllowed &&
     fastVal > slowVal &&
     decision.close > fastVal &&
     extensionOk(decision.close, fastVal, 'BUY') &&
     rsiVal >= rules.momentumRsiMin &&
     rsiVal <= rules.momentumRsiMax;
   const momentumSell =
+    momentumAllowed &&
     fastVal < slowVal &&
     decision.close < fastVal &&
     extensionOk(decision.close, fastVal, 'SELL') &&
@@ -451,21 +460,24 @@ function judgeTf(
   //    momentum = continuation (with the structure), reversal = confirmed
   //    (sweep/CHoCH). A refused trigger is recorded honestly on the
   //    judgement (gate) — the UI/audit show WHY the agent said no.
+  //    rules.smc.legacyGate=false (backtest A/B / ops kill-switch) passes
+  //    null evidence — the gate then allows everything (pre-Task-37).
+  const gateEvidence = rules.smc.legacyGate ? evaluation.smcEvidence : null;
   const gateParams = {
     maxBarsSinceEvent: rules.smc.params.maxBarsSinceEvent,
     maxBarsSinceSweep: rules.smc.params.maxBarsSinceSweep,
   };
   const momentumBuyGate = legacyStructureGate({
-    model: 'MOMENTUM', direction: 'BUY', smcEvidence: evaluation.smcEvidence, params: gateParams,
+    model: 'MOMENTUM', direction: 'BUY', smcEvidence: gateEvidence, params: gateParams,
   });
   const momentumSellGate = legacyStructureGate({
-    model: 'MOMENTUM', direction: 'SELL', smcEvidence: evaluation.smcEvidence, params: gateParams,
+    model: 'MOMENTUM', direction: 'SELL', smcEvidence: gateEvidence, params: gateParams,
   });
   const reversalBuyGate = legacyStructureGate({
-    model: 'REVERSAL', direction: 'BUY', smcEvidence: evaluation.smcEvidence, params: gateParams,
+    model: 'REVERSAL', direction: 'BUY', smcEvidence: gateEvidence, params: gateParams,
   });
   const reversalSellGate = legacyStructureGate({
-    model: 'REVERSAL', direction: 'SELL', smcEvidence: evaluation.smcEvidence, params: gateParams,
+    model: 'REVERSAL', direction: 'SELL', smcEvidence: gateEvidence, params: gateParams,
   });
   const allowMomentumBuy = momentumBuy && momentumBuyGate.allowed;
   const allowMomentumSell = momentumSell && momentumSellGate.allowed;

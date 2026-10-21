@@ -301,7 +301,13 @@ describe('scalper v13 — SMC_CONFLUENCE setup emission', () => {
 });
 
 describe('scalper v13 — news blackout gates every model', () => {
-  const rules = buildScalperRules();
+  // Task 38: momentum pinned ON — these tests pin the legacy-fallback
+  // mechanics and must not depend on the production kill-switch posture.
+  const rules: ScalperRules = {
+    ...buildScalperRules(),
+    momentumEnabled: true,
+    momentumSourceTfOnly: null,
+  };
 
   test('the golden series at 13:00 UTC → NO_SETUP, SMC veto visible, no legacy fallback', () => {
     const evaluation = evaluateScalper(coreInput(Date.UTC(2025, 0, 15, 13, 0) / 1000 + 300, rules));

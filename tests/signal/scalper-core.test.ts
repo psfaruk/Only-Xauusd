@@ -33,11 +33,16 @@ import type { AnalysisCandle } from '@/lib/analysis/types';
 // LEGACY MODE for the pinned Phase-12 behaviour tests: the chase guard and
 // the HTF gate (Task 36) are OFF here — they have their own describe block
 // below with explicitly-enabled rules (the production defaults).
+// Task 38: the momentum reflex is EXPLICITLY enabled here — these tests pin
+// the model's mechanics and must stay independent of the production posture
+// (SCALPER_MOMENTUM_ENABLED in .env, currently false after the 34h replay).
 const RULES: ScalperRules = {
   ...buildScalperRules(),
   windowBars: 240,
   minBarsPerTf: 60,
   maxExtensionAtr: 0,
+  momentumEnabled: true,
+  momentumSourceTfOnly: null,
   htf: { ...buildScalperRules().htf, enabled: false },
 };
 
@@ -545,8 +550,16 @@ describe('Task 36 — htfOpposesSetup (the pure reverse-vs-continue gate)', () =
 describe('Task 36 — scalper engine integration (chase guard + HTF veto)', () => {
   const H1 = 3600;
   const H4 = 14400;
-  /** Production-posture rules: chase guard ON + HTF gate ON. */
-  const T36_RULES: ScalperRules = { ...buildScalperRules(), windowBars: 240, minBarsPerTf: 60 };
+  /** Production-posture rules: chase guard ON + HTF gate ON. Task 38: the
+   *  momentum reflex pinned ON so these tests exercise the HTF/chase-gate
+   *  mechanics independent of the production kill-switch posture. */
+  const T36_RULES: ScalperRules = {
+    ...buildScalperRules(),
+    windowBars: 240,
+    minBarsPerTf: 60,
+    momentumEnabled: true,
+    momentumSourceTfOnly: null,
+  };
 
   test('chase guard: an EXTENDED run no longer fires the momentum model (no chasing tops)', () => {
     const evaluation = evaluateScalper(

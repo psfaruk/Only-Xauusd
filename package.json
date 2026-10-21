@@ -3,7 +3,7 @@
   "version": "0.2.1",
   "private": true,
   "scripts": {
-    "dev": "next dev -p 3000 2>&1 | tee dev.log",
+    "dev": "bun /home/z/my-project/.zscripts/ensure-env.mjs --with-db && next dev -p 3000 2>&1 | tee dev.log",
     "build": "next build && cp -r .next/static .next/standalone/.next/ && cp -r public .next/standalone/",
     "start": "NODE_ENV=production bun .next/standalone/server.js 2>&1 | tee server.log",
     "lint": "eslint .",
@@ -17,6 +17,8 @@
     "test": "bun test",
     "market:smoke": "bun run scripts/mt5-smoke-test.ts",
     "market:sync": "bun run scripts/sync-market.ts",
+    "backtest": "bun --env-file=.env scripts/backtest-scalper.ts",
+    "history:deep": "bun --env-file=.env scripts/deep-history-pull.ts",
     "bridge:dev": "cd mini-services/mt5-bridge && bun run dev",
     "paper:snapshot": "bun run scripts/phase10.2-paper-snapshot.ts"
   },

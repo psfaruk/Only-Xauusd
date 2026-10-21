@@ -4,7 +4,7 @@
   "private": true,
   "description": "Exness MT5 market-data bridge (Phase 8 read-only core) + Phase 11 gated order layer (market open/close only, dead unless BRIDGE_ORDERS_ENABLED=true)",
   "scripts": {
-    "dev": "bun --hot --env-file=../../.env index.ts",
+    "dev": "bun /home/z/my-project/.zscripts/ensure-env.mjs && bun --hot --env-file=../../.env index.ts",
     "start": "bun --env-file=../../.env index.ts",
     "probe:orders": "bun --env-file=../../.env probe-orders.ts"
   },

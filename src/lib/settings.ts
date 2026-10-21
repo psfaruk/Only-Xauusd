@@ -270,6 +270,32 @@ export async function getBridgeCredentialState(
   }
 }
 
+/** Boot-seed (Task 38) — the self-healing answer to platform rollbacks that
+ *  zero the database or wipe db/settings.key:
+ *    · row absent (DB zeroed)              → seed from the .env baseline
+ *    · row present but passwordUnreadable  → re-seed with the fresh key
+ *  Idempotent: a healthy, readable row is never touched. The UI keeps working
+ *  either way (env fallback), but seeding restores the db-source honesty and
+ *  keeps the revision/drift-sync discipline intact. */
+export async function seedBrokerSettingsFromEnv(): Promise<{ seeded: boolean; reason: string }> {
+  const envServer = (process.env.MT5_SERVER ?? '').trim();
+  const envLogin = (process.env.MT5_LOGIN ?? '').trim();
+  const envPassword = process.env.MT5_PASSWORD ?? '';
+  if (!envServer || !envLogin || !envPassword) {
+    return { seeded: false, reason: 'no env credentials' };
+  }
+  const row = await getBrokerSettings();
+  if (row && row.password) {
+    return { seeded: false, reason: 'db row present and readable' };
+  }
+  const check = validateCredentials({ server: envServer, login: envLogin, password: envPassword });
+  if (!check.ok) {
+    return { seeded: false, reason: `env credentials invalid: ${check.error}` };
+  }
+  const result = await saveBrokerCredentials(check.value, 'boot-seed');
+  return { seeded: result.ok, reason: result.ok ? 'seeded from env' : result.error ?? 'save failed' };
+}
+
 /** Drift sync — called from the scheduler tick: when DB credentials exist and
  *  the bridge has not applied that revision yet (restart with stale .env,
  *  bridge crash-loop, etc.), re-push. Fire-and-forget safe. */

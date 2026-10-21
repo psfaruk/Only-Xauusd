@@ -40,16 +40,32 @@ export async function register() {
   // and then once per scheduler tick, compare the DB revision with the
   // bridge's applied revision and re-push when they drift. Fire-and-forget,
   // error-isolated, never blocks the scheduler.
+  //
+  // Task 38 — boot-seed first: rollbacks zero the DB (row gone) or wipe
+  // db/settings.key (row unreadable). Seeding from the .env baseline before
+  // the first sync restores the db-source discipline; a healthy readable row
+  // is never touched.
   if (bridgeUrl && process.env.NEXT_RUNTIME === 'nodejs') {
-    const { syncBridgeCredentials } = await import('@/lib/settings');
-    const syncOnce = () =>
-      void syncBridgeCredentials()
+    const settings = await import('@/lib/settings');
+    const bootHeal = async () => {
+      try {
+        const seed = await settings.seedBrokerSettingsFromEnv();
+        if (seed.seeded) console.log(`[settings-boot] ${seed.reason}`);
+      } catch { /* never break boot */ }
+      try {
+        const r = await settings.syncBridgeCredentials();
+        if (r.pushed) console.log(`[settings-sync] ${r.reason}`);
+      } catch { /* never break boot */ }
+    };
+    setTimeout(() => void bootHeal(), 10_000).unref?.();
+    setInterval(() => {
+      void settings
+        .syncBridgeCredentials()
         .then((r) => {
           if (r.pushed) console.log(`[settings-sync] ${r.reason}`);
         })
         .catch(() => undefined);
-    setTimeout(syncOnce, 10_000).unref?.();
-    setInterval(syncOnce, Math.max(60_000, intervalMs || 60_000)).unref?.();
+    }, Math.max(60_000, intervalMs || 60_000)).unref?.();
   }
 
   if (!Number.isFinite(intervalMs) || intervalMs <= 0 || !bridgeUrl) {

@@ -42,6 +42,8 @@ export function buildScalperRules(): ScalperRules {
     },
     maxExtensionAtr: s.maxExtensionAtr,
     postLossCooldownSec: s.postLossCooldownSec,
+    momentumEnabled: s.momentumEnabled,
+    momentumSourceTfOnly: s.momentumSourceTfOnly,
     htf: {
       enabled: s.htfEnabled,
       emaFastPeriod: s.htfEmaFastPeriod,
@@ -52,6 +54,7 @@ export function buildScalperRules(): ScalperRules {
     smc: {
       enabled: smc.enabled,
       newsBlackoutEnabled: smc.newsBlackoutEnabled,
+      legacyGate: smc.legacyGate,
       params: {
         swingLeft: smc.swingLeft,
         swingRight: smc.swingRight,
@@ -102,7 +105,8 @@ export const SCALPER_DOC: string[] = [
   'Phase 14 — SMC/ICT কনফ্লুয়েন্স মডেল (অগ্রাধিকার): ৮টি এজেন্ট (স্ট্রাকচার ১৫ · লিকুইডিটি ২০ · POI ২০ · কি-লেভেল ১০ · প্রাইস-অ্যাকশন ১৫ · মোমেন্টাম ১০ · সেশন ৫ · AMD ৫ = ১০০) ওজন-যোগে স্কোর করে; টিয়ার A ≥ 75 (সিউর), B ≥ 55 (ডিফল্ট ইমিশন), C ≥ 40।',
   'SMC হার্ড ভিটো: নিউজ ব্ল্যাকআউট উইন্ডো, ০.৮×ATR-এর কাছে বিপরীত কি-লেভেল দেয়াল (SR_WALL), POI-এর বাইরে দাম (PRICE_BEYOND_POI), POI ভাঙা (POI_VIOLATED), শক্তিশালী বিপরীত মোমেন্টাম (MOMENTUM_OPPOSED)।',
   'SMC লেভেল: এন্ট্রি = POI জোনে লাইভ দাম; SL = সুইপ-উইক/জোন-প্রান্তের বাইরে ০.৫×ATR বাফার; টার্গেট = বিপরীত লিকুইডিটি পুল (সর্বোচ্চ ১.২R ক্যাপ; ১R-এর কাছের ম্যাগনেট হলে SMC_TP_TOO_CLOSE)।',
-  'মোমেন্টাম মডেল (ফলব্যাক): EMA9 > EMA21 (বা বিপরীত), দাম EMA9-এর ওপরে (নিচে), RSI 52–78 ব্যান্ডে (SELL-এ আয়নাকৃত ব্যান্ড) — সাথে টাইমফ্রেমের স্ট্রাকচার ট্রেন্ড বা সদ্য BOS একই দিকে (Task 37 গেট)।',
+  'Task 38 — ব্যাকটেস্ট-নির্দেশিত সিদ্ধান্ত: মোমেন্টাম মডেল সাময়িক বন্ধ (SCALPER_MOMENTUM_ENABLED=false)। ৩৪ ঘণ্টার রিপ্লে-ব্যাকটেস্টে (৪৬ ট্রেড) মোমেন্টাম রিফ্লেক্সই ছিল একমাত্র বড় ঘাটতি (৩৩% উইন, −৮.৬৪R); গেট-করা রিভার্সাল ও SMC কনফ্লুয়েন্স বইটি বহন করেছে (মোমেন্টাম বন্ধ রেখে: +৫.৭৯R, ৫৫.৬% উইন)। সুইচটি যেকোনো সময় আবার চালু করা যায়।',
+  'মোমেন্টাম মডেল (ফলব্যাক, যখন চালু): EMA9 > EMA21 (বা বিপরীত), দাম EMA9-এর ওপরে (নিচে), RSI 52–78 ব্যান্ডে (SELL-এ আয়নাকৃত ব্যান্ড) — সাথে টাইমফ্রেমের স্ট্রাকচার ট্রেন্ড বা সদ্য BOS একই দিকে (Task 37 গেট)।',
   'রিভার্সাল মডেল (ফলব্যাক): আগের বারে RSI 32-এর নিচে (অথবা 68-এর ওপরে), সিদ্ধান্ত-বারে RSI ফিরে আসছে + দিকানুগ ক্লোজ — সাথে লিকুইডিটি সুইপ বা CHoCH কনফার্মেশন (Task 37 গেট)।',
   'কয়েকটি TF একসাথে agree করলে অগ্রাধিকার M15 → M5 → M1 (উৎস টাইমফ্রেম হিসেবে)।',
   'SL-দূরত্ব 0.50-এর কম হলে সেটআপ বাদ (স্প্রেডের চেয়ে চাপা স্টপ অবাণিজ্যিক)।',

@@ -245,6 +245,15 @@ export const config = {
        *  one of OUR positions pauses NEW auto-executions for this long; the
        *  scalper service reports SCALPER_POST_LOSS_COOLDOWN honestly. 0 = off. */
       postLossCooldownSec: Math.min(Math.max(0, num('SCALPER_POST_LOSS_COOLDOWN_SEC', 900)), 7_200),
+      /** Task 38 (backtest-driven): momentum reflex kill-switch. The 34h
+       *  replay showed M1/M5 micro-trend momentum as the biggest bleeder
+       *  (33% win, −8.64R); reversal+SMC carried the book. */
+      momentumEnabled: bool('SCALPER_MOMENTUM_ENABLED', true),
+      /** Task 38: restrict momentum to ONE source TF (M15 | M5 | M1 | ''). */
+      momentumSourceTfOnly: (() => {
+        const v = str('SCALPER_MOMENTUM_SOURCE_TF', '');
+        return v === 'M15' || v === 'M5' || v === 'M1' ? v : null;
+      })(),
     },
     /** Phase 14 — the ICT/SMC ten-agent confluence engine layered onto the
      *  scalper (SMC_CONFLUENCE model). Pure agents never read config directly;
@@ -253,6 +262,8 @@ export const config = {
       /** Master switch for the SMC confluence model (fallback: legacy
        *  momentum/reversal models still judge when off). */
       enabled: bool('SMC_ENABLED', true),
+      /** Task 37 structure gate for the legacy reflexes (default ON). */
+      legacyGate: bool('SMC_LEGACY_GATE', true),
       /** Swing window (left/right closed bars) for structure/liquidity. */
       swingLeft: Math.min(Math.max(2, num('SMC_SWING_LEFT', 3)), 8),
       swingRight: Math.min(Math.max(2, num('SMC_SWING_RIGHT', 3)), 8),

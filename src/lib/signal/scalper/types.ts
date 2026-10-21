@@ -50,6 +50,10 @@ export interface ScalperSmcRules {
   enabled: boolean;
   /** News-blackout veto master switch. */
   newsBlackoutEnabled: boolean;
+  /** Task 37 structure gate for the legacy reflexes (momentum = continuation
+   *  with structure, reversal = sweep/CHoCH-confirmed). Default ON; OFF
+   *  restores the pre-Task-37 indicator-only behaviour (backtest A/B). */
+  legacyGate: boolean;
   /** All agent parameters (locked, fingerprinted with every evaluation). */
   params: SmcAgentParams;
   /** Indicator periods shared with the agents (EMA/RSI/ATR). */
@@ -114,6 +118,13 @@ export interface ScalperRules {
   maxExtensionAtr: number;
   /** Task 36 — post-loss circuit breaker (seconds, service-level). 0 = off. */
   postLossCooldownSec: number;
+  /** Task 38 (backtest-driven): momentum kill-switch — false disables the
+   *  legacy momentum reflex entirely (reversal/SMC still judge). Default on. */
+  momentumEnabled?: boolean;
+  /** Task 38: restrict the momentum reflex to ONE source timeframe
+   *  (e.g. 'M15' — M1/M5 micro-trend momentum proved to be noise on gold).
+   *  Null/undefined = all timeframes (legacy behaviour). */
+  momentumSourceTfOnly?: ScalperTf | null;
   /** Task 36 — higher-timeframe trend intelligence. */
   htf: ScalperHtfRules;
   /** Phase 14 — the ICT/SMC confluence layer (SMC_CONFLUENCE model). */
