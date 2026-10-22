@@ -15,7 +15,10 @@ import subprocess
 import sys
 import time
 
-PROJECT = "/home/z/my-project"
+# Project root = parent of this script's directory (.zscripts lives at
+# <project-root>/.zscripts). Derived from __file__ so the script is portable
+# (no sandbox-specific absolute path); behavior is identical.
+PROJECT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BRIDGE_DIR = os.path.join(PROJECT, "mini-services", "mt5-bridge")
 LOG_PATH = os.path.join(BRIDGE_DIR, "bridge.log")
 

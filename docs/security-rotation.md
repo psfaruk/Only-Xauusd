@@ -60,9 +60,11 @@ pip install git-filter-repo
 git clone https://github.com/psfaruk/Only-Xauusd.git only-xauusd-clean
 cd only-xauusd-clean
 git filter-repo --invert-paths --path .env --path .zscripts/env.golden
-git filter-repo --replace-text <(echo '414350770==>[REDACTED-LOGIN]'; \
-                                 echo '56529050Fk/==>[REDACTED-PW]'; \
-                                 echo 'xauusd-bridge-k7d2m9f4==>[REDACTED-TOKEN]')
+# Build replacements.txt from the OLD values (recover them from the pre-purge
+# history WITHOUT copying them into any tracked file, e.g.
+#   git show <old-sha>:.env   — then write lines like  <old-value>==>[REDACTED]
+# to an UNTRACKED replacements.txt and run:
+git filter-repo --replace-text replacements.txt
 git remote add origin https://github.com/psfaruk/Only-Xauusd.git
 git push --force --set-upstream origin main
 

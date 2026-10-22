@@ -2,7 +2,7 @@
   "name": "mt5-bridge",
   "version": "1.0.0",
   "private": true,
-  "description": "Exness MT5 market-data bridge (Phase 8 read-only core) + Phase 11 gated order layer (market open/close only, dead unless BRIDGE_ORDERS_ENABLED=true)",
+  "description": "Exness MT5 read-only market-data gateway (v2.0.0-signal-only) — speaks the MT5 web-terminal WS protocol to Exness; order layer deleted in Phase 0, GET-only by construction",
   "scripts": {
     "dev": "bun ../../.zscripts/ensure-env.mjs && bun --hot --env-file=../../.env index.ts",
     "start": "bun --env-file=../../.env index.ts"

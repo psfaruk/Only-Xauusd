@@ -407,7 +407,10 @@ describe('Phase 11-E execution isolation — candidate rows can never reach the 
 // API shapes (additive candidate surfaces)
 // ---------------------------------------------------------------------------
 
-const req = (url: string) => new Request(`http://localhost:3000${url}`);
+const req = (url: string) => new Request(`http://localhost:3000${url}`, {
+  // Phase 9: public triggers are same-origin only — emulate the app UI.
+  headers: { Origin: 'http://localhost:3000' },
+});
 
 describe('Phase 11-E API shapes — candidate field additive, baseline byte-compatible', () => {
   test('/api/signal/latest: candidate card present (evaluation + levels + model + paperStats + INCOMPLETE verdict); `signal` stays BASELINE-scoped', async () => {
@@ -583,7 +586,11 @@ describe('Phase 11-E API shapes — candidate field additive, baseline byte-comp
       const res = await POST(
         new Request('http://localhost:3000/api/signal/run', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-forwarded-for': '10.79.0.1' },
+          headers: {
+            Origin: 'http://localhost:3000', // Phase 9: same-origin trigger evidence
+            'Content-Type': 'application/json',
+            'x-forwarded-for': '10.79.0.1',
+          },
           body: JSON.stringify({ symbol: SYMBOL }),
         }),
       );

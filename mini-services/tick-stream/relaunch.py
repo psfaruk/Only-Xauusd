@@ -22,7 +22,11 @@ import sys
 import time
 
 SERVICE_DIR = os.path.dirname(os.path.abspath(__file__))
-LOG_PATH = "/home/z/my-project/tickstream-dev.log"
+# Project root = parent of this service directory (mini-services/tick-stream
+# lives under <project-root>). Derived from __file__ so the script is portable
+# (no sandbox-specific absolute path); the log path is identical.
+PROJECT_ROOT = os.path.dirname(os.path.dirname(SERVICE_DIR))
+LOG_PATH = os.path.join(PROJECT_ROOT, "tickstream-dev.log")
 PORT = 3041
 
 

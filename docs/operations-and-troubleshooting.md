@@ -88,7 +88,7 @@ Honest empty state — that TF has no stored candles yet; the scheduled sync fil
 
 ## 5. Safety invariants — never change these operationally
 
-- Four execution locks (`TRADING_PHASE` gate / `TRADING_MODE=read_only` / `EXECUTION_ARMED=false` / `ALLOW_EXECUTION=false`) — the terminal is analysis-and-signal ONLY.
+- **Execution capability was deleted in Phase 0** — there is no execution code to lock: the app execution services/routes, the bridge order endpoints, and the auto-execution hooks are gone, and `TRADING_MODE` is hard-locked to `read_only` in `src/lib/config.ts` (the env value is inert). `EXECUTION_ARMED`/`ALLOW_EXECUTION` no longer exist as concepts. Regression tests (`tests/ui/execution-lock-invariants.test.ts`, incl. subprocess env probes) pin the absence.
 - The bridge is GET-only; there is no order code anywhere (3 test tripwires + runtime checks pin this).
 - Demo feed is never ingested by default (`SOURCE_DEMO` skip) — demo data is never analysis-ready.
 - All market data is broker-verified or honestly absent — a `—` means unavailable, never 0.
@@ -96,6 +96,6 @@ Honest empty state — that TF has no stored candles yet; the scheduled sync fil
 ## 6. Known limitations (honest)
 
 - Production build (`next build`) is not runnable inside the sandbox (platform constraint); `tsc --noEmit` + `eslint` + `bun test` are the verification gates there. On a persistent host, run `bun run build` once before `bun run start`.
-- `next.config.ts` sets `typescript.ignoreBuildErrors: true` (build does not typecheck); run `bun run typecheck` in CI instead. Consider flipping the flag to `false` on the persistent host AFTER verifying `bun run build` passes there.
+- `next.config.ts` no longer sets `typescript.ignoreBuildErrors` (Phase 1 strict gate) — `next build` now fails on type errors. Keep `bun run typecheck` as the fast dedicated gate in CI and before every commit.
 - Browser E2E is currently a documented manual procedure (screenshots in `audit/`), not an automated suite.
 - In-memory rate-limit buckets and the scheduler lock are per-process (fine single-process; see §4 before scaling).

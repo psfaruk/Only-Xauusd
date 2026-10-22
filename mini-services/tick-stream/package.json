@@ -4,7 +4,7 @@
   "private": true,
   "description": "READ-ONLY live tick relay (Task 29-b) — polls the mt5-bridge quote stream and broadcasts to dashboard websocket clients; no trading capability by construction",
   "scripts": {
-    "dev": "bun /home/z/my-project/.zscripts/ensure-env.mjs && bun --hot --env-file=../../.env index.ts",
+    "dev": "bun ../../.zscripts/ensure-env.mjs && bun --hot --env-file=../../.env index.ts",
     "start": "bun --env-file=../../.env index.ts",
     "probe": "bun run probe.ts"
   },

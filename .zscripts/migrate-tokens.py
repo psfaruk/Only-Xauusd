@@ -143,7 +143,9 @@ def convert(match: re.Match) -> str:
 
 
 def main() -> int:
-    root = Path("/home/z/my-project")
+    # 项目根 = 本脚本（.zscripts/migrate-tokens.py）所在目录的上一级；
+    # 不再硬编码沙箱绝对路径，行为不变。
+    root = Path(__file__).resolve().parent.parent
     total = 0
     for rel in FILES:
         path = root / rel

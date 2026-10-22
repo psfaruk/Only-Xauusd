@@ -1424,7 +1424,7 @@ Work Log:
 
 Stage Summary:
 - Phase 1 complete: strict build gate active, all tracked scripts portable (zero /home/z in scope), README/docs now match the signal-only runtime exactly, env reference doc added.
-- BLOCKED (gate 3, not 42-S1's files): secret-scan FAIL — BRIDGE_TOKEN_SHAPE at docs/security-rotation.md:65: the Phase 0 rotation runbook embeds the literal old bridge token (`xauusd-bridge-k7d2m9f4`) inside the filter-repo replace-text example. Present since commit 834e09b ⇒ Phase 0's "secret-scan PASS" evidence was INACCURATE for this finding. Fix (file owner: orchestrator): replace the literal with a placeholder and tell users to recover the old value from git history (`git show <sha>:.env`) when building the replace-text file.
+- BLOCKED (gate 3, not 42-S1's files): secret-scan FAIL — BRIDGE_TOKEN_SHAPE at docs/security-rotation.md:65: the Phase 0 rotation runbook embeds the literal old bridge token (literal redacted) inside the filter-repo replace-text example. Present since commit 834e09b ⇒ Phase 0's "secret-scan PASS" evidence was INACCURATE for this finding. Fix (file owner: orchestrator): replace the literal with a placeholder and tell users to recover the old value from git history (`git show <sha>:.env`) when building the replace-text file.
 - COMMIT WITHHELD per the "only if all gates pass" rule (gate 3 red on an out-of-scope file). All Phase 1 changes sit verified in the working tree; gates 1/2/4/5 are green right now, so the moment security-rotation.md:65 is fixed the commit can proceed verbatim.
 
 ---

@@ -11,10 +11,10 @@
 |---|---|---|
 | `DATA_API_TOKEN` | *(unset)* | **long random value** |
 | `MARKET_API_PUBLIC_READS` | `true` (explicit opt-in) | *(unset/false)* |
-| `MARKET_API_PUBLIC_TRIGGERS` | `true` (explicit opt-in) | *(unset/false)* |
-| `MARKET_SYNC_INTERVAL_MS` | `300000` | `300000` |
+| `MARKET_API_PUBLIC_TRIGGERS` | `true` (explicit opt-in; **same-origin only** since Phase 9) | *(unset/false)* |
+| `MARKET_SYNC_INTERVAL_MS` | `60000` (1 min) | `300000` (5 min) |
 | MT5 bridge keys | set (gitignored `.env`) | set (secret manager / `.env` 0600) |
-| Execution locks | all four LOCKED | all four LOCKED (unchanged — Phase 11 gate) |
+| Execution capability | **deleted (Phase 0)** — no locks needed because there is no execution code | same (read-only by construction) |
 
 **Rule:** a surface is open ONLY when (a) a token is set and presented, or (b) the operator explicitly opted in with the matching public flag while NO token is set. There is no third path (fail-closed 503 `MARKET_API_TOKEN_NOT_CONFIGURED`).
 
@@ -29,7 +29,7 @@
 ## 3. Variable groups (see `.env.example` for the full annotated list)
 
 1. **Database** — `DATABASE_URL` (SQLite file path).
-2. **Execution locks (four)** — `TRADING_PHASE`, `TRADING_MODE`, `EXECUTION_ARMED`, `ALLOW_EXECUTION`. Execution requires ALL FOUR to pass (`phase ≥ 11` + armed + allowed + non-read-only). Leave locked; the UI badge derives from `/api/health`.
+2. **Product posture (informational)** — `TRADING_PHASE`, `TRADING_MODE`. These are **labels only**: the execution gate and the entire execution layer were deleted in Phase 0. `TRADING_MODE` is hard-locked to `read_only` in `src/lib/config.ts` (the env value is inert); `TRADING_PHASE` feeds the phase label string. The UI badge derives from `/api/health` (`executionLocked` is always `true`).
 3. **GLM** — `GLM_MODEL`, `GLM_TIMEOUT_MS`, `GLM_MAX_RETRIES`, `GLM_MIN_VERIFY_INTERVAL_MS`. No API key: the sandbox SDK manages auth server-side.
 4. **MT5 bridge (app side)** — `MT5_BRIDGE_URL`, `MT5_BRIDGE_TOKEN` (sent as `x-trader-key`), `MT5_BRIDGE_TIMEOUT_MS`, `MT5_BRIDGE_MAX_RETRIES`.
 5. **MT5 bridge (bridge side)** — `MT5_LOGIN`, `MT5_PASSWORD`, `MT5_SERVER`, `MT5_WATCHLIST`, `MT5_BRIDGE_RELAY`. Read ONLY by the bridge process. **If these were ever exposed (chat, logs), rotate them at the broker immediately.**
@@ -50,11 +50,11 @@
 curl -s -o /dev/null -w '%{http_code}\n' localhost:3000/api/data/status          # 503 (no public reads)
 # 2. With the token:
 curl -s -H "Authorization: Bearer $DATA_API_TOKEN" localhost:3000/api/data/status | head -c 120
-# 3. Lock state (must always say locked + gate phase):
-curl -s localhost:3000/api/health | python3 -c "import json,sys; h=json.load(sys.stdin); print(h['executionLocked'], h['executionGatePhase'], h['phaseLabel'])"
+# 3. Lock state (always locked — execution code was deleted in Phase 0):
+curl -s localhost:3000/api/health | python3 -c "import json,sys; h=json.load(sys.stdin); print(h['executionLocked'], h['phaseLabel'])"
 ```
 
-Expected in production: `True 11 Phase 4 — Read-Only Research` (phase number = your `TRADING_PHASE`, label states the mode truthfully — it is a lock value, not roadmap progress).
+Expected in production: `True Phase 15 — Signal-Only (read-only)` (`TRADING_PHASE` is an informational label, not a capability gate; `executionLocked` is a constant `true`).
 
 ---
 

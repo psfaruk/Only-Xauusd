@@ -17,7 +17,10 @@ import subprocess
 import sys
 import time
 
-PROJECT = "/home/z/my-project"
+# Project root = parent of this script's directory (.zscripts lives at
+# <project-root>/.zscripts). Derived from __file__ so the script is portable
+# (no sandbox-specific absolute path); behavior is identical.
+PROJECT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def port_open(port: int) -> bool:

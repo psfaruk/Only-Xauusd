@@ -2,7 +2,10 @@
 
 set -euo pipefail
 
-PROJECT_DIR="${PROJECT_DIR:-/home/z/my-project}"
+# 默认项目根相对于本脚本目录推导（.zscripts 位于 <项目根>/.zscripts），
+# 不再硬编码沙箱绝对路径；显式传入 PROJECT_DIR 时行为不变。
+_ZS_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="${PROJECT_DIR:-$(cd "$_ZS_DIR/.." && pwd)}"
 BUILD_DIR="${BUILD_DIR:?BUILD_DIR is required}"
 PYTHON_VERSION="${PYTHON_VERSION:-3.12}"
 NEXT_DIST_DIR="$BUILD_DIR/next-service-dist"

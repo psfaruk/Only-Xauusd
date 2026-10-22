@@ -9,8 +9,9 @@ set -e
 # 使用 $0 获取脚本路径（兼容 sh 和 bash）
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# Next.js 项目路径
-NEXTJS_PROJECT_DIR="/home/z/my-project"
+# Next.js 项目路径 —— 相对于本脚本目录推导（.zscripts 位于 <项目根>/.zscripts），
+# 不再硬编码沙箱绝对路径；行为不变。
+NEXTJS_PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # 检查 Next.js 项目目录是否存在
 if [ ! -d "$NEXTJS_PROJECT_DIR" ]; then
@@ -135,7 +136,7 @@ if [ -d "public" ]; then
     cp -r public "$BUILD_DIR/next-service-dist/"
 fi
 
-# Python 不继承 workspace-agent 的 /home/z/.venv。若项目包含 Python 源码或
+# Python 不继承构建环境的 venv。若项目包含 Python 源码或
 # 依赖清单，在构建期将生产依赖固化到产物，并保持 Python 源码的项目相对路径。
 PROJECT_DIR="$NEXTJS_PROJECT_DIR" BUILD_DIR="$BUILD_DIR" \
     bash "$SCRIPT_DIR/python-runtime-build.sh"

@@ -27,9 +27,15 @@
 
 import { spawnSync } from 'node:child_process';
 import { rmSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// ── Project root, derived from this file's location (scripts/ → repo root).
+// Portable replacement for the former hardcoded sandbox absolute path.
+const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
 // ── Isolated throwaway DB (NEVER the production one) ────────────────────────
-const TEST_DB = '/home/z/my-project/db/test-chronology-103b.db';
+const TEST_DB = join(ROOT, 'db/test-chronology-103b.db');
 process.env.DATABASE_URL = `file:${TEST_DB}`;
 process.env.MARKET_API_PUBLIC_READS = 'true';
 process.env.MT5_BRIDGE_URL = '';
@@ -41,12 +47,12 @@ process.env.DATA_API_TOKEN = '';
 
 // Production DB url (READ-ONLY use; never printed) — captured BEFORE the env
 // override above took effect… .env is still on disk; parse it directly.
-const envText = readFileSync('/home/z/my-project/.env', 'utf8');
+const envText = readFileSync(join(ROOT, '.env'), 'utf8');
 const LIVE_URL = (envText.match(/^DATABASE_URL=file:(.+)$/m) ?? [])[1]?.trim() ?? 'db/custom.db';
 
 rmSync(TEST_DB, { force: true });
 const push = spawnSync('./node_modules/.bin/prisma', ['db', 'push', '--skip-generate'], {
-  cwd: '/home/z/my-project',
+  cwd: ROOT,
   env: { ...process.env, DATABASE_URL: `file:${TEST_DB}` },
   encoding: 'utf8',
 });
@@ -354,7 +360,7 @@ async function main(): Promise<void> {
 
   // ── PART 2 — LIVE production DB, read-only ───────────────────────────────
   console.log('\n════ PART 2 — LIVE PRODUCTION DB (READ-ONLY — SELECTs only) ════');
-  const live = new PrismaClient({ datasources: { db: { url: `file:${LIVE_URL.startsWith('/') ? '' : '/home/z/my-project/'}${LIVE_URL}` } } });
+  const live = new PrismaClient({ datasources: { db: { url: `file:${LIVE_URL.startsWith('/') ? '' : ROOT + '/'}${LIVE_URL}` } } });
   try {
     const paperCount = await live.paperSignalOutcome.count();
     const setupEvals = await live.signalEvaluation.count({ where: { outcome: { in: ['BUY_SETUP', 'SELL_SETUP'] } } });

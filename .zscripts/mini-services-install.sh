@@ -1,7 +1,9 @@
 #!/bin/bash
 
-# 配置项
-ROOT_DIR="/home/z/my-project/mini-services"
+# 配置项 —— ROOT_DIR 相对于本脚本目录推导（.zscripts 位于 <项目根>/.zscripts），
+# 不再硬编码沙箱绝对路径；行为不变。
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT_DIR="$SCRIPT_DIR/../mini-services"
 
 main() {
     echo "🚀 开始批量安装依赖..."
