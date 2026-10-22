@@ -1520,3 +1520,21 @@ Stage Summary:
 - Real bugs found/fixed: NONE in production code — the audited engines were already conservative (SL-first) and causal; all fixes were test-side only (two draft-test arithmetic errors caught by the test runs themselves before commit). No look-ahead/same-bar-fill issue existed to fix; it is now pinned exactly.
 - Gaps left open (documented in the audit docs): scalper readHtfTrend lacks an internal close-time filter (hardening only — both callers feed closed bars today); per-candle historical spread not stored; no tick data (SL-first stays the only honest resolution); walk-forward only in the Phase 10 harness; browser-visible + notification-dispatch latency legs unmeasured (need a client beacon feature); baseline minimum-window policy proposed (≥2 weeks + ≥20 outcomes; "validated" only at ≥100) but not yet pre-registered in code.
 - Commit scope note: committed ONLY the 42-S3 files (git add of my explicit paths, NOT `git add -A`) — the tree concurrently carries 42-S1's in-flight uncommitted work (.env.example/.zscripts/README/docs/mini-services/next.config); sweeping it into this commit would have mislabeled their work.
+
+---
+Task ID: 42 (final integration — Phase 11 release gate)
+Agent: Z.ai Code (main orchestrator) + subagents 42-S1..S5
+Task: Deep remediation Phases 0-11 per upload/Only-Xauusd_Deep_Implementation_Master_Prompt.txt — final integration, gates, evidence, push
+
+Work Log:
+- Subagent results integrated: 42-S1 (Phase 1 build health/docs, uncommitted due to scanner finding), 42-S2 (Phases 2+3, commit 3f70fc9 — incl. REAL closed-candle-mutation bug fix in ingestion), 42-S3 (Phases 4-6, 4a0b271 — engines proven no-look-ahead/conservative; sampleAdequacy + bootstrap CI), 42-S4 (Phase 7 agent runtime, 55830b8 — state machine, 9 read-only tools, budgets, 32 tests, live-verified COMPLETED run), 42-S5 (Phase 8 UI, 64bc870 — lifecycle badges, AgentActivityPanel, stale honesty, disclosure).
+- Orchestrator fixes: neutralized literal old-bridge-token in docs/security-rotation.md runbook + worklog entry (secret-scan now PASS 1599 files); fixed candidate-dual-run + api tests for Phase 9 same-origin posture (Origin headers on synthetic requests, duplicate-header merge bug caught).
+- FINAL GATES: tsc 0 errors · lint 0 problems · bun test 950/950 (60 files, 88,433 expects — up from 840 at Phase 0 start) · secret-scan PASS · /api/health 200 read_only+locked · /api/agent/runs 200 · freshness block LIVE all 5 TFs · bridge order endpoints 405/404 · anon trigger 403.
+- Browser end-to-end (agent-browser): system view shows AgentActivityPanel with the real persisted COMPLETED run (2/6 steps, 2/8 tools, 4s, Bengali summary quoting observed bid 4088.135/ask 4088.375/spread 0.240 from Exness), lifecycle + closed-candle badges, disclosure line, 0 console/page errors. Screenshots: audit/phase0-after-signal-only.png, audit/phase0-8-final-system-view.png.
+- Evidence report written: audit/deep-remediation-report.md (phase table, exact commands+results, USER-ACTION list, rollback list).
+- Committed d0c7c63 (S1 integration + fixes) and this final commit; pushed to github.com/psfaruk/Only-Xauusd main.
+
+Stage Summary:
+- Phases 0,1,2,3,4,5,6,7,8,9 DONE; 10 PARTIAL (correlation-ID + browser-latency legs documented as gaps); 11 DONE (build NOT RUN per platform rule — strict tsc gate covers compile dimension; honestly recorded).
+- App is SIGNAL-ONLY READ-ONLY by construction: execution code deleted app+bridge, mode hard-locked in code, 13 invariant tests + scanner pin it; no broker order was sent by this work.
+- USER ACTIONS outstanding (docs/security-rotation.md): rotate Exness password, rotate bridge token, confirm repo PRIVATE, optional history purge.
