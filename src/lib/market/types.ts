@@ -92,6 +92,10 @@ export const ErrorCode = {
   CANDLE_BAD_TIME: 'CANDLE_BAD_TIME',
   CANDLE_DUPLICATE_KEY: 'CANDLE_DUPLICATE_KEY',
   CANDLE_OUT_OF_ORDER: 'CANDLE_OUT_OF_ORDER',
+  /** Deep-remediation Phase 2: the bridge re-delivered an already-CLOSED
+   *  candle with different OHLC (or as forming). Closed candles are immutable
+   *  — the revision is IGNORED and recorded, never applied. */
+  CANDLE_CLOSED_REVISION_IGNORED: 'CANDLE_CLOSED_REVISION_IGNORED',
   CANDLE_PRICE_PRECISION_ANOMALY: 'CANDLE_PRICE_PRECISION_ANOMALY',
   CANDLE_FUTURE_TIME: 'CANDLE_FUTURE_TIME',
   FORMING_BAR_STALE: 'FORMING_BAR_STALE',
@@ -315,6 +319,55 @@ export interface UnavailableResult {
 
 export function unavailableResult(errorCodes: string[], reason: string): UnavailableResult {
   return { ready: false, qualityState: 'UNAVAILABLE', errorCodes, reason };
+}
+
+// ---------------------------------------------------------------------------
+// Consolidated market-health freshness snapshot (Deep-remediation Phase 2,
+// master prompt §Phase 2 task 5). One authoritative object: source-tick age,
+// per-TF closed-candle staleness, 24h gap count and the single
+// confirmed-signals permission bit. Derived — it never recomputes staleness
+// on its own: computeReadiness (per-TF thresholds) + findMissingCandles
+// (gap grid) remain the only staleness/gap authorities.
+// ---------------------------------------------------------------------------
+
+/** Three-state staleness vocabulary for the consolidated health surface.
+ *  Mapping from QualityState (see quality.ts): VALID|WARNING → LIVE,
+ *  STALE → STALE, MISSING → NO_DATA, and INVALID|UNAVAILABLE → NO_DATA
+ *  (present-but-corrupt is NOT usable data — fail closed, never "LIVE"). */
+export type TfStalenessState = 'LIVE' | 'STALE' | 'NO_DATA';
+
+export interface TfFreshness {
+  timeframe: Timeframe;
+  latestClosedCandleAtUtc: string | null;
+  stalenessState: TfStalenessState;
+  /** Additive diagnostics (never interpreted alone). */
+  lastClosedCandleAgeSeconds: number | null;
+  stalenessThresholdSeconds: number;
+  /** Suspicious (non-closure) gaps inside the last 24h window. */
+  suspiciousGapsLast24h: number;
+  errorCodes: string[];
+}
+
+export interface MarketFreshnessSnapshot {
+  purpose: 'market-freshness-surface-not-trade-recommendation';
+  symbol: string;
+  checkedAtUtc: string;
+  /** Broker/event time of the last persisted tick (source timestamp). */
+  lastSourceTickAtUtc: string | null;
+  /** Server receive time of the last persisted tick (our receipt, NOT the
+   *  broker event time — the two are never conflated). */
+  lastReceiveAtUtc: string | null;
+  /** Age of the last tick receipt in ms (vs `now`). */
+  tickAgeMs: number | null;
+  perTimeframe: TfFreshness[];
+  /** Total suspicious gaps (outside closure windows) across all checked
+   *  timeframes inside the last 24h — from MarketCandle closed-bar grid
+   *  validation, not from a windowed guess. */
+  gapCountLast24h: number;
+  /** True ONLY when quote integrity passes AND M1+M5+M15 are all LIVE.
+   *  Fail closed: any missing check ⇒ false. */
+  confirmedSignalsPermitted: boolean;
+  blockReasons: string[];
 }
 
 // ---------------------------------------------------------------------------

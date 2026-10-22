@@ -8,6 +8,9 @@
  *      explicitly opted in; a disconnected bridge fails the run.
  *   3. Per-timeframe candle fetch with a bounded limit; deterministic
  *      validation; idempotent upserts keyed on (symbol, timeframe, candleTime).
+ *      Closed candles are IMMUTABLE: a re-delivery never rewrites final OHLC
+ *      (divergent re-deliveries are recorded as CANDLE_CLOSED_REVISION_IGNORED
+ *      warnings — never applied silently).
  *   4. Latest-tick snapshot upsert (single row per symbol — no tick history).
  *   5. SymbolSpec upsert containing ONLY bridge-verified fields.
  *   6. Honest SyncRun bookkeeping: incomplete runs are NEVER 'success'
@@ -62,6 +65,13 @@ interface TfOutcome {
   rejected: number;
   duplicates: number;
   errorCode: string | null;
+}
+
+/** A divergent re-delivery of an already-CLOSED candle that was IGNORED
+ *  (recorded as an auditable warning — closed candles are immutable). */
+interface ClosedRevisionIssue {
+  barTimeUtcSec: number;
+  detail: string;
 }
 
 const DAY_SEC = 86_400;
@@ -411,48 +421,90 @@ export async function runSync(deps: SyncDeps, opts: SyncOptions): Promise<SyncOu
       const batch = validateCandleBatch(res.data.bars, { timeframe: tf, nowUtcSec, digits });
 
       // Persist idempotently inside one transaction per timeframe.
+      // Deep-remediation Phase 2 (master prompt §Phase 2 task 4: "Never
+      // mutate an already closed candle silently"): an already-CLOSED row is
+      // FINAL — a re-delivery never rewrites its OHLC/isForming/validation,
+      // only the receipt bookkeeping (receivedAtUtc) is refreshed. Divergent
+      // re-deliveries are recorded as auditable WARNING issues, never applied.
+      // (forming → closed transitions still take the normal update path: the
+      // final values of a bar that just closed DO arrive.)
       let inserted = 0;
       let updated = 0;
+      // Typed via the interface because the assignment happens inside the
+      // transaction callback (TS control-flow cannot see it — cast at read).
+      let closedRevisionIssues: ClosedRevisionIssue[] | null = null;
       try {
         await deps.db.$transaction(
           async (tx) => {
             const times = batch.candles.map((c) => new Date(c.candleTimeUtcSec * 1000));
             const existing = await tx.marketCandle.findMany({
               where: { symbol: opts.symbol, timeframe: tf, candleTimeUtc: { in: times } },
-              select: { candleTimeUtc: true },
+              select: { candleTimeUtc: true, isForming: true, open: true, high: true, low: true, close: true },
             });
-            const existingTimes = new Set(existing.map((r) => r.candleTimeUtc.getTime()));
+            const existingByTime = new Map(
+              existing.map((r) => [r.candleTimeUtc.getTime(), r] as const),
+            );
+            const existingTimes = new Set(existingByTime.keys());
+            const divergences: ClosedRevisionIssue[] = [];
 
             for (const c of batch.candles) {
               const time = new Date(c.candleTimeUtcSec * 1000);
-              await tx.marketCandle.upsert({
-                where: { symbol_timeframe_candleTimeUtc: { symbol: opts.symbol, timeframe: tf, candleTimeUtc: time } },
-                create: {
-                  symbol: opts.symbol,
-                  timeframe: tf,
-                  candleTimeUtc: time,
-                  open: c.open,
-                  high: c.high,
-                  low: c.low,
-                  close: c.close,
-                  tickVolume: c.tickVolume,
-                  spread: null,
-                  source: `bridge-${feedSource}`,
-                  isForming: c.isForming,
-                  validationStatus: c.validationStatus,
-                  receivedAtUtc: receivedAt,
-                },
-                update: {
-                  open: c.open,
-                  high: c.high,
-                  low: c.low,
-                  close: c.close,
-                  tickVolume: c.tickVolume,
-                  isForming: c.isForming,
-                  validationStatus: c.validationStatus,
-                  receivedAtUtc: receivedAt,
-                },
-              });
+              const stored = existingByTime.get(time.getTime());
+              if (stored && !stored.isForming) {
+                // CLOSED row re-delivered: refresh receipt time ONLY.
+                await tx.marketCandle.update({
+                  where: {
+                    symbol_timeframe_candleTimeUtc: {
+                      symbol: opts.symbol,
+                      timeframe: tf,
+                      candleTimeUtc: time,
+                    },
+                  },
+                  data: { receivedAtUtc: receivedAt },
+                });
+                const ohlcDiffers =
+                  c.open !== stored.open ||
+                  c.high !== stored.high ||
+                  c.low !== stored.low ||
+                  c.close !== stored.close;
+                if (c.isForming || ohlcDiffers) {
+                  divergences.push({
+                    barTimeUtcSec: c.candleTimeUtcSec,
+                    detail: c.isForming
+                      ? `Bridge re-delivered closed ${tf} bar as FORMING — ignored (a closed candle never re-opens). Stored OHLC kept.`
+                      : `Bridge re-delivered closed ${tf} bar with different OHLC (stored ${stored.open}/${stored.high}/${stored.low}/${stored.close} vs incoming ${c.open}/${c.high}/${c.low}/${c.close}) — revision IGNORED (closed candles are immutable); stored values kept.`,
+                  });
+                }
+              } else {
+                await tx.marketCandle.upsert({
+                  where: { symbol_timeframe_candleTimeUtc: { symbol: opts.symbol, timeframe: tf, candleTimeUtc: time } },
+                  create: {
+                    symbol: opts.symbol,
+                    timeframe: tf,
+                    candleTimeUtc: time,
+                    open: c.open,
+                    high: c.high,
+                    low: c.low,
+                    close: c.close,
+                    tickVolume: c.tickVolume,
+                    spread: null,
+                    source: `bridge-${feedSource}`,
+                    isForming: c.isForming,
+                    validationStatus: c.validationStatus,
+                    receivedAtUtc: receivedAt,
+                  },
+                  update: {
+                    open: c.open,
+                    high: c.high,
+                    low: c.low,
+                    close: c.close,
+                    tickVolume: c.tickVolume,
+                    isForming: c.isForming,
+                    validationStatus: c.validationStatus,
+                    receivedAtUtc: receivedAt,
+                  },
+                });
+              }
               if (existingTimes.has(time.getTime())) updated += 1;
               else inserted += 1;
             }
@@ -470,6 +522,8 @@ export async function runSync(deps: SyncDeps, opts: SyncOptions): Promise<SyncOu
               },
               data: { validationStatus: 'WARNING' },
             });
+
+            closedRevisionIssues = divergences;
           },
           { timeout: 15_000, maxWait: 5_000 },
         );
@@ -485,6 +539,15 @@ export async function runSync(deps: SyncDeps, opts: SyncOptions): Promise<SyncOu
           tf,
         });
         continue;
+      }
+      for (const rev of (closedRevisionIssues as ClosedRevisionIssue[] | null) ?? []) {
+        allIssues.push({
+          code: ErrorCode.CANDLE_CLOSED_REVISION_IGNORED,
+          severity: 'warning',
+          detail: rev.detail,
+          tf,
+          barTimeUtcSec: rev.barTimeUtcSec,
+        });
       }
 
       tfOutcomes.push({

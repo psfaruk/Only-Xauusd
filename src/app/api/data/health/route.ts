@@ -14,6 +14,7 @@ import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { guardDataApi, parseQuery } from '@/lib/api-guard';
 import { quoteIntegrity, auditCandleHistory } from '@/lib/market/integrity';
+import { computeFreshnessSnapshot } from '@/lib/market/quality';
 import { StatusQuerySchema } from '@/lib/market/schemas';
 import { config } from '@/lib/config';
 
@@ -38,6 +39,17 @@ export async function GET(req: Request) {
       auditCandleHistory(symbol, config.market.timeframes),
     ]);
 
+    // Deep-remediation Phase 2: the single authoritative freshness object —
+    // source-tick event/receive times, tick age, per-TF closed-candle
+    // staleness (LIVE | STALE | NO_DATA), 24h gap count and the one
+    // confirmed-signals permission bit (quote integrity + M1/M5/M15 all LIVE).
+    // Reuses the quote report above — no second bridge round-trip.
+    const freshness = await computeFreshnessSnapshot({
+      symbol,
+      timeframes: [...config.market.timeframes],
+      quoteReport: quote,
+    });
+
     const lastSync = await db.syncRun.findFirst({
       where: { symbol },
       orderBy: { startedAtUtc: 'desc' },
@@ -54,6 +66,7 @@ export async function GET(req: Request) {
       purpose: 'data-and-signal-health-read-only',
       symbol,
       quote,
+      freshness,
       candleHistory: history,
       lastSync,
       executionLock: {

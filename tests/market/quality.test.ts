@@ -9,7 +9,8 @@ import './helpers/setup';
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
 
 import { db } from '@/lib/db';
-import { computeReadiness, getAnalysisReadiness } from '@/lib/market/quality';
+import { computeFreshnessSnapshot, computeReadiness, getAnalysisReadiness } from '@/lib/market/quality';
+import type { QuoteIntegrityReport } from '@/lib/market/integrity';
 import { TIMEFRAME_SECONDS } from '@/lib/market/types';
 import { makeBars } from './helpers/mock-bridge';
 import { FIXED_NOW_MS, FIXED_NOW_SEC } from './helpers/setup';
@@ -249,5 +250,197 @@ describe('getAnalysisReadiness — downstream fail-closed contract', () => {
     const r = await getAnalysisReadiness({ symbol: SYMBOL, now: () => FIXED_NOW_MS });
     expect(r.ready).toBe(true);
     expect('timeframes' in r && r.timeframes.length).toBe(5);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Deep-remediation Phase 2 — the consolidated freshness snapshot
+// (computeFreshnessSnapshot: the `freshness` block of GET /api/data/health).
+// Quote-integrity reports are synthetic (the pure shape the route passes in).
+// ---------------------------------------------------------------------------
+
+function syntheticQuoteReport(signalPermitted: boolean): QuoteIntegrityReport {
+  return {
+    symbol: SYMBOL,
+    checkedAtUtc: new Date(FIXED_NOW_MS).toISOString(),
+    bridgeReachable: true,
+    connected: true,
+    authenticated: true,
+    server: 'MockServer',
+    gateway: '203.0.113.10',
+    sourceClass: 'broker',
+    sourceLabel: 'Authenticated Exness MT5 session (direct web-terminal protocol)',
+    bid: '2650.10',
+    ask: '2650.50',
+    mid: '2650.30',
+    spread: '0.40',
+    digits: 2,
+    quoteTimeUtc: new Date(FIXED_NOW_MS).toISOString(),
+    receivedAtUtc: new Date(FIXED_NOW_MS).toISOString(),
+    ageSeconds: 0,
+    stalenessThresholdSeconds: 120,
+    freshness: 'LIVE',
+    reconnects: 0,
+    lastError: null,
+    validationStatus: 'VALID',
+    issues: [],
+    signalPermitted,
+    blockedReasons: signalPermitted ? [] : ['QUOTE_STALE'],
+  };
+}
+
+async function seedTickWithReceiveAge(receiveAgeMs: number) {
+  await db.marketLatestTick.upsert({
+    where: { symbol: SYMBOL },
+    create: {
+      symbol: SYMBOL,
+      bid: '2650.10',
+      ask: '2650.50',
+      spread: '0.40',
+      spreadPoints: '40.0',
+      tickTimeUtc: new Date(FIXED_NOW_MS),
+      receivedAtUtc: new Date(FIXED_NOW_MS - receiveAgeMs),
+      source: 'bridge-mt5',
+      validationStatus: 'VALID',
+    },
+    update: {
+      tickTimeUtc: new Date(FIXED_NOW_MS),
+      receivedAtUtc: new Date(FIXED_NOW_MS - receiveAgeMs),
+    },
+  });
+}
+
+describe('freshness snapshot — consolidated market health (Phase 2)', () => {
+  const TFS = ['M1', 'M5', 'M15', 'H1', 'H4'] as const;
+
+  test('all fresh + quote permitted → every TF LIVE, gapCount 0, confirmedSignalsPermitted true', async () => {
+    for (const tf of TFS) await seedTf(tf);
+    await seedTick(10);
+    const snap = await computeFreshnessSnapshot({
+      symbol: SYMBOL,
+      timeframes: [...TFS],
+      now: () => FIXED_NOW_MS,
+      quoteReport: syntheticQuoteReport(true),
+    });
+    expect(snap.perTimeframe.length).toBe(5);
+    expect(snap.perTimeframe.every((t) => t.stalenessState === 'LIVE')).toBe(true);
+    for (const t of snap.perTimeframe) {
+      expect(t.latestClosedCandleAtUtc).not.toBeNull();
+      expect(t.errorCodes).toEqual([]);
+    }
+    expect(snap.gapCountLast24h).toBe(0);
+    expect(snap.confirmedSignalsPermitted).toBe(true);
+    expect(snap.blockReasons).toEqual([]);
+    // Tick surface: source event time vs receive time, age in ms.
+    expect(snap.lastSourceTickAtUtc).toBe(new Date(FIXED_NOW_MS - 10_000).toISOString());
+    expect(snap.lastReceiveAtUtc).toBe(new Date(FIXED_NOW_MS).toISOString());
+    expect(snap.tickAgeMs).toBe(0);
+    expect(snap.purpose).toBe('market-freshness-surface-not-trade-recommendation');
+  });
+
+  test('stale M1 (older than the 420s threshold) → M1 STALE, permission denied with honest reason', async () => {
+    for (const tf of TFS) {
+      if (tf === 'M1') {
+        await seedTf('M1', { count: 60, lastOpenSec: FIXED_NOW_SEC - 7_200 });
+      } else {
+        await seedTf(tf);
+      }
+    }
+    await seedTick(10);
+    const snap = await computeFreshnessSnapshot({
+      symbol: SYMBOL,
+      timeframes: [...TFS],
+      now: () => FIXED_NOW_MS,
+      quoteReport: syntheticQuoteReport(true),
+    });
+    const m1 = snap.perTimeframe.find((t) => t.timeframe === 'M1')!;
+    expect(m1.stalenessState).toBe('STALE');
+    expect(m1.errorCodes).toContain('DATA_STALE');
+    expect(m1.lastClosedCandleAgeSeconds).toBeGreaterThanOrEqual(7_200);
+    expect(snap.perTimeframe.find((t) => t.timeframe === 'M5')!.stalenessState).toBe('LIVE');
+    expect(snap.confirmedSignalsPermitted).toBe(false);
+    expect(snap.blockReasons).toContain('M1_STALE');
+  });
+
+  test('missing M15 rows entirely → M15 NO_DATA; a single hole → gapCountLast24h ≥ 1 (but stays LIVE)', async () => {
+    await seedTf('M1');
+    await seedTf('M5', { count: 60, holes: [30] }); // interior hole ~2.5h ago (Wednesday, open market)
+    // M15 deliberately NOT seeded
+    await seedTf('H1');
+    await seedTf('H4');
+    await seedTick(10);
+    const snap = await computeFreshnessSnapshot({
+      symbol: SYMBOL,
+      timeframes: [...TFS],
+      now: () => FIXED_NOW_MS,
+      quoteReport: syntheticQuoteReport(true),
+    });
+    const m15 = snap.perTimeframe.find((t) => t.timeframe === 'M15')!;
+    expect(m15.stalenessState).toBe('NO_DATA');
+    expect(m15.latestClosedCandleAtUtc).toBeNull();
+    expect(m15.errorCodes).toContain('DATA_MISSING');
+    expect(snap.confirmedSignalsPermitted).toBe(false);
+    expect(snap.blockReasons).toContain('M15_NO_DATA');
+    // The M5 hole is counted as a suspicious 24h gap while staleness stays LIVE
+    // (WARNING state — a flagged gap is not staleness).
+    const m5 = snap.perTimeframe.find((t) => t.timeframe === 'M5')!;
+    expect(m5.stalenessState).toBe('LIVE');
+    expect(m5.suspiciousGapsLast24h).toBe(1);
+    expect(snap.gapCountLast24h).toBe(1);
+  });
+
+  test('quote integrity failure alone denies permission even with every TF LIVE', async () => {
+    for (const tf of TFS) await seedTf(tf);
+    await seedTick(10);
+    const snap = await computeFreshnessSnapshot({
+      symbol: SYMBOL,
+      timeframes: [...TFS],
+      now: () => FIXED_NOW_MS,
+      quoteReport: syntheticQuoteReport(false),
+    });
+    expect(snap.perTimeframe.every((t) => t.stalenessState === 'LIVE')).toBe(true);
+    expect(snap.confirmedSignalsPermitted).toBe(false);
+    expect(snap.blockReasons).toContain('QUOTE_INTEGRITY_FAILED');
+    expect(snap.blockReasons).toContain('QUOTE_STALE'); // honest pass-through of the report's reasons
+  });
+
+  test('no quote report → permission can never be true (fail closed)', async () => {
+    for (const tf of TFS) await seedTf(tf);
+    await seedTick(10);
+    const snap = await computeFreshnessSnapshot({
+      symbol: SYMBOL,
+      timeframes: [...TFS],
+      now: () => FIXED_NOW_MS,
+    });
+    expect(snap.confirmedSignalsPermitted).toBe(false);
+    expect(snap.blockReasons).toContain('QUOTE_INTEGRITY_UNKNOWN');
+  });
+
+  test('a required TF not requested → NOT_CHECKED blocks permission (fail closed)', async () => {
+    await seedTf('M5');
+    await seedTf('M15');
+    await seedTick(10);
+    const snap = await computeFreshnessSnapshot({
+      symbol: SYMBOL,
+      timeframes: ['M5', 'M15'], // M1 missing from the checked set
+      now: () => FIXED_NOW_MS,
+      quoteReport: syntheticQuoteReport(true),
+    });
+    expect(snap.confirmedSignalsPermitted).toBe(false);
+    expect(snap.blockReasons).toContain('M1_NOT_CHECKED');
+  });
+
+  test('tick receive age is reported in ms (receive time, distinct from source time)', async () => {
+    await seedTf('M5');
+    await seedTickWithReceiveAge(30_000);
+    const snap = await computeFreshnessSnapshot({
+      symbol: SYMBOL,
+      timeframes: ['M5'],
+      now: () => FIXED_NOW_MS,
+      quoteReport: syntheticQuoteReport(true),
+    });
+    expect(snap.tickAgeMs).toBe(30_000);
+    expect(snap.lastReceiveAtUtc).toBe(new Date(FIXED_NOW_MS - 30_000).toISOString());
+    expect(snap.lastSourceTickAtUtc).not.toBe(snap.lastReceiveAtUtc); // never conflated
   });
 });

@@ -22,12 +22,16 @@ import {
   ErrorCode,
   TIMEFRAME_SECONDS,
   worstQualityState,
+  type MarketFreshnessSnapshot,
   type QualityState,
   type ReadinessResult,
+  type TfFreshness,
+  type TfStalenessState,
   type Timeframe,
   type TimeframeReadiness,
   type TickReadiness,
 } from './types';
+import type { QuoteIntegrityReport } from './integrity';
 import { ageSeconds, findMissingCandles, freshnessState } from './validation';
 
 export interface ReadinessOptions {
@@ -240,5 +244,133 @@ export async function getAnalysisReadiness(
     qualityState: 'UNAVAILABLE',
     errorCodes: result.errorCodes,
     reason: `Market data for ${opts.symbol} is not analysis-ready (state: ${result.qualityState}). Analysis must NOT run.`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Consolidated market-health freshness snapshot (Deep-remediation Phase 2,
+// master prompt §Phase 2 task 5: "a single authoritative market health
+// object"). PURE DERIVATION on top of the existing authorities —
+// computeReadiness (per-TF staleness thresholds) + findMissingCandles (gap
+// grid) + the persisted MarketLatestTick row. No staleness or gap logic is
+// reimplemented here.
+// ---------------------------------------------------------------------------
+
+export interface FreshnessOptions {
+  symbol: string;
+  /** Timeframes to report (default: the configured allowlist). */
+  timeframes?: Timeframe[];
+  /** Injectable clock (epoch ms) — deterministic tests. */
+  now?: () => number;
+  /** Pre-fetched quote-integrity report (the health route already has one).
+   *  When absent the quote gate is UNKNOWN and confirmedSignalsPermitted can
+   *  never be true — fail closed by construction. */
+  quoteReport?: QuoteIntegrityReport | null;
+}
+
+/** QualityState → the three-state staleness vocabulary of the health surface.
+ *  INVALID/UNAVAILABLE map to NO_DATA: present-but-corrupt is not usable. */
+function toStalenessState(state: QualityState): TfStalenessState {
+  if (state === 'VALID' || state === 'WARNING') return 'LIVE';
+  if (state === 'STALE') return 'STALE';
+  return 'NO_DATA';
+}
+
+/** Suspicious (non-closure) gaps among closed candles from `fromSec` to now —
+ *  the same findMissingCandles grid validation computeReadiness uses, applied
+ *  to a 24h window instead of the recent-bar scan window. */
+async function suspiciousGapsSince(
+  symbol: string,
+  tf: Timeframe,
+  fromSec: number,
+  nowSec: number,
+): Promise<number> {
+  const rows = await db.marketCandle
+    .findMany({
+      where: {
+        symbol,
+        timeframe: tf,
+        isForming: false,
+        candleTimeUtc: { gte: new Date(fromSec * 1000) },
+      },
+      orderBy: { candleTimeUtc: 'asc' },
+      select: { candleTimeUtc: true },
+    })
+    .catch(() => []);
+  if (rows.length < 2) return 0;
+  const present = rows.map((r) => Math.floor(r.candleTimeUtc.getTime() / 1000));
+  const gaps = findMissingCandles(present, {
+    timeframe: tf,
+    fromUtcSec: present[0],
+    toUtcSec: present[present.length - 1] + TIMEFRAME_SECONDS[tf],
+    nowUtcSec: nowSec,
+    maxGaps: 500,
+  });
+  return gaps.filter((g) => g.severity === 'warning').length;
+}
+
+/** The timeframes that must ALL be LIVE for confirmed signals to be allowed
+ *  (the scalper's fast trio — the same set its readiness gate checks). */
+const CONFIRMED_SIGNAL_REQUIRED_TFS: readonly Timeframe[] = ['M1', 'M5', 'M15'];
+
+export async function computeFreshnessSnapshot(opts: FreshnessOptions): Promise<MarketFreshnessSnapshot> {
+  const nowMs = opts.now ?? Date.now;
+  const nowSec = Math.floor(nowMs() / 1000);
+  const timeframes: Timeframe[] = [...(opts.timeframes ?? config.market.timeframes)];
+
+  // Per-TF staleness + latest closed candle — reuse the existing authority.
+  const readiness = await computeReadiness({ symbol: opts.symbol, timeframes, now: nowMs });
+
+  // 24h suspicious-gap count per timeframe (closed bars only).
+  const sinceSec = nowSec - 86_400;
+  const perTimeframe: TfFreshness[] = [];
+  let gapCount = 0;
+  for (const t of readiness.timeframes) {
+    const suspicious = await suspiciousGapsSince(opts.symbol, t.timeframe, sinceSec, nowSec);
+    gapCount += suspicious;
+    perTimeframe.push({
+      timeframe: t.timeframe,
+      latestClosedCandleAtUtc: t.lastClosedCandleTimeUtc,
+      stalenessState: toStalenessState(t.state),
+      lastClosedCandleAgeSeconds: t.lastClosedCandleAgeSeconds,
+      stalenessThresholdSeconds: t.stalenessThresholdSeconds,
+      suspiciousGapsLast24h: suspicious,
+      errorCodes: [...t.errorCodes],
+    });
+  }
+
+  // Tick surface: source event time vs server receive time (never conflated).
+  const tickRow = await db.marketLatestTick.findUnique({ where: { symbol: opts.symbol } }).catch(() => null);
+  const receivedAtMs = tickRow ? tickRow.receivedAtUtc.getTime() : null;
+
+  // Single permission bit: quote integrity passes AND M1+M5+M15 all LIVE.
+  const blockReasons: string[] = [];
+  if (opts.quoteReport) {
+    if (!opts.quoteReport.signalPermitted) {
+      blockReasons.push('QUOTE_INTEGRITY_FAILED', ...opts.quoteReport.blockedReasons);
+    }
+  } else {
+    blockReasons.push('QUOTE_INTEGRITY_UNKNOWN');
+  }
+  for (const required of CONFIRMED_SIGNAL_REQUIRED_TFS) {
+    const tf = perTimeframe.find((t) => t.timeframe === required);
+    if (!tf) {
+      blockReasons.push(`${required}_NOT_CHECKED`);
+    } else if (tf.stalenessState !== 'LIVE') {
+      blockReasons.push(`${required}_${tf.stalenessState}`);
+    }
+  }
+
+  return {
+    purpose: 'market-freshness-surface-not-trade-recommendation',
+    symbol: opts.symbol,
+    checkedAtUtc: new Date(nowMs()).toISOString(),
+    lastSourceTickAtUtc: tickRow ? tickRow.tickTimeUtc.toISOString() : null,
+    lastReceiveAtUtc: tickRow ? tickRow.receivedAtUtc.toISOString() : null,
+    tickAgeMs: receivedAtMs !== null ? Math.max(0, nowMs() - receivedAtMs) : null,
+    perTimeframe,
+    gapCountLast24h: gapCount,
+    confirmedSignalsPermitted: blockReasons.length === 0,
+    blockReasons,
   };
 }

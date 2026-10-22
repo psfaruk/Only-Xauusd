@@ -17,6 +17,13 @@ import { deriveConditionReport } from '@/lib/signal/conditions';
 import { CANDIDATE_STRATEGY_VERSION } from '@/lib/signal/candidate/types';
 import { getLatestCandidateEvaluation } from '@/lib/signal/candidate-persistence';
 import { getCandidatePaperStats } from '@/lib/signal/candidate-paper';
+import { getLatestScalperEvaluation } from '@/lib/signal/scalper/persistence';
+import {
+  LIFECYCLE_CONTRACT_VERSION,
+  confidenceLabel,
+  deriveLifecycleStatus,
+  signalDedupeKey,
+} from '@/lib/signal/lifecycle';
 import { config } from '@/lib/config';
 import { signalLatestQuerySchema } from '@/lib/signal/schemas';
 
@@ -80,10 +87,64 @@ export async function GET(req: Request) {
         }
       : null;
 
+    // Deep-remediation Phase 3 (additive): typed lifecycle contract for the
+    // latest evaluation(s) — derived status (CANDIDATE | CONFIRMED | EXPIRED |
+    // …), expiry, canonical dedupe key and the confidence TYPE (evidence
+    // score, never a probability). Computed read-time from the persisted rows
+    // via the pure lifecycle module; null when no evaluation exists (honest
+    // absence). The scalper surface gets its own separately-labeled block
+    // (same contract) — the scalper ROUTE itself is untouched.
+    const nowMs = () => Date.now();
+    const lifecycle = signal
+      ? {
+          contractVersion: LIFECYCLE_CONTRACT_VERSION,
+          status: deriveLifecycleStatus({
+            outcome: signal.outcome,
+            decisionCandleTimeUtc: signal.decisionCandleTimeUtc,
+            setupKnownAtUtc: signal.setupKnownAtUtc,
+            expiryUtc: signal.expiryUtc,
+            now: nowMs,
+          }),
+          expiresAtUtc: signal.expiryUtc,
+          dedupeKey: signalDedupeKey({
+            symbol: signal.symbol,
+            strategyVersion: signal.strategyVersion,
+            setupFingerprint: signal.setupFingerprint,
+            decisionCandleTimeUtc: signal.decisionCandleTimeUtc,
+          }),
+          confidenceType: confidenceLabel(signal.evidence?.smc?.tier ?? null),
+        }
+      : null;
+
+    const latestScalper = await getLatestScalperEvaluation(db, symbol);
+    const scalperLifecycle = latestScalper
+      ? {
+          contractVersion: LIFECYCLE_CONTRACT_VERSION,
+          status: deriveLifecycleStatus({
+            outcome: latestScalper.outcome,
+            decisionCandleTimeUtc: latestScalper.decisionCandleTimeUtc,
+            setupKnownAtUtc: latestScalper.setupKnownAtUtc,
+            expiryUtc: latestScalper.expiryUtc,
+            now: nowMs,
+          }),
+          expiresAtUtc: latestScalper.expiryUtc,
+          dedupeKey: signalDedupeKey({
+            symbol: latestScalper.symbol,
+            strategyVersion: latestScalper.strategyVersion,
+            setupFingerprint: latestScalper.setupFingerprint,
+            decisionCandleTimeUtc: latestScalper.decisionCandleTimeUtc,
+          }),
+          confidenceType: confidenceLabel(latestScalper.evidence?.smc?.tier ?? null),
+        }
+      : null;
+
     return NextResponse.json({
       ok: true,
       symbol,
       signal,
+      // Deep-remediation Phase 3: signal lifecycle contract (additive).
+      lifecycle,
+      scalperLifecycle,
       backtestComparison,
       // Phase 11 (section I): read-time derived condition checklist — WHY the
       // latest evaluation did (or did not) produce a signal, per condition,
