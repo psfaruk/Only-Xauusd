@@ -99,3 +99,18 @@ every route on demand (all 200s).
 5. Standing Task-42 user actions (docs/security-rotation.md): rotate the Exness password, confirm
    the repo is PRIVATE, rotate the bridge token.
 6. M1 history older than ~100 days is broker-unavailable (explicitly not fabricated).
+
+## 10. ADDENDUM — first REAL live signal captured end-to-end (post-commit proof)
+
+Minutes after the release commit, at 2026-10-22T17:05:48Z the baseline engine
+(hybrid-structure-retest/9.0.0) detected and persisted the FIRST REAL live setup of this session:
+
+- **SELL_SETUP · M15** — entry 4037.806 · SL 4069.820 · TP 3973.779 · R:R 2.00 · expiry 20:00 UTC
+- Paper row auto-created by the scheduler (open, 0 observations → status PENDING — honest)
+- The Fresh Signal Table picked it up LIVE: badge অপেক্ষমাণ, movement +1.239 (+0.04R),
+  current price 4039.045, lifecycle DECISION_CANDLE → SETUP_KNOWN → EVALUATED → PAPER_OPENED
+- Screenshot: `audit/task45-first-live-signal.png` · zero console errors
+
+This is the complete end-to-end proof the master prompt required: real broker data → validated
+candles → engine decision → persisted signal → paper tracking → API → Fresh Signal Table → UI —
+every stage verified with a REAL signal, nothing fabricated.
