@@ -18,7 +18,13 @@ import { FIXED_NOW_SEC, FIXED_NOW_MS } from './helpers/setup';
 import { makeBars } from './helpers/mock-bridge';
 
 const SYMBOL = 'XAUUSDm';
-const req = (url: string, init?: RequestInit) => new Request(`http://localhost:3000${url}`, init);
+const req = (url: string, init?: RequestInit) =>
+  new Request(`http://localhost:3000${url}`, {
+    ...init,
+    // Phase 9: trigger routes with the public opt-in require same-origin
+    // evidence — emulate the app's own browser UI on every synthetic request.
+    headers: { Origin: 'http://localhost:3000', ...(init?.headers ?? {}) },
+  });
 
 async function seedCandles() {
   await db.marketCandle.deleteMany();

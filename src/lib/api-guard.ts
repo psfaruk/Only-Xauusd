@@ -93,6 +93,40 @@ export function jsonError(
  *     allowed only with the explicit MARKET_API_PUBLIC_READS opt-in,
  *     otherwise 503 fail closed.
  */
+/**
+ * Same-origin evidence for the public-trigger opt-in (Phase 9 hardening).
+ * When DATA_API_TOKEN is unset and the operator opted into public triggers,
+ * the request must still look like it came from THIS app's browser UI:
+ *   · `Origin` header host matches the request Host, or
+ *   · `Sec-Fetch-Site` is same-origin/same-site (modern browsers always send
+ *     it on fetch()).
+ * A bare curl/scanner (no Origin, no Sec-Fetch-Site, or a foreign Origin) is
+ * rejected — anonymous off-box triggering is impossible by default.
+ * Behind the platform gateway the Host/Origin pair is preserved end-to-end.
+ */
+function sameOriginEvidence(request: Request): boolean {
+  const secFetchSite = (request.headers.get('sec-fetch-site') ?? '').toLowerCase();
+  if (secFetchSite === 'same-origin' || secFetchSite === 'same-site') return true;
+  if (secFetchSite && secFetchSite !== 'none') return false; // cross-site fetch metadata
+  const origin = request.headers.get('origin');
+  if (!origin) return false; // non-browser caller without fetch metadata
+  try {
+    const originHost = new URL(origin).host;
+    if (originHost === '') return false;
+    // Accept a match against ANY of the host identities this request can
+    // legitimately carry: the Host header (direct/proxied), X-Forwarded-Host
+    // (reverse proxy), or the request URL's own host (server-side synthesis).
+    const hostHeader = (request.headers.get('host') ?? '').toLowerCase();
+    const forwardedHost = (request.headers.get('x-forwarded-host') ?? '').split(',')[0].trim().toLowerCase();
+    const urlHost = new URL(request.url).host.toLowerCase();
+    return originHost.toLowerCase() === hostHeader ||
+      originHost.toLowerCase() === forwardedHost ||
+      originHost.toLowerCase() === urlHost;
+  } catch {
+    return false;
+  }
+}
+
 export function guardDataApi(
   request: Request,
   bucket: 'read' | 'trigger' = 'read',
@@ -146,7 +180,20 @@ export function guardDataApi(
       return { ok: true };
     }
     if (process.env.MARKET_API_PUBLIC_TRIGGERS === 'true' || process.env.MARKET_API_PUBLIC_TRIGGERS === '1') {
-      return { ok: true }; // explicitly opted-in public trigger (preview only)
+      // Phase 9 hardening: the preview opt-in is same-origin ONLY. The app's
+      // own browser UI qualifies (Origin/Sec-Fetch-Site evidence); an
+      // anonymous off-box caller (curl, scanner, foreign origin) does not.
+      if (!sameOriginEvidence(request)) {
+        return {
+          ok: false,
+          response: jsonError(
+            403,
+            ErrorCode.AUTH_INVALID_TOKEN,
+            'Fail-closed: public triggers are same-origin only. Off-box callers must set DATA_API_TOKEN and present a valid bearer.',
+          ),
+        };
+      }
+      return { ok: true }; // explicitly opted-in public trigger, same-origin (preview only)
     }
     return {
       ok: false,
