@@ -483,3 +483,59 @@ model BrokerSettings {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 }
+
+// ============================================================================
+// PHASE 7 (42-S4, ACTIVE) — real tool-using agent runtime
+// ----------------------------------------------------------------------------
+// AgentRun: one bounded task run of the agent orchestrator. Every state
+// transition is persisted (restart-safe: an interrupted run is listed with
+// its LAST state — nothing is ever fabricated as completed after the fact).
+// AgentStep: per-step audit rows — tool name + REDACTED digests only
+// (argument KEYS, first 400 chars of the bounded result). Raw args/results
+// are never persisted; secrets can never land here by construction.
+//
+// READ-ONLY BY CONSTRUCTION: the runtime may only invoke the 9 allowlisted
+// read-only observation tools (src/lib/agent-runtime/tools.ts). No order,
+// execution or mutation tool exists anywhere; run_risk_check is deliberately
+// EXCLUDED from the agent (it writes RiskCheck audit rows — agent runs stay
+// pure reads). This is analysis bookkeeping only.
+// ============================================================================
+
+model AgentRun {
+  id          String   @id @default(cuid())
+  task        String // the requested task (bounded 500 chars)
+  status      String // CREATED|PLANNED|RUNNING|WAITING_FOR_TOOL|VERIFYING|COMPLETED|FAILED|BLOCKED|CANCELLED
+  planJson    String // JSON array of { stepId, description, tool, status }
+  resultJson  String? // JSON { verdict, reason, facts[], evidence[], summaryBn }
+  errorText   String?
+  stepsUsed   Int      @default(0)
+  stepsMax    Int
+  toolCallsUsed Int    @default(0)
+  toolCallsMax Int
+  elapsedMs   Int      @default(0)
+  startedAtUtc DateTime @default(now())
+  endedAtUtc  DateTime?
+  createdAtUtc DateTime @default(now())
+  updatedAtUtc DateTime @updatedAt
+  steps       AgentStep[]
+
+  @@index([createdAtUtc])
+  @@index([status])
+}
+
+model AgentStep {
+  id        String   @id @default(cuid())
+  runId     String
+  run       AgentRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  seq       Int
+  state     String // PLANNED|RUNNING|WAITING_FOR_TOOL|DONE|FAILED|SKIPPED
+  toolName  String?
+  toolArgsDigest String? // redacted digest, NEVER raw secrets — store keys only
+  toolResultDigest String? // first 400 chars of bounded result
+  retries   Int      @default(0)
+  errorText String?
+  startedAtUtc DateTime @default(now())
+  endedAtUtc  DateTime?
+
+  @@index([runId])
+}
