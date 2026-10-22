@@ -115,7 +115,7 @@ export const bnErrorText: Record<string, string> = {
   SCALPER_HTF_OPPOSED:
     'H1 ও H4 ট্রেন্ড একসাথে বিপরীত দিকে — ট্রেন্ডের বিরুদ্ধে সিগন্যাল আটকানো হলো (কনটিনিউ vs রিভার্স বিচার, Task 36)। শুধু টিয়ার-A SMC রিভার্সাল ব্যতিক্রম।',
   SCALPER_POST_LOSS_COOLDOWN:
-    'সাম্প্রত্যক লসের পর পোস্ট-লস কুলডাউন চলছে — রিভেঞ্জ ট্রেড ঠেকাতে নতুন অটো-এন্ট্রি বিরত (Task 36)।',
+    'সাম্প্রত্যক কাগজে-লসের (পেপার) পর পোস্ট-লস কুলডাউন চলছে — রিভেঞ্জ-সেটআপ ঠেকাতে নতুন সিগন্যাল নিবন্ধন বিরত (Task 36; সিগন্যাল-অনলি — কোনো অর্ডার জড়িত নয়)।',
   INSUFFICIENT_M1_HISTORY: 'M1 ইতিহাস অপর্যাপ্ত — ইন্ডিকেটর ওয়ার্ম-আপ সম্পূর্ণ নয়।',
   INSUFFICIENT_M5_HISTORY: 'M5 ইতিহাস অপর্যাপ্ত — ইন্ডিকেটর ওয়ার্ম-আপ সম্পূর্ণ নয়।',
   INSUFFICIENT_M15_HISTORY: 'M15 ইতিহাস অপর্যাপ্ত — ইন্ডিকেটর ওয়ার্ম-আপ সম্পূর্ণ নয়।',
@@ -394,4 +394,74 @@ export const scalperTfLabelBn: Record<string, string> = {
   M15: '১৫ মিনিট',
   M5: '৫ মিনিট',
   M1: '১ মিনিট',
+};
+
+// ---------------------------------------------------------------------------
+// Phase 8 (42-S5) — signal lifecycle renderings (signal-only product)
+// ---------------------------------------------------------------------------
+
+/** Lifecycle status → Bengali label (42-S2 contract on /api/signal/latest). */
+export const signalLifecycleBn: Record<string, string> = {
+  CONFIRMED: 'নিশ্চিত',
+  EXPIRED: 'মেয়াদোত্তীর্ণ',
+  CANDIDATE: 'প্রার্থী',
+};
+
+/** Lifecycle status → token badge classes. EXPIRED is visually DE-emphasized
+ * (muted, never actionable-styled) per the Phase 8 honest-interpretation rule. */
+export function signalLifecycleBadgeClass(status: string): string {
+  switch (status) {
+    case 'CONFIRMED':
+      return 'border-up/40 bg-up/10 text-up';
+    case 'CANDIDATE':
+      return 'border-sun/40 bg-sun/10 text-sun';
+    case 'EXPIRED':
+      return 'border-border-strong/50 bg-muted text-muted-foreground';
+    default:
+      return 'border-border-strong/50 bg-muted text-content';
+  }
+}
+
+/**
+ * Confidence TYPE → Bengali label. EVIDENCE_SCORE is a raw evidence tally —
+ * it must read 'প্রমাণ-স্কোর', NEVER 'সম্ভাবনা' (probability); only a
+ * backend-declared CALIBRATED_PROBABILITY may be called সম্ভাবনা.
+ */
+export const confidenceTypeBn: Record<string, string> = {
+  EVIDENCE_SCORE: 'প্রমাণ-স্কোর (ক্যালিব্রেটেড সম্ভাবনা নয়)',
+  CALIBRATED_PROBABILITY: 'ক্যালিব্রেটেড সম্ভাবনা',
+};
+
+// ---------------------------------------------------------------------------
+// Phase 8 (42-S4) — agent-run status renderings (persisted backend state only)
+// ---------------------------------------------------------------------------
+
+/** Agent run status → Bengali label (every status is backend-persisted). */
+export const agentRunStatusBn: Record<string, string> = {
+  COMPLETED: 'সম্পন্ন',
+  FAILED: 'ব্যর্থ',
+  BLOCKED: 'অবরুদ্ধ',
+  RUNNING: 'চলমান',
+  PLANNED: 'চলমান',
+  WAITING_FOR_TOOL: 'চলমান',
+};
+
+/** Terminal = the run reached a final persisted verdict (no spinner). */
+export function isAgentRunTerminal(status: string): boolean {
+  return status === 'COMPLETED' || status === 'FAILED' || status === 'BLOCKED';
+}
+
+/** Agent run status → token badge classes. */
+export function agentRunBadgeClass(status: string): string {
+  switch (status) {
+    case 'COMPLETED':
+      return 'border-up/40 bg-up/10 text-up';
+    case 'FAILED':
+      return 'border-down/40 bg-down/10 text-down';
+    case 'BLOCKED':
+      return 'border-sun/40 bg-sun/10 text-sun';
+    default:
+      // RUNNING / PLANNED / WAITING_FOR_TOOL — active, backend says so
+      return 'border-brand/40 bg-brand/10 text-brand';
+  }
 };

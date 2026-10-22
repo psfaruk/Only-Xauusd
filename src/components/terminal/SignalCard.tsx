@@ -9,11 +9,18 @@
  * is research/decision-support — never an execution instruction.
  */
 
-import { CheckCircle2, Loader2, Minus, XCircle, Zap } from 'lucide-react';
+import { CheckCircle2, Clock, Loader2, Minus, XCircle, Zap } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { LevelBox, OutcomeBadgeIcon, PriceLevelText, outcomeBadgeTokenClass } from './bits';
-import { bnForCode, fmtDhaka, signalOutcomeBn } from '@/lib/dashboard/i18n';
+import {
+  bnForCode,
+  confidenceTypeBn,
+  fmtDhaka,
+  signalLifecycleBn,
+  signalLifecycleBadgeClass,
+  signalOutcomeBn,
+} from '@/lib/dashboard/i18n';
 import type { SignalLatestResponse } from '@/lib/dashboard/types';
 import type { PriceDisplaySpec } from '@/lib/market/price-display';
 
@@ -39,6 +46,17 @@ export function SignalCard({
   const cond = signalLatest?.conditions ?? null;
   const passedCount = cond?.checks.filter((c) => c.passed === true).length ?? null;
   const failedCount = cond?.checks.filter((c) => c.passed === false).length ?? null;
+
+  // Phase 8 (42-S2) — lifecycle block. Older payloads have NO lifecycle
+  // field; in that case nothing extra renders (honest absence — the UI never
+  // fabricates a CONFIRMED/EXPIRED state the backend did not publish).
+  const lifecycle = s?.lifecycle ?? null;
+  const lifecycleExpired = lifecycle?.status === 'EXPIRED';
+  const expiryIso = lifecycle?.expiresAtUtc ?? s?.expiryUtc ?? null;
+  const expiryPast =
+    expiryIso !== null && !Number.isNaN(new Date(expiryIso).getTime())
+      ? new Date(expiryIso).getTime() < Date.now()
+      : false;
 
   return (
     <section
@@ -74,6 +92,37 @@ export function SignalCard({
           </p>
         ) : (
           <>
+            {/* Phase 8 — lifecycle strip (renders ONLY when the backend
+             * attached the block). Static expiry text — no fake countdown
+             * ticking; an EXPIRED setup is visually de-emphasized. */}
+            {lifecycle && (
+              <div
+                className="flex min-w-0 flex-wrap items-center gap-1.5"
+                data-testid="signal-lifecycle-strip"
+              >
+                <Badge
+                  variant="outline"
+                  className={`text-[11px] ${signalLifecycleBadgeClass(lifecycle.status)}`}
+                >
+                  <Clock className="h-3 w-3" aria-hidden />
+                  {signalLifecycleBn[lifecycle.status] ?? lifecycle.status}
+                </Badge>
+                {expiryIso && (
+                  <span className="min-w-0 break-words text-[11px] leading-relaxed text-muted-foreground">
+                    মেয়াদ: <span className="font-mono text-content">{fmtDhaka(expiryIso)}</span>
+                    {expiryPast && !lifecycleExpired && (
+                      <span className="ml-1 text-sun">(মেয়াদোত্তীর্ণ)</span>
+                    )}
+                  </span>
+                )}
+                {lifecycle.confidenceType && (
+                  <span className="min-w-0 basis-full break-words text-[11px] leading-relaxed text-muted-foreground">
+                    কনফিডেন্স ধরন: <span className="text-content">{confidenceTypeBn[lifecycle.confidenceType] ?? lifecycle.confidenceType}</span>
+                  </span>
+                )}
+              </div>
+            )}
+
             <div className="grid grid-cols-2 gap-2 text-[11px]">
               <div className="min-w-0">
                 <p className="leading-snug text-muted-foreground">সিদ্ধান্ত ক্যান্ডেল (M15)</p>
@@ -96,7 +145,10 @@ export function SignalCard({
             </div>
 
             {s.levels ? (
-              <div className="grid grid-cols-2 gap-2">
+              <div
+                className={`grid grid-cols-2 gap-2 ${lifecycleExpired ? 'opacity-60 transition-opacity' : ''}`}
+                aria-label={lifecycleExpired ? 'মেয়াদোত্তীর্ণ সেটআপের লেভেল (ঐতিহাসিক)' : undefined}
+              >
                 <LevelBox
                   label="দিক"
                   value={s.levels.direction === 'BUY' ? 'BUY (লং)' : 'SELL (শর্ট)'}

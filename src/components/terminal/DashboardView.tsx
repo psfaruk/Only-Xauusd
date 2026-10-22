@@ -57,12 +57,34 @@ export function MarketSnapshot({
   const bidValue = liveTick ? String(liveTick.bid) : (pollTick?.bid ?? null);
   const askValue = liveTick ? String(liveTick.ask) : (pollTick?.ask ?? null);
   const spreadValue = liveTick ? liveTick.spread.toFixed(liveTick.digits ?? 3) : (pollTick?.spread ?? null);
+  // Phase 8 (42-S5) — stale-quote honesty on the snapshot itself. The badge
+  // is driven by the payload's own freshness marker (never an invented
+  // threshold): STALE/DEGRADED quotes get the warn 'পুরনো ডেটা' chip so a
+  // non-live quote is visually distinct from a live one.
+  const quoteFreshness = dataHealth?.quote?.freshness ?? null;
+  const staleBadge =
+    quoteFreshness === 'STALE' || quoteFreshness === 'DEGRADED'
+      ? { cls: 'border-warn/40 bg-warn/10 text-warn', label: 'পুরনো ডেটা' }
+      : quoteFreshness === 'DISCONNECTED'
+        ? { cls: 'border-down/40 bg-down/10 text-down', label: 'কোট বিচ্ছিন্ন' }
+        : null;
   return (
     <section aria-label="মার্কেট স্ন্যাপশট" className="rounded-xl border border-border bg-panel" data-testid="market-snapshot">
       <div className="flex min-w-0 flex-wrap items-center gap-2 border-b border-border px-4 py-3">
         <Network className="h-4 w-4 shrink-0 text-sun" aria-hidden />
         <h2 className="min-w-0 text-sm font-semibold text-foreground">মার্কেট স্ন্যাপশট — XAUUSDm</h2>
         <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1.5">
+          {staleBadge && (
+            <Badge
+              variant="outline"
+              className={`text-[11px] ${staleBadge.cls}`}
+              data-testid="market-stale-badge"
+              title="কোট সতেজতা পে-লোড থেকে (STALE/DEGRADED/DISCONNECTED) — কোনো থ্রেশহোল্ড বানানো হয়নি"
+            >
+              <AlertTriangle className="h-3 w-3" aria-hidden />
+              {staleBadge.label}
+            </Badge>
+          )}
           {marketStatus && (
             <Badge variant="outline" className={`text-[11px] ${qualityStateTokenClass(marketStatus.readiness.qualityState)}`}>
               <QualityBadgeIcon state={marketStatus.readiness.qualityState} />
@@ -142,6 +164,9 @@ export function MarketSnapshot({
             কোট সতেজতা: <span className="font-mono text-content">{dataHealth.quote.freshness}</span> · উৎস{' '}
             <span className="text-content">{dataHealth.quote.sourceLabel}</span>
             {dataHealth.quote.quoteTimeUtc ? ` · কোট-সময় ${fmtDhaka(dataHealth.quote.quoteTimeUtc)}` : ''}
+            {dataHealth.quote.ageSeconds != null
+              ? ` · বয়স ${fmtAge(dataHealth.quote.ageSeconds)}`
+              : ''}
           </p>
         )}
         {liveTick && (
@@ -233,18 +258,20 @@ export function SystemMiniCards({
     {
       key: 'lock',
       icon: LockKeyhole,
-      title: 'Order Execution',
+      title: 'অর্ডার লক',
       // Master-audit fix B-D2: derived from the backend's own flag — the old
       // card was a static string (could not reflect an abnormal unlock).
-      value: health ? (health.executionLocked ? 'Read-Only' : 'লাইভ সচল') : '—',
+      // Phase 8 (42-S5): signal-only copy — an (impossible) unlock reads as
+      // an honest warning, never as live trading.
+      value: health ? (health.executionLocked ? 'Read-Only' : 'আনলকড (অপ্রত্যাশিত)') : '—',
       state: (
         health?.executionLocked
-          ? { label: 'LOCKED', cls: 'border-down/40 bg-down/10 text-down', Icon: XCircle }
+          ? { label: 'LOCKED', cls: 'border-up/40 bg-up/10 text-up', Icon: CheckCircle2 }
           : health
-            ? { label: 'LIVE', cls: 'border-up/40 bg-up/10 text-up', Icon: CheckCircle2 }
+            ? { label: 'UNLOCKED', cls: 'border-warn/40 bg-warn/10 text-warn', Icon: AlertTriangle }
             : { label: '—', cls: 'border-border-strong/50 bg-muted text-content', Icon: Minus }
       ) as { label: string; cls: string; Icon: typeof Minus },
-      lines: [health?.executionReason ?? 'Execution state unavailable.'],
+      lines: [health?.executionReason ?? 'সিগনাল-অনলি মোড — অর্ডার কোড সরানো হয়েছে (read-only)।'],
     },
   ];
 
@@ -312,19 +339,23 @@ export function DashboardView({
 }) {
   return (
     <div className="space-y-4">
-      {/* Live-trading banner — honest posture from the backend state */}
+      {/* Signal-only posture banner — honest state from the backend flag.
+       * Phase 0 hard-locked execution by construction (order code deleted,
+       * pinned by regression tests), so the locked branch is the real one;
+       * the impossible-unlocked branch renders an honest WARNING and never
+       * promises order execution (no such surface exists anymore). */}
       <div role="note" className="flex items-start gap-2.5 rounded-xl border border-up/30 bg-up/5 p-4">
         <LockKeyhole className="mt-0.5 h-4 w-4 shrink-0 text-up" aria-hidden />
         <p className="min-w-0 break-words text-[11px] leading-relaxed text-content">
           {health && !health.executionLocked ? (
             <>
-              <span className="font-semibold text-up">লাইভ ডেমো ট্রেডিং সচল</span> — স্ক্যাল্পার সিগন্যাল (M1·M5·M15)
-              রিস্ক-চেক পাস করলে স্বয়ংক্রিয়ভাবে অর্ডার কার্যকর হয়। {health.executionReason}
+              <span className="font-semibold text-warn">অপ্রত্যাশিত আনলক অবস্থা</span> — এই অ্যাপ
+              সিগনাল-অনলি; অর্ডার কোড সরানো আছে, তাই এটি সতর্কতা মাত্র। {health.executionReason}
             </>
           ) : (
             <>
-              <span className="font-semibold text-sun">রিড-ওনলি মোড</span> — বিশ্লেষণ ও সিগন্যাল গবেষণা ছাড়া কিছু নয়।{' '}
-              {health?.executionReason ?? 'চার-সুইচ এক্সিকিউশন লক সক্রিয়।'}
+              <span className="font-semibold text-sun">রিড-ওনলি মোড</span> — বিশ্লেষণ ও সিগনাল গবেষণা ছাড়া কিছু নয়।{' '}
+              {health?.executionReason ?? 'সিগনাল-অনলি মোড — অর্ডার কোড সরানো হয়েছে (read-only)।'}
             </>
           )}
         </p>

@@ -196,15 +196,15 @@ export function AppSidebar({
             <div
               className={`mb-2 flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-medium ${
                 locked
-                  ? 'border-down/40 bg-down/10 text-down'
-                  : 'border-up/40 bg-up/10 text-up'
+                  ? 'border-up/40 bg-up/10 text-up'
+                  : 'border-warn/40 bg-warn/10 text-warn'
               }`}
               data-execution-locked={locked ? 'true' : 'false'}
               title={health?.executionReason ?? undefined}
             >
               <ShieldCheck className="h-3.5 w-3.5 shrink-0" aria-hidden />
               <span className="truncate">
-                {locked ? 'অর্ডার লকড (রিড-ওনলি)' : 'ডেমো এক্সিকিউশন সচল'}
+                {locked ? 'অর্ডার লকড (রিড-ওনলি)' : 'আনলকড (অপ্রত্যাশিত সতর্কতা)'}
               </span>
             </div>
           )}

@@ -63,6 +63,7 @@ import { AppSidebar } from '@/components/terminal/AppSidebar';
 import { CommandPalette } from '@/components/terminal/CommandPalette';
 import { HeroStrip } from '@/components/terminal/HeroStrip';
 import { AppInfoCard } from '@/components/terminal/AppInfoCard';
+import { AgentActivityPanel } from '@/components/terminal/AgentActivityPanel';
 import { ChartPanel } from '@/components/terminal/ChartPanel';
 import { CandidateSignalCard } from '@/components/terminal/CandidateSignalCard';
 import { ScalperSignalCard } from '@/components/terminal/ScalperSignalCard';
@@ -731,6 +732,9 @@ export default function TradingTerminal() {
             {view === 'system' && (
               <div className="space-y-4">
                 <AppInfoCard health={health} />
+                {/* Phase 8 — persisted agent-run activity (self-polling,
+                 * read-only) directly under the app identity card. */}
+                <AgentActivityPanel />
                 {systemView}
               </div>
             )}
@@ -800,6 +804,9 @@ export default function TradingTerminal() {
                  * app identity/posture card (former footer block), then the
                  * analysis surfaces, then the diagnostics mega-view. */}
                 <AppInfoCard health={health} />
+                {/* Phase 8 — agent activity panel right after the identity
+                 * card, before the analysis surfaces. */}
+                <AgentActivityPanel />
                 <AnalysisView
                   analysisLatest={analysisLatest}
                   analysisError={analysisError}

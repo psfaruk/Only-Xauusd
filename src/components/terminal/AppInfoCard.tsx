@@ -98,6 +98,14 @@ export function AppInfoCard({ health }: { health: HealthReport | null }) {
             অর্ডার এক্সিকিউশন কোড মুছে ফেলা হয়েছে — অ্যাপ শুধু বাজার দেখে,
             বিশ্লেষণ ও সিগন্যাল দেয়; ব্রোকার অর্ডার পাঠাতে পারে না।
           </dd>
+          {/* Phase 8 — mandatory uncertainty/risk disclosure (no guaranteed-
+           * profit language anywhere in the product). */}
+          <dd
+            className="mt-1.5 break-words border-t border-border/60 pt-1.5 text-[11px] leading-relaxed text-muted-foreground"
+            data-testid="risk-disclosure"
+          >
+            সিগন্যাল গবেষণামূলক তথ্য — বিনিয়োগ পরামর্শ নয়।
+          </dd>
         </div>
       </dl>
     </section>

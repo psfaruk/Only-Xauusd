@@ -15,7 +15,7 @@
  * whenever the engine actually attached that evidence, levels only when the
  * evaluation actually produced them (SMC setups show the real POI entry ZONE
  * plus the live entry reference), the last-hour setup counter, the recent
- * setups strip, and the auto-execution posture. Honest states throughout —
+ * setups strip, and the signal-only posture. Honest states throughout —
  * API error ≠ loading ≠ "no evaluation yet"; a suppressed setup says WHY;
  * the SMC section renders ONLY from persisted evidence, never fabricated.
  */
@@ -359,7 +359,6 @@ export function ScalperSignalCard({
   const judgements = s?.evidence?.scalper?.tfJudgements ?? [];
   const smcEvidence = s?.evidence?.smc ?? null;
   const recent = scalper?.recentSetups ?? [];
-  const autoArmed = scalper?.execution?.enabled === true && scalper?.execution?.auto === true;
   const lastHour = scalper?.setupsLastHour ?? 0;
 
   return (
@@ -375,11 +374,17 @@ export function ScalperSignalCard({
           <Badge variant="outline" className="border-sun/40 bg-sun/10 text-[11px] text-sun">
             M1 · M5 · M15
           </Badge>
-          {autoArmed && (
-            <Badge variant="outline" className="border-up/40 bg-up/10 text-[11px] text-up">
-              <CheckCircle2 className="h-3 w-3" aria-hidden /> অটো-এক্সিকিউশন সচল
-            </Badge>
-          )}
+          {/* Phase 8 — scalper setups are confirmed on CLOSED candles by
+           * construction (the engine never reads a forming candle), so the
+           * badge states that provenance honestly. */}
+          <Badge
+            variant="outline"
+            className="border-border-strong/50 bg-muted text-[11px] text-content"
+            title="সিদ্ধান্ত শুধু সম্পূর্ণ-বন্ধ (closed) ক্যান্ডেলের দেওয়া ওপর ভিত্তি করে — গঠনশীল ক্যান্ডেল নয়"
+            data-testid="scalper-closed-candle-badge"
+          >
+            <CheckCircle2 className="h-3 w-3" aria-hidden /> ক্লোজড-ক্যান্ডেল ভিত্তিক
+          </Badge>
           {s && (
             <Badge variant="outline" className={`text-[11px] ${outcomeBadgeTokenClass(s.outcome)}`}>
               <OutcomeBadgeIcon outcome={s.outcome} />
@@ -481,8 +486,7 @@ export function ScalperSignalCard({
                   {s.evidence?.scalper?.model === 'SMC_CONFLUENCE' && smcEvidence?.tier != null
                     ? ` · ${smcTierBn[smcEvidence.tier] ?? ''}`
                     : ''}
-                  {autoArmed ? ' · রিস্ক-চেক পাস করলে অর্ডার স্বয়ংক্রিয়ভাবে যাবে' : ''}
-                  ।
+                  । সিগন্যাল-অনলি — কোনো অর্ডার যায় না।
                 </p>
               )}
             </div>
@@ -556,6 +560,19 @@ export function ScalperSignalCard({
                 <p className="leading-snug text-muted-foreground">কুলডাউন</p>
                 <p className="font-mono leading-snug text-foreground/90">৮ মিনিট</p>
               </div>
+              {/* Phase 8 — setup expiry (present only when the evaluation
+               * carried one; static time text, no fake countdown). */}
+              {s.expiryUtc && (
+                <div className="min-w-0">
+                  <p className="leading-snug text-muted-foreground">মেয়াদ</p>
+                  <p className="break-words font-mono leading-snug text-foreground/90">
+                    {fmtDhaka(s.expiryUtc)}
+                    {new Date(s.expiryUtc).getTime() < Date.now() ? (
+                      <span className="ml-1 font-sans text-sun">(মেয়াদোত্তীর্ণ)</span>
+                    ) : null}
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* Recent setups strip */}
@@ -582,6 +599,17 @@ export function ScalperSignalCard({
                         {r.model === 'SMC_CONFLUENCE' ? 'SMC' : r.model === 'REVERSAL' ? 'রিভার্সাল' : 'মোমেন্টাম'}
                       </span>
                       <span className="ml-auto font-mono text-muted-foreground">{fmtDhaka(r.createdAt)}</span>
+                      {/* Phase 8 — per-setup expiry when the payload carries
+                       * one (recentSetups[].expiryUtc); wraps to its own line
+                       * on narrow screens so nothing overflows. */}
+                      {r.expiryUtc && (
+                        <span className="min-w-0 basis-full break-words font-mono text-[10px] leading-relaxed text-muted-foreground">
+                          মেয়াদ: {fmtDhaka(r.expiryUtc)}
+                          {new Date(r.expiryUtc).getTime() < Date.now() ? (
+                            <span className="ml-1 font-sans text-sun">(মেয়াদোত্তীর্ণ)</span>
+                          ) : null}
+                        </span>
+                      )}
                     </div>
                   ))}
                 </div>

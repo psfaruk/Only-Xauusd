@@ -209,6 +209,27 @@ export interface RulesSnapshotView {
   };
 }
 
+/**
+ * Phase 8 (42-S2) — signal lifecycle block on /api/signal/latest.
+ * Optional by contract: older persisted payloads predate the lifecycle field,
+ * so the UI renders it ONLY when the backend actually attached it (honest
+ * absence — never a fabricated CONFIRMED/EXPIRED state).
+ */
+export interface SignalLifecycleView {
+  /** CONFIRMED | EXPIRED | CANDIDATE (kept open-string for forward compat). */
+  status: 'CONFIRMED' | 'EXPIRED' | 'CANDIDATE' | string;
+  /** When the setup stops being actionable (null = engine set no expiry). */
+  expiresAtUtc: string | null;
+  /** Deduplication key of the emitted setup (digest display only). */
+  dedupeKey: string | null;
+  /**
+   * What the engine's confidence number MEANS. 'EVIDENCE_SCORE' is a raw
+   * evidence tally — NOT a calibrated probability; the UI must never label
+   * it "সম্ভাবনা" (probability) unless the backend says CALIBRATED_PROBABILITY.
+   */
+  confidenceType: 'EVIDENCE_SCORE' | 'CALIBRATED_PROBABILITY' | string | null;
+}
+
 export interface SignalEvaluationView {
   id: string;
   createdAt: string;
@@ -220,6 +241,8 @@ export interface SignalEvaluationView {
   decisionCandleTimeUtc: string | null;
   setupKnownAtUtc: string | null;
   expiryUtc: string | null;
+  /** Phase 8 (42-S2) — present only on lifecycle-aware payloads. */
+  lifecycle?: SignalLifecycleView | null;
   levels: SignalLevelsView | null;
   evidence: SignalEvidenceView | null;
   inputFingerprint: string;
@@ -1184,6 +1207,62 @@ export interface AiReviewRunResponse {
     agents: Array<{ agent: string; verdict: string; reasoning: string; modelOk: boolean }>;
   } | null;
   generatedAtUtc: string;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 8 (42-S4) — /api/agent/runs — persisted agent-run activity
+// ----------------------------------------------------------------------------
+
+/** One persisted agent run (GET /api/agent/runs?limit=N → { ok, runs }). */
+export interface AgentRunView {
+  id: string;
+  task: string;
+  status:
+    | 'COMPLETED'
+    | 'FAILED'
+    | 'BLOCKED'
+    | 'RUNNING'
+    | 'PLANNED'
+    | 'WAITING_FOR_TOOL'
+    | string;
+  stepsUsed: number;
+  stepsMax: number;
+  toolCallsUsed: number;
+  toolCallsMax: number;
+  elapsedMs: number | null;
+  startedAtUtc: string;
+  endedAtUtc: string | null;
+  errorText: string | null;
+  /** Persisted result payload (JSON string) — digests only in the UI. */
+  resultJson?: string | null;
+  /** Live 42-S4 payload: the run's plan as persisted step digests. */
+  plan?: Array<{
+    stepId: string;
+    description: string;
+    tool: string | null;
+    status: string;
+  }> | null;
+  /** Live 42-S4 payload: per-tool observation rows (already REDACTED digests). */
+  steps?: Array<{
+    id: string;
+    seq: number;
+    state: string;
+    toolName: string | null;
+    retries: number;
+    errorText: string | null;
+  }> | null;
+  /** Live 42-S4 payload: structured result (verdict + Bengali summary). */
+  result?: {
+    verdict?: string;
+    reason?: string | null;
+    summaryBn?: string;
+  } | null;
+}
+
+export interface AgentRunsResponse {
+  ok: boolean;
+  runs: AgentRunView[];
+  error?: { code?: string; message?: string };
 }
 
 // ---------------------------------------------------------------------------
