@@ -1358,3 +1358,21 @@ Stage Summary:
 - Bottom space reclaimed: mobile footer 190px → ~137px total (1 slim line + nav clearance), content pb-28 → pb-6; all former footer info now lives in AppInfoCard at the top of the সিস্টেম tab (footer link navigates there).
 - Off-screen functions fixed: header quote age, নিরাপত্তা + আর্কিটেকচার sub-tabs, and wide-table scroll behavior all visible/contained at every tested width.
 - Zero API-contract changes (no fetch/handler/prop/testid touched except new footer link testid); committed as "Task 40 — reclaim bottom screen space + fix off-screen functions".
+
+---
+Task ID: 41
+Agent: Z.ai Code (main orchestrator)
+Task: Push the full project (main branch) to the new GitHub repo psfaruk/Only-Xauusd using the user-provided PAT (user Bengali request: "পুশ করো GitHub এ main ব্রাঞ্চে")
+
+Work Log:
+- Pre-flight: working tree 100% clean (nothing uncommitted); `.env` confirmed tracked (35/38 anti-rollback strategy intact — 60 commits on main incl. Tasks 39 UI redesign + 40 bottom-space/off-screen fixes).
+- Verified PAT + repo access with `git ls-remote` — Only-Xauusd was completely empty (fresh repo, no conflicting refs → clean non-force push possible).
+- Safety: scanned all history blobs — none >50MB (GitHub 100MB hard limit safe); .git pack ≈ 76MB.
+- Replaced old origin (psfaruk/Xauusd-agent.git) with `git remote set-url origin https://<PAT>@github.com/psfaruk/Only-Xauusd.git` (token embedded so future pushes/anti-rollback commits work non-interactively); `git branch -M main` (already main).
+- `git push -u origin main` → SUCCESS: `* [new branch] main -> main`, tracking `main → origin/main`.
+- Post-verify: `ls-remote` shows refs/heads/main = 2f3c39b (local HEAD); rev-list count 60; `git status -sb` = `## main...origin/main` fully in sync, 0 ahead/behind.
+
+Stage Summary:
+- Full project live on GitHub: https://github.com/psfaruk/Only-Xauusd (main branch, 60 commits, .env included per user's anti-rollback strategy).
+- Origin remote now permanently authenticated with embedded PAT — future `git push` self-healing works without interaction.
+- All prior work (Phase 14 demo trading, credential layer, Sky Terminal redesign, Task 40 layout fixes) is now backed up remotely.
