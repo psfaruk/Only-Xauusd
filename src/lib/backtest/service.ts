@@ -12,6 +12,13 @@ import type { AnalysisCandle } from '@/lib/analysis/types';
 import type { Timeframe } from '@/lib/market/types';
 import { TIMEFRAME_SECONDS } from '@/lib/market/types';
 import { runBacktest, DEFAULT_RULES, type BacktestResult, type BacktestRules } from './engine';
+import { bootstrapR, type BootstrapExpectancy } from './bootstrap';
+import {
+  buildSampleAdequacyReport,
+  sampleAdequacyFromTradeCount,
+  type DataRangeUtc,
+  type SampleAdequacy,
+} from './sample-adequacy';
 
 export interface RunBacktestOptions {
   symbol: string;
@@ -141,6 +148,25 @@ export interface LatestBacktestRun {
   tradeCount: number;
   limitations: string[];
   rules: Record<string, unknown>;
+  /** Phase 5 honesty block (Task 42-S3) — always present. */
+  sampleAdequacy: SampleAdequacy;
+  uncertaintyNote: string;
+  dataRangeUtc: DataRangeUtc | null;
+  /** Bootstrap CI over the stored trade list's R-multiples (null when the run
+   *  stored no parseable trades — never fabricated). */
+  bootstrapCi:
+    | (Pick<BootstrapExpectancy, 'iterations' | 'samples' | 'expectancyR' | 'medianExpectancyR' | 'p05ExpectancyR' | 'p95ExpectancyR' | 'note'>)
+    | null;
+}
+
+/** Parse the stored (bounded) trade JSON defensively — corrupt rows yield []. */
+function parseStoredTrades(raw: string): Array<{ rMultiple?: unknown }> {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? (parsed as Array<{ rMultiple?: unknown }>) : [];
+  } catch {
+    return [];
+  }
 }
 
 export async function getLatestBacktest(symbol: string): Promise<LatestBacktestRun | null> {
@@ -149,6 +175,35 @@ export async function getLatestBacktest(symbol: string): Promise<LatestBacktestR
     orderBy: { createdAt: 'desc' },
   });
   if (!row) return null;
+
+  const trades = parseStoredTrades(row.trades);
+  const tradeCount = trades.length;
+  const dataRangeUtc: DataRangeUtc = {
+    fromUtc: row.datasetFromUtc.toISOString(),
+    toUtc: row.datasetToUtc.toISOString(),
+  };
+  const adequacy = buildSampleAdequacyReport(tradeCount, dataRangeUtc);
+
+  // Bootstrap CI over the stored trade list when the R-multiples are available.
+  const rMultiples = trades
+    .map((t) => (typeof t.rMultiple === 'number' ? t.rMultiple : Number.NaN))
+    .filter((v) => Number.isFinite(v));
+  const bootstrapCi =
+    rMultiples.length > 0
+      ? (() => {
+          const b = bootstrapR(rMultiples, 1000, 42);
+          return {
+            iterations: b.iterations,
+            samples: b.samples,
+            expectancyR: b.expectancyR,
+            medianExpectancyR: b.medianExpectancyR,
+            p05ExpectancyR: b.p05ExpectancyR,
+            p95ExpectancyR: b.p95ExpectancyR,
+            note: b.note,
+          };
+        })()
+      : null;
+
   return {
     id: row.id,
     createdAt: row.createdAt.toISOString(),
@@ -166,9 +221,35 @@ export async function getLatestBacktest(symbol: string): Promise<LatestBacktestR
     },
     dev: JSON.parse(row.devMetrics) as Record<string, unknown>,
     oos: JSON.parse(row.oosMetrics) as Record<string, unknown>,
-    tradeCount: (JSON.parse(row.trades) as unknown[]).length,
+    tradeCount,
     limitations: JSON.parse(row.limitations) as string[],
     rules: JSON.parse(row.rules) as Record<string, unknown>,
+    sampleAdequacy: adequacy.sampleAdequacy,
+    uncertaintyNote: adequacy.uncertaintyNote,
+    dataRangeUtc: adequacy.dataRangeUtc,
+    bootstrapCi,
+  };
+}
+
+/**
+ * Phase 5 honesty block for callers that have NO run at all (null latest):
+ * zero trades is INSUFFICIENT_EVIDENCE by definition — the label must still
+ * be surfaced, never omitted.
+ */
+export function emptyBacktestHonestyBlock(): {
+  sampleAdequacy: SampleAdequacy;
+  tradeCount: number;
+  uncertaintyNote: string;
+  dataRangeUtc: DataRangeUtc | null;
+  bootstrapCi: LatestBacktestRun['bootstrapCi'];
+} {
+  const adequacy = buildSampleAdequacyReport(0, null);
+  return {
+    sampleAdequacy: sampleAdequacyFromTradeCount(0),
+    tradeCount: 0,
+    uncertaintyNote: adequacy.uncertaintyNote,
+    dataRangeUtc: null,
+    bootstrapCi: null,
   };
 }
 

@@ -8,7 +8,7 @@
 import { NextResponse } from 'next/server';
 import { guardDataApi } from '@/lib/api-guard';
 import { config } from '@/lib/config';
-import { getLatestBacktest } from '@/lib/backtest/service';
+import { emptyBacktestHonestyBlock, getLatestBacktest } from '@/lib/backtest/service';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,6 +29,18 @@ export async function GET(req: Request) {
     ok: true,
     symbol,
     latest,
+    // Phase 5 honesty block (Task 42-S3): ALWAYS present, even when no run
+    // exists — a missing run is INSUFFICIENT_EVIDENCE by definition, and the
+    // label must never silently disappear from the surface.
+    ...(latest
+      ? {
+          sampleAdequacy: latest.sampleAdequacy,
+          tradeCount: latest.tradeCount,
+          uncertaintyNote: latest.uncertaintyNote,
+          dataRangeUtc: latest.dataRangeUtc,
+          bootstrapCi: latest.bootstrapCi,
+        }
+      : emptyBacktestHonestyBlock()),
     disclaimer: latest
       ? 'Backtests are simulations, not proof of live profitability.'
       : null,

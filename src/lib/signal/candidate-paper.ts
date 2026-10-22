@@ -41,7 +41,7 @@ import { baselineCostModel, roundTripCost, type CostModel } from '@/lib/backtest
 import { logEvent } from '@/lib/logger';
 import { CANDIDATE_STRATEGY_VERSION, type CandidateModel } from './candidate/types';
 import type { CandidateRowEvidence } from './candidate-persistence';
-import { resolvePaperOutcome, paperPnl } from './paper';
+import { resolvePaperOutcome, paperPnl, timingBlockForCreate, timingBlockForRow } from './paper';
 import {
   CANDIDATE_FORWARD_ACTIVATED_AT_ISO,
   CANDIDATE_FORWARD_MIN_COMPLETED,
@@ -256,7 +256,15 @@ export async function trackCandidatePaperSignals(
               invalidationLevel: setup.invalidationLevel,
               status: 'open',
               modeledCostsPrice: roundTripCost(costs),
-              details: JSON.stringify({ costLabels: costs.labels }),
+              details: JSON.stringify({
+                costLabels: costs.labels,
+                // Phase 6 (42-S3): same end-to-end timing capture as the
+                // baseline ledger (additive JSON meta — schema untouched).
+                timing: timingBlockForCreate(
+                  { setupKnownAt: setup.setupKnownAt, createdAt: setup.createdAt },
+                  nowMs(),
+                ),
+              }),
             },
           });
           result.newlyOpened += 1;
@@ -369,6 +377,9 @@ export async function trackCandidatePaperSignals(
           collision: adv.collision,
           signalCreatedUtcSec: createSec,
           walkLowerBoundOpenUtcSec: Math.floor(lowerOpenMs / 1000),
+          // Phase 6 (42-S3): timing carried forward on every advance —
+          // recomputed from the row's own columns (exact).
+          timing: timingBlockForRow(paper),
         }),
       };
 

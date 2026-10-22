@@ -301,6 +301,122 @@ export function paperPnl(
   };
 }
 
+// ---------------------------------------------------------------------------
+// Phase 6 (Task 42-S3) — end-to-end timing capture + latency stats
+// ---------------------------------------------------------------------------
+
+/** Per-row timing fields used by the latency stats. ALL THREE are existing
+ *  columns on every PaperSignalOutcome row (historical rows included) — no
+ *  migration needed:
+ *    · decisionCandleCloseAtUtc = setupKnownAtUtc (the engine stamps the
+ *      decision bar's close instant there — core.ts: setupKnownAtUtc = decision
+ *      open + tfSec)
+ *    · detectedAtUtc            = signalCreatedAtUtc (the originating
+ *      SignalEvaluation row's createdAt — when the server SAW the setup)
+ *    · trackedAtUtc             = the paper row's own createdAt (when the
+ *      ledger opened the row) */
+export interface PaperTimingSourceRow {
+  setupKnownAtUtc: Date;
+  signalCreatedAtUtc: Date;
+  createdAt: Date;
+}
+
+export interface LatencyStat {
+  count: number;
+  medianMs: number | null;
+  p95Ms: number | null;
+}
+
+export interface PaperTimingStats {
+  /** decisionLatency = detectedAt − decisionCandleClose (how long after the
+   *  candle closed the server detected the setup). */
+  decisionLatencyMs: LatencyStat;
+  /** trackedLatency = trackedAt − detectedAt (evaluation → paper-row latency). */
+  trackedLatencyMs: LatencyStat;
+  /** Rows skipped because the delta was negative (chronology guard makes these
+   *  impossible in practice — defensive, always disclosed). */
+  invalidRows: number;
+  note: string;
+}
+
+/** Nearest-rank percentile over ascending values (deterministic). */
+function nearestRankOf(sorted: number[], p: number): number | null {
+  if (!sorted.length) return null;
+  const idx = Math.min(Math.max(0, Math.ceil((p / 100) * sorted.length) - 1), sorted.length - 1);
+  return sorted[idx];
+}
+
+function latencyStat(deltas: number[]): LatencyStat {
+  const sorted = [...deltas].sort((a, b) => a - b);
+  return {
+    count: sorted.length,
+    medianMs: nearestRankOf(sorted, 50),
+    p95Ms: nearestRankOf(sorted, 95),
+  };
+}
+
+/** PURE: latency stats over paper rows (see PaperTimingSourceRow). */
+export function computePaperTimingStats(rows: PaperTimingSourceRow[]): PaperTimingStats {
+  const decisionDeltas: number[] = [];
+  const trackedDeltas: number[] = [];
+  let invalid = 0;
+  for (const r of rows) {
+    const knownMs = r.setupKnownAtUtc.getTime();
+    const detectedMs = r.signalCreatedAtUtc.getTime();
+    const trackedMs = r.createdAt.getTime();
+    if (![knownMs, detectedMs, trackedMs].every(Number.isFinite)) {
+      invalid += 1;
+      continue;
+    }
+    const decisionDelta = detectedMs - knownMs;
+    const trackedDelta = trackedMs - detectedMs;
+    if (decisionDelta < 0 || trackedDelta < 0) {
+      invalid += 1; // impossible under the chronology guard — defensive skip
+      continue;
+    }
+    decisionDeltas.push(decisionDelta);
+    trackedDeltas.push(trackedDelta);
+  }
+  return {
+    decisionLatencyMs: latencyStat(decisionDeltas),
+    trackedLatencyMs: latencyStat(trackedDeltas),
+    invalidRows: invalid,
+    note: 'সময়-পরিমাপ ঐতিহাসিক সারি থেকে গণনী (schema অপরিবর্তিত) — ৪২-S3-এর আগের সারিও সময়-কলাম বহন করে, তাই latency পরিসংখ্যান পুরোনো সারিতেও প্রযোজ্য।',
+  };
+}
+
+/** The timing block persisted inside `details` (additive JSON meta — Phase 6).
+ *  Captured at CREATE time via the injectable clock: trackedAtUtc here is the
+ *  create-call instant; the DB-assigned row createdAt may differ by
+ *  sub-second. The authoritative column stays createdAt; this block is
+ *  observability. Exported for reuse by candidate-paper.ts (same discipline
+ *  as resolvePaperOutcome/paperPnl). */
+export function timingBlockForCreate(
+  setup: { setupKnownAt: Date; createdAt: Date },
+  nowMs: number,
+): Record<string, string> {
+  return {
+    decisionCandleCloseAtUtc: setup.setupKnownAt.toISOString(),
+    detectedAtUtc: setup.createdAt.toISOString(),
+    trackedAtUtc: new Date(nowMs).toISOString(),
+  };
+}
+
+/** The timing block carried on ADVANCE updates — recomputed from the row's
+ *  OWN columns (exact, never drifts with re-advances). Exported for reuse by
+ *  candidate-paper.ts. */
+export function timingBlockForRow(paper: {
+  setupKnownAtUtc: Date;
+  signalCreatedAtUtc: Date;
+  createdAt: Date;
+}): Record<string, string> {
+  return {
+    decisionCandleCloseAtUtc: paper.setupKnownAtUtc.toISOString(),
+    detectedAtUtc: paper.signalCreatedAtUtc.toISOString(),
+    trackedAtUtc: paper.createdAt.toISOString(),
+  };
+}
+
 /**
  * Advance paper tracking for all recent SETUP evaluations of a symbol.
  * Safe to call repeatedly (idempotent per signal: resolved rows are skipped;
@@ -397,7 +513,10 @@ export async function trackPaperSignals(
               invalidationLevel: invalidationLevelOf(setup),
               status: 'open',
               modeledCostsPrice: roundTripCost(costs),
-              details: JSON.stringify({ costLabels: costs.labels }),
+              details: JSON.stringify({
+                costLabels: costs.labels,
+                timing: timingBlockForCreate(setup, nowMs()),
+              }),
             },
           });
           result.newlyOpened += 1;
@@ -511,6 +630,9 @@ export async function trackPaperSignals(
           // Phase 10.3-B: the publication bound is documented on the row
           signalCreatedUtcSec: createSec,
           walkLowerBoundOpenUtcSec: Math.floor(lowerOpenMs / 1000),
+          // Phase 6 (42-S3): end-to-end timing carried forward on every
+          // advance — recomputed from the row's own columns (exact).
+          timing: timingBlockForRow(paper),
         }),
       };
 
@@ -578,6 +700,10 @@ export interface PaperOutcomeRow {
   symbol: string;
   direction: string;
   signalCreatedAtUtc: string;
+  /** Phase 6 (42-S3) — the decision bar's close instant (= setupKnownAtUtc column). */
+  setupKnownAtUtc: string;
+  /** Phase 6 (42-S3) — the paper row's create instant (= createdAt column). */
+  trackedAtUtc: string;
   decisionCandleTimeUtc: string;
   expiryUtc: string;
   status: string;
@@ -604,6 +730,10 @@ export interface PaperSummary {
   sumR: number | null;
   avgR: number | null;
   outcomes: PaperOutcomeRow[];
+  /** Phase 6 (42-S3) — end-to-end timing stats computed from stored rows.
+   *  Computable for ALL rows (the three instants are pre-existing columns),
+   *  so there is NO historical gap for the latency statistics themselves. */
+  timing: PaperTimingStats;
 }
 
 export async function getPaperSignalSummary(
@@ -630,6 +760,8 @@ export async function getPaperSignalSummary(
       symbol: r.symbol,
       direction: r.direction,
       signalCreatedAtUtc: r.signalCreatedAtUtc.toISOString(),
+      setupKnownAtUtc: r.setupKnownAtUtc.toISOString(),
+      trackedAtUtc: r.createdAt.toISOString(),
       decisionCandleTimeUtc: r.decisionCandleTimeUtc.toISOString(),
       expiryUtc: r.expiryUtc.toISOString(),
       status: r.status,
@@ -668,5 +800,7 @@ export async function getPaperSignalSummary(
     sumR: withPnl.length ? Number(sumR.toFixed(4)) : null,
     avgR: withPnl.length ? Number((sumR / withPnl.length).toFixed(4)) : null,
     outcomes,
+    // Phase 6 (42-S3): latency stats from the stored rows' own columns.
+    timing: computePaperTimingStats(rows),
   };
 }
