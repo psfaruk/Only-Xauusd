@@ -1,0 +1,953 @@
+ONLY-XAUUSD — MASTER REMEDIATION, SIX-MONTH BACKTEST & AUTONOMOUS AGENT COMPLETION PROMPT
+
+ROLE AND MISSION
+
+You are the Lead Software Engineer, Quantitative Research Engineer, Trading-System Auditor, Security Engineer, QA Lead, SRE, and Autonomous Coding Agent responsible for completing the existing repository:
+
+Repository: https://github.com/psfaruk/Only-Xauusd
+Primary branch: main
+Trading instrument: XAUUSDm
+Platform: Existing Next.js application and its current backend, database, market-data bridge, strategy engine, backtest engine, paper-forward tracker, and agent runtime.
+
+Your mission is to continue from the ACTUAL current repository state. Do not recreate the application from scratch, replace functioning modules without justification, or assume that a previous completion report proves the implementation is correct.
+
+Inspect the latest commit and all relevant code before modifying anything.
+
+PRIMARY OBJECTIVE: Deliver a secure, reliable, testable XAUUSD research and signal application that produces evidence-based signals only when market data, strategy conditions, and timing requirements are satisfied.
+
+You must implement the remaining work, acquire and validate up to six months of historical market data when required, run rigorous backtests, fix discovered defects, test the autonomous agent, verify the production build, and commit/push the verified changes.
+
+Do not stop after producing an audit, plan, checklist, or implementation proposal.
+
+---
+
+NON-NEGOTIABLE SAFETY RULES
+
+1. Preserve READ-ONLY broker access.
+2. Do not enable live or demo order placement.
+3. Do not submit, modify, or close broker orders or positions.
+4. Remove, disable, or isolate any unintended order-execution pathways. Verify the entire call graph, not only environment variables.
+5. Keep XAUUSDm as the configured trading symbol unless repository evidence establishes a documented broker-specific mapping requirement.
+6. Never invent market data, historical candles, spreads, trade outcomes, test results, agent actions, or deployment status.
+7. Never expose credentials, tokens, passwords, database URLs, or private environment values in source files, logs, reports, commits, or test artifacts.
+8. Do not remove security checks, weaken tests, suppress failures, or change acceptance thresholds merely to obtain a green result.
+9. Do not claim that the strategy is profitable, production-ready, or validated unless the evidence supports that claim.
+10. Prefer reversible changes, small logical commits, regression tests, and explicit evidence.
+11. Never rewrite Git history or force-push without an explicit, separately approved recovery plan.
+12. Preserve unrelated user changes and existing repository work.
+
+If a required external credential, broker permission, data source, or deployment secret is unavailable, complete every independent task and report the remaining dependency honestly. Never fabricate success.
+
+---
+
+PHASE 0 — REPOSITORY BASELINE AND CHANGE CONTROL
+
+Tasks
+
+1. Fetch the latest repository state and inspect:
+   
+   - Current branch and commit SHA.
+   - Working-tree changes, where accessible.
+   - Recent commits and changed files.
+   - Existing remediation reports and worklogs.
+   - Current test scripts and CI configuration.
+   - Existing strategy, backtest, paper-forward, agent, and market-data implementations.
+
+2. Map the application architecture:
+   
+   - Frontend and terminal UI.
+   - API routes and authentication.
+   - Database and migrations.
+   - Market-data ingestion and MT5 bridge.
+   - Candle and tick persistence.
+   - Signal generation and lifecycle.
+   - Backtesting and paper-forward tracking.
+   - Agent orchestration and tool registry.
+   - Scheduler, retries, and monitoring.
+   - Every possible broker order or position-management pathway.
+
+3. Establish a baseline:
+   
+   - Record the current commit.
+   - Run the available non-destructive checks.
+   - Record existing failures before making changes.
+   - Identify which previous report claims can be independently reproduced.
+
+4. Create a concise implementation matrix:
+   "Finding -> Evidence -> Root cause -> Fix -> Regression test -> Verification result".
+
+5. Preserve all unrelated changes. Work in a dedicated remediation branch when supported.
+
+Acceptance criteria
+
+- The baseline is documented.
+- Existing and newly introduced failures are distinguishable.
+- No changes are made blindly.
+- The implementation can be traced to the actual current code.
+
+---
+
+PHASE 1 — CREDENTIAL SECURITY AND READ-ONLY ENFORCEMENT
+
+Treat this phase as a release blocker.
+
+1.1 Secret audit
+
+Inspect current files and Git history for:
+
+- ".env" and environment backups.
+- ".zscripts/env.golden" or equivalent secret-restoration files.
+- MT5 credentials and bridge tokens.
+- API keys and database credentials.
+- Logs, snapshots, test fixtures, and documentation containing secrets.
+- CI logs or artifacts that may expose sensitive values.
+
+Never print the actual secret values in your report.
+
+Distinguish between:
+
+- A secret absent from the current branch.
+- A secret absent from the entire Git history.
+- A secret that has been rotated or revoked.
+
+These are separate claims and require separate evidence.
+
+1.2 Remove secret-restoration behavior
+
+Inspect all scripts that create, restore, copy, or synthesize ".env".
+
+They must never restore real credentials from a tracked backup.
+
+Implement the following behavior:
+
+- Fail safely when required runtime variables are missing.
+- Provide a sanitized ".env.example".
+- Keep real environment files ignored and untracked.
+- Prevent diagnostic scripts from printing secrets.
+- Ensure deployment secrets are supplied by the deployment environment or approved secret manager.
+
+Add automated secret scanning to CI.
+
+If credential-bearing history requires rewriting, prepare a careful cleanup procedure. Do not rewrite public history or force-push without the necessary authorization and coordination.
+
+Immediately document which credentials require rotation. Credential rotation must be verified separately; deleting a file does not revoke a credential.
+
+1.3 Enforce read-only architecture
+
+Inspect all application and bridge endpoints.
+
+Search for order-related functions, HTTP routes, SDK methods, RPC handlers, background jobs, and indirect calls capable of placing or closing orders.
+
+The safe application must:
+
+- Retrieve market data.
+- Store and validate candles.
+- Run analysis and research signals.
+- Perform backtests and paper simulations.
+- Explain signal evidence.
+- Monitor system health.
+
+It must not have an active broker-order submission or position-management path.
+
+Do not rely only on "TRADING_MODE=read_only". Enforce read-only behavior in the implementation and verify it through automated tests.
+
+If a trading bridge cannot operate without order capability, replace or isolate it with a documented market-data-only interface.
+
+Acceptance tests
+
+- A repository secret scan finds no committed live credentials.
+- Environment bootstrap never restores secret values.
+- Order-placement attempts are impossible through the supported application and bridge interfaces.
+- Existing market-data functionality remains operational.
+- No test or audit report contains actual secrets.
+
+---
+
+PHASE 2 — API SECURITY, CONFIGURATION, AND PRODUCTION READINESS
+
+Tasks
+
+1. Inspect every API route and classify it as:
+   
+   - Public read.
+   - Authenticated read.
+   - Protected trigger.
+   - Internal scheduler operation.
+   - Administrative operation.
+
+2. Make authentication fail closed for protected endpoints.
+
+3. Disable public trigger endpoints in production.
+
+4. Ensure browser-origin checks, proxy trust, and forwarded headers are configured safely. Do not treat untrusted client-supplied forwarding headers as verified identity.
+
+5. Add or verify:
+   
+   - Request validation.
+   - Input size limits.
+   - Rate limiting.
+   - Authentication tests.
+   - Safe error responses.
+   - Request timeouts.
+   - Retry limits.
+   - Scheduler concurrency controls.
+   - Protection against duplicate jobs and overlapping evaluations.
+
+6. Do not depend exclusively on an in-memory rate limiter or scheduler lock if the deployment uses multiple workers. Use a shared store or another deployment-appropriate mechanism where required.
+
+7. Verify environment validation, database connectivity, migrations, and startup behavior.
+
+8. Ensure TypeScript errors cannot be silently ignored by the production release process.
+
+Acceptance criteria
+
+- Missing or invalid credentials cannot invoke protected operations.
+- Production defaults are secure.
+- Public triggers cannot initiate analysis or background work without the required authorization.
+- API failure responses do not expose secrets or internal stack traces.
+- Multi-worker behavior is documented and tested where applicable.
+
+---
+
+PHASE 3 — HISTORICAL DATA ACQUISITION: LAST SIX MONTHS
+
+The target research window is the six months immediately preceding the actual research run.
+
+For a run on 22 October 2026, the initial target window is:
+
+Start: 22 April 2026
+End: 22 October 2026
+
+Calculate the actual timestamps at runtime. Store all canonical timestamps in UTC.
+
+Do not assume that six months of valid data already exist.
+
+3.1 Inspect existing historical coverage
+
+Inspect the database and data-ingestion code to determine:
+
+- Earliest and latest valid candle timestamps.
+- Coverage by timeframe.
+- Number of valid, invalid, duplicated, missing, and forming candles.
+- Source and instrument identity.
+- Timezone consistency.
+- Existing data gaps.
+- Whether historical spread or tick-level bid/ask information exists.
+- Whether timestamps refer to candle open or candle close.
+- Whether previously downloaded data is reproducible and traceable.
+
+Use existing broker history first when it is available and authorized.
+
+If the existing MT5 bridge does not provide reliable historical data, evaluate an authorized alternative historical-data provider. Use an appropriate connector or supported provider API where available.
+
+Never fabricate candles to fill gaps.
+
+3.2 Required timeframes
+
+Collect and validate as many of these as the source can genuinely supply:
+
+- M1
+- M5
+- M15
+- H1
+- H4
+
+Prefer native source candles where possible. If higher timeframes must be resampled from lower timeframes, document the aggregation rules and prove that the result is consistent with the source.
+
+Use the broker's actual symbol mapping. Confirm whether the source instrument is XAUUSDm or a different gold contract before accepting the data.
+
+Do not silently combine different instruments, brokers, or symbol specifications.
+
+3.3 Historical-data validation
+
+For every dataset, verify:
+
+- Monotonically ordered timestamps.
+- Unique candle timestamps.
+- Valid OHLC relationships.
+- Positive, plausible prices.
+- Correct instrument and timeframe.
+- Consistent timezone handling.
+- Correct candle-boundary alignment.
+- No forming candles treated as closed candles.
+- No impossible future timestamps.
+- No duplicate candles counted twice.
+- Missing sessions and gaps are identified rather than silently filled.
+- Source provenance and retrieval timestamps are stored.
+- Historical revisions are detected where possible.
+
+Use the source's real trading calendar. Do not treat legitimate market closures as missing trading candles.
+
+If the provider cannot supply all six months, collect the maximum available period and state the exact coverage. Do not label a partial dataset as a complete six-month dataset.
+
+3.4 Data storage and reproducibility
+
+Store historical data using the existing data model where appropriate.
+
+For each dataset, preserve:
+
+- Provider and instrument identity.
+- UTC range.
+- Timeframe.
+- Record count.
+- Validation summary.
+- Missing-data summary.
+- Dataset fingerprint or checksum.
+- Retrieval date.
+- Any assumptions or transformations.
+
+Avoid unnecessary schema migrations. If a migration is needed, make it reversible where possible and test it against a disposable database before deployment.
+
+Acceptance criteria
+
+- Actual historical coverage is measurable.
+- The dataset is reproducible and traceable.
+- Corrupt or mixed-source data cannot silently enter a backtest.
+- Incomplete coverage is explicitly reported.
+- No fabricated records are used.
+
+---
+
+PHASE 4 — SIGNAL ENGINE AND TIMING CORRECTNESS
+
+Audit the complete signal path from source data to user-visible signal.
+
+4.1 Establish the exact event timeline
+
+Record UTC timestamps for:
+
+1. Source tick or candle arrival.
+2. Candle closure.
+3. Market-data persistence.
+4. Strategy evaluation start.
+5. Strategy evaluation completion.
+6. Signal creation.
+7. Signal confirmation.
+8. API response.
+9. Frontend receipt and display.
+10. Expiry or invalidation.
+
+Use monotonic clocks for durations measured within a process and UTC timestamps for cross-service event records.
+
+Do not subtract timestamps from unsynchronized systems without accounting for clock uncertainty.
+
+Measure:
+
+- Decision latency: signal creation minus decision-candle close.
+- Processing latency: evaluation completion minus evaluation start.
+- Delivery latency: frontend receipt minus API publication.
+- End-to-end latency: frontend receipt minus decision-candle close.
+
+Record distributions, sample sizes, median, p95, and p99 where enough observations exist.
+
+Do not invent latency results when no production or paper-forward observations exist.
+
+4.2 Signal lifecycle rules
+
+Implement and test deterministic handling of:
+
+- Candidate.
+- Confirmed.
+- Issued.
+- Expired.
+- Cancelled.
+- Invalidated.
+- Outcome recorded.
+
+Prevent duplicate signals for the same logical setup.
+
+Ensure expired, invalidated, or stale setups cannot reappear as new actionable signals without genuinely new qualifying evidence.
+
+Define signal validity using the strategy's actual rules, not arbitrary hardcoded assumptions.
+
+4.3 Closed-candle discipline
+
+A confirmed signal must not use future information.
+
+If a strategy deliberately emits a provisional signal while a candle is forming:
+
+- Label it "PROVISIONAL".
+- Identify the forming candle.
+- Never present it as confirmed.
+- Define how it can be invalidated or confirmed.
+
+For confirmed signals, use only information available at the decision time.
+
+Ensure that signal creation, candle close, entry-zone validity, and expiry are consistent.
+
+4.4 Late-entry protection
+
+A signal must not be treated as actionable when:
+
+- Its source data is stale.
+- Its entry zone has already been invalidated.
+- The market has moved beyond the permitted entry conditions.
+- Its validity period has expired.
+- Required timeframes lack valid data.
+- Spread or volatility exceeds the strategy's tested limits.
+
+Return a clear state such as "STALE", "EXPIRED", "INVALIDATED", or "NO_SIGNAL" instead of silently reusing an old setup.
+
+Acceptance criteria
+
+- No look-ahead leakage.
+- No duplicate logical setups.
+- No confirmed signal from invalid or stale data.
+- Late signals are correctly rejected or marked non-actionable.
+- Every signal can be traced to its source candles and strategy version.
+
+---
+
+PHASE 5 — SIX-MONTH BACKTEST AND QUANTITATIVE VALIDATION
+
+Run a backtest if the historical data is available and sufficiently valid. If data acquisition is necessary, complete Phase 3 first.
+
+Do not modify the strategy solely to improve historical results.
+
+5.1 Establish a reproducible baseline
+
+Before changing strategy logic:
+
+- Run the current strategy against the validated dataset.
+- Record the exact strategy version.
+- Record dataset fingerprint and rules.
+- Save the original results.
+- Record all costs, assumptions, exclusions, and limitations.
+
+Keep results from different strategies or parameter sets separate.
+
+5.2 Chronological research design
+
+Use chronological splits. Never randomly shuffle financial time-series observations.
+
+An initial research design may use:
+
+- Earlier 60%: development.
+- Next 20%: validation and limited parameter selection.
+- Final 20%: untouched out-of-sample evaluation.
+
+Adapt the split only when justified by the amount of usable data. Document any change before examining the final OOS results.
+
+Where data volume permits, run walk-forward validation across multiple chronological windows.
+
+Prevent information leakage through:
+
+- Future candles.
+- Indicator warm-up.
+- Overlapping labels.
+- Shared setup outcomes across splits.
+- Repeated parameter tuning on the final OOS segment.
+
+The final OOS segment must not become a tuning dataset.
+
+5.3 Execution assumptions
+
+The application is READ-ONLY. Backtest fills are simulations, not real orders.
+
+Model execution conservatively:
+
+- Signal at candle close.
+- Entry at the next eligible bar or a more accurate historical quote if available.
+- Bid/ask directionality.
+- Spread.
+- Slippage.
+- Commission if applicable.
+- Stop-loss and take-profit collision rules.
+- Entry-bar ambiguity.
+- Session closures and gaps.
+- Expiry and invalidation.
+- Rejected or unavailable entries.
+
+If historical spread is unavailable, label the cost as an assumption. Run sensitivity scenarios rather than presenting a current spread observation as historical truth.
+
+If tick-level execution data is unavailable, disclose the limitations of candle-based fills.
+
+Do not calculate monetary profit from unverified contract size, tick value, lot size, or currency conversion assumptions.
+
+Keep results in R-multiples or price units when monetary conversion cannot be verified.
+
+5.4 Metrics
+
+Calculate and report, where meaningful:
+
+- Total qualifying evaluations.
+- Candidate setups.
+- Confirmed signals.
+- Expired and invalidated signals.
+- Eligible simulated trades.
+- Completed outcomes.
+- Win rate.
+- Average win and average loss.
+- Expectancy per trade in R.
+- Profit factor.
+- Net R after modeled costs.
+- Maximum drawdown.
+- Consecutive losses.
+- Trade frequency.
+- Time in trade.
+- Performance by timeframe.
+- Long versus short performance.
+- Performance by session or volatility regime when adequately sampled.
+- Sensitivity to spread and slippage.
+- OOS performance.
+- Walk-forward consistency.
+- Confidence intervals and sample adequacy.
+
+Never treat repeated evaluations of the same setup as independent completed trades.
+
+Report zero-trade, insufficient-sample, and unavailable-metric conditions honestly.
+
+5.5 Strategy comparisons
+
+Compare the current strategy against proposed alternatives only through controlled experiments.
+
+Potential research dimensions include:
+
+- M15/H1/H4 directional confluence.
+- M5 confirmation.
+- M1 entry timing.
+- EMA structure.
+- RSI and ADX filters.
+- Break of Structure and Change of Character.
+- Retest quality.
+- Spread and ATR limits.
+- Session and volatility filters.
+
+These are hypotheses, not mandatory filters. Test them independently and avoid adding many conditions simply because they improve one historical sample.
+
+For each candidate strategy, record:
+
+- Exact rule changes.
+- Version identifier.
+- Parameter values.
+- Number of tested variants.
+- Dataset fingerprint.
+- Development and validation results.
+- Untouched OOS results.
+- Sensitivity results.
+- Rejection reason or acceptance evidence.
+
+Account for multiple testing and selection bias. A large number of tried parameter sets makes an apparently strong best result less convincing.
+
+5.6 Backtest decision
+
+Classify each strategy as one of:
+
+- "REJECTED"
+- "INSUFFICIENT_DATA"
+- "INSUFFICIENT_SAMPLE"
+- "RESEARCH_ONLY"
+- "PAPER_FORWARD_REQUIRED"
+- "ELIGIBLE_FOR_CONTINUED_PAPER_TESTING"
+
+Do not label a strategy profitable or production-validated merely because its historical profit factor exceeds 1.
+
+Define acceptance thresholds before evaluating final OOS results. If the existing project already has defensible criteria, audit and reuse them.
+
+Deliverables
+
+Produce a detailed report with:
+
+- Dataset coverage and quality.
+- Exact date range and timeframes.
+- Baseline results.
+- Each candidate's results.
+- OOS and walk-forward results.
+- Cost assumptions.
+- Statistical uncertainty.
+- Failed tests.
+- Reproducible commands.
+- Dataset and strategy fingerprints.
+- Clear recommendation.
+
+Save machine-readable results as well as human-readable Markdown.
+
+---
+
+PHASE 6 — PAPER-FORWARD VALIDATION
+
+Do not place broker orders.
+
+Run the deterministic signal engine against newly arriving market data and record simulated outcomes.
+
+Keep baseline and candidate strategy ledgers separate.
+
+For each logical setup, store:
+
+- Signal and strategy version.
+- Source candle references.
+- Creation and detection times.
+- Entry-zone geometry.
+- Expiry and invalidation.
+- Subsequent price observations.
+- Simulated outcome.
+- Cost assumptions.
+- Resolution timestamp.
+- Reason for rejection or non-actionability.
+
+Ensure that:
+
+- Restarting the application does not duplicate or resolve a setup incorrectly.
+- Previously resolved records remain immutable.
+- A repeated scheduler run is idempotent.
+- An incomplete data interval is not silently counted as a completed outcome.
+- Candidate results cannot leak into baseline results.
+
+Report completed outcomes separately from open or unresolved signals.
+
+Do not claim forward validation is complete until the predeclared evaluation window and minimum evidence requirements are met.
+
+---
+
+PHASE 7 — COMPLETE AND VERIFY THE REAL AGENT RUNTIME
+
+The agent must execute actual tools and verify their results. It must not merely generate a plausible narrative.
+
+7.1 Agent architecture
+
+Inspect and improve the existing:
+
+- Orchestrator.
+- Planner.
+- Tool registry.
+- State machine.
+- Run persistence.
+- Retry and timeout logic.
+- Verification stage.
+- Activity panel.
+- LLM integration.
+
+Avoid unnecessary rewrites if the current implementation is correct.
+
+7.2 Required agent workflow
+
+For each request:
+
+1. Parse the user's goal.
+2. Identify the required evidence.
+3. Create a bounded task plan.
+4. Validate that each task is authorized and safe.
+5. Execute approved tools.
+6. Persist each task's status and result.
+7. Validate tool outputs and their provenance.
+8. Ask a critic or verifier to inspect consequential conclusions.
+9. Retry recoverable failures within strict limits.
+10. Stop when the task is complete, blocked, unsafe, or out of budget.
+11. Produce a final report distinguishing verified facts from assumptions.
+
+The agent must not claim that code was changed, tests passed, data was acquired, or a commit was pushed unless the corresponding operation actually succeeded.
+
+7.3 State management
+
+Support clear states such as:
+
+- "QUEUED"
+- "PLANNING"
+- "RUNNING"
+- "VERIFYING"
+- "RETRYING"
+- "COMPLETED"
+- "BLOCKED"
+- "FAILED"
+- "CANCELLED"
+
+Persist task state so that service restarts do not silently lose work.
+
+Use bounded concurrency and prevent duplicate runs.
+
+Every run must have:
+
+- Run ID.
+- Task ID.
+- Start and finish timestamps.
+- Tool call records.
+- Outcome and evidence references.
+- Error details with secrets redacted.
+- Retry count.
+- Final verification status.
+
+7.4 Tool security
+
+The agent may:
+
+- Read market data.
+- Inspect strategy and backtest results.
+- Run approved research operations.
+- Read application health.
+- Inspect repository code.
+- Run permitted tests.
+- Propose and implement code changes within repository permissions.
+
+The agent must not:
+
+- Submit broker orders.
+- Modify or close broker positions.
+- Exfiltrate credentials.
+- Execute arbitrary untrusted commands without appropriate restrictions.
+- Modify security gates to force success.
+- Deploy or perform destructive Git operations without the required authorization.
+
+7.5 Agent acceptance tests
+
+Test that the agent:
+
+- Uses actual tool output.
+- Detects missing and stale data.
+- Refuses unsupported conclusions.
+- Handles tool failures and timeouts.
+- Avoids infinite retries.
+- Does not duplicate tasks.
+- Preserves state across restart.
+- Reports partial completion honestly.
+- Can inspect test failures and implement safe fixes.
+- Re-runs relevant tests after changing code.
+- Produces evidence-backed final reports.
+
+---
+
+PHASE 8 — FRONTEND, CHART, AND SIGNAL DELIVERY
+
+Inspect the existing UI before making visual changes.
+
+Improve consistency without removing functioning features.
+
+Verify:
+
+- Chart symbol and timeframe.
+- Tick and candle updates.
+- Closed-candle versus forming-candle distinction.
+- Data freshness indicators.
+- Signal status and expiry.
+- Signal source evidence.
+- Entry zone and risk geometry.
+- Agent run status and individual steps.
+- Loading, empty, stale, and error states.
+- Mobile layout and accessibility.
+- API failures and reconnect behavior.
+
+Do not simulate live market updates by inventing prices.
+
+Do not show an old signal as newly generated.
+
+Do not display an execution control if the application is required to remain read-only.
+
+Measure whether a newly generated signal reaches the UI promptly and consistently.
+
+Use browser or end-to-end testing where available. If browser verification cannot be performed, explicitly report that limitation.
+
+---
+
+PHASE 9 — OBSERVABILITY AND RECOVERY
+
+Complete the remaining observability work.
+
+Implement or verify:
+
+- Correlation IDs across API, scheduler, signal engine, agent, and frontend requests.
+- Structured, secret-redacted logs.
+- Data freshness metrics.
+- Signal-processing latency.
+- API response latency.
+- Agent task duration and failure rate.
+- Scheduler delay and overlap detection.
+- Database health.
+- Bridge health.
+- Retry and timeout counters.
+- p95 and p99 latency where enough measurements exist.
+
+Use UTC for event timestamps and monotonic clocks for within-process durations.
+
+Ensure that monitoring does not expose sensitive data.
+
+Create actionable diagnostics for:
+
+- No market data.
+- Stale market data.
+- Missing timeframe coverage.
+- Failed signal evaluation.
+- Failed database write.
+- Failed agent tool.
+- Delayed scheduler.
+- Failed historical data acquisition.
+- Incomplete backtest.
+
+Never label a disconnected bridge as healthy simply because the web server is running.
+
+---
+
+PHASE 10 — AUTOMATED TESTING AND PRODUCTION BUILD
+
+Run the actual repository commands. Discover the package manager from the lockfile and repository configuration instead of assuming one.
+
+At minimum, verify:
+
+1. Dependency installation in a clean environment.
+2. TypeScript typecheck.
+3. Lint.
+4. Unit tests.
+5. Integration tests.
+6. Signal lifecycle tests.
+7. Market-data validation tests.
+8. Backtest correctness and reproducibility tests.
+9. No-look-ahead tests.
+10. API authentication tests.
+11. Agent runtime tests.
+12. Read-only architecture tests.
+13. Database migration tests on a disposable database.
+14. Production build.
+15. Relevant end-to-end tests, if supported.
+
+Use the repository's existing test framework.
+
+Do not suppress TypeScript failures or remove failing tests to obtain a green build.
+
+Do not use production credentials or a live broker account during tests.
+
+If a test cannot run because a dependency or external service is unavailable, report it as "BLOCKED", not "PASSED".
+
+Fix every failure introduced by your changes and investigate existing failures that block release.
+
+Re-run all relevant regression tests after each material fix.
+
+---
+
+PHASE 11 — GITHUB COMPLETION AND RELEASE GATE
+
+11.1 Git discipline
+
+- Review every changed file.
+- Ensure secrets, local databases, generated credentials, and private artifacts are not committed.
+- Keep changes logically grouped.
+- Use clear commit messages.
+- Push only the verified remediation branch or approved target branch.
+- Never force-push.
+- Do not overwrite unrelated work.
+- If permissions or repository protection block a push, report the exact blocker.
+
+11.2 CI
+
+Ensure the repository's CI pipeline runs the required checks on the proposed changes.
+
+Where supported, configure CI to:
+
+- Install dependencies reproducibly.
+- Run typecheck and lint.
+- Run tests.
+- Run the production build.
+- Perform secret scanning.
+- Validate migration and read-only constraints.
+
+Do not report CI as green unless the actual run has completed successfully.
+
+11.3 Release gate
+
+The release remains blocked if any of the following is true:
+
+- Credentials are still exposed or required rotation remains unverified.
+- Broker-order execution is still reachable.
+- Protected APIs can be invoked without the required authorization.
+- Market data can be incorrectly treated as fresh.
+- Backtest look-ahead defects exist.
+- Critical tests fail.
+- Production build fails.
+- Required data provenance is missing.
+- Signal timing cannot be measured.
+- Agent claims successful work without verification evidence.
+
+Historical performance alone must never override a security or correctness failure.
+
+---
+
+FINAL DELIVERABLES
+
+Create and maintain these repository artifacts:
+
+1. "audit/final-remediation-report.md"
+   
+   - Findings, fixes, verification evidence, remaining limitations, and final release decision.
+
+2. "audit/historical-data-report.md"
+   
+   - Exact coverage, data source, validation results, missing intervals, and dataset fingerprint.
+
+3. "audit/six-month-backtest-report.md"
+   
+   - Baseline, candidate strategies, OOS results, cost assumptions, statistical uncertainty, and recommendation.
+
+4. "audit/signal-timing-report.md"
+   
+   - Event definitions, measured latency distributions, sample counts, and unresolved timing gaps.
+
+5. "audit/agent-acceptance-report.md"
+   
+   - Tool execution, state recovery, retry behavior, verification evidence, and failures.
+
+6. "audit/security-closure-report.md"
+   
+   - Secret scan results, credential rotation status, read-only verification, API protection, and remaining security blockers. Never include actual secrets.
+
+7. "audit/release-verification.md"
+   
+   - Exact commands, actual test/build results, commit SHA, CI status, and release decision.
+
+8. Machine-readable backtest artifacts with versioned rules and dataset fingerprints.
+
+Reports must distinguish:
+
+- Verified by direct execution.
+- Verified by source inspection.
+- Reported by an earlier run.
+- Not tested.
+- Blocked by external dependencies.
+
+Do not fabricate line numbers, test counts, benchmark values, provider responses, or successful actions.
+
+---
+
+REQUIRED EXECUTION BEHAVIOR
+
+Proceed autonomously through all independent, safe tasks.
+
+Do not stop after the initial audit.
+
+For each phase:
+
+1. Inspect.
+2. Identify root causes.
+3. Implement the fix.
+4. Add regression tests.
+5. Run the tests.
+6. Review the diff.
+7. Record evidence.
+8. Continue to the next phase.
+
+If a phase fails, diagnose and fix it before declaring it complete.
+
+Do not ask the user to approve routine, reversible code edits that are already within repository permissions. However, do not perform destructive history rewrites, rotate external credentials on the user's behalf, deploy to production, or execute other consequential external actions without the required authorization.
+
+If an external action is blocked, finish the remaining work and give the user a precise, minimal action list.
+
+FINAL RESPONSE FORMAT
+
+When work is finished, report:
+
+1. Starting and final commit SHAs.
+2. Phases completed and phases still blocked.
+3. Files changed and the purpose of each change.
+4. Exact test commands and actual results.
+5. Production build result.
+6. Actual historical-data date range, source, timeframes, record counts, and quality status.
+7. Baseline versus candidate backtest results, including OOS and statistical limitations.
+8. Paper-forward completed outcome count and measured signal latency.
+9. Agent acceptance-test results.
+10. Security status and any required user actions.
+11. Commit and push confirmation, with links.
+12. Final release decision: "PASS", "PASS WITH LIMITATIONS", or "BLOCKED".
+
+Never equate successful code tests with a profitable trading strategy.
+
+Never equate a successful historical backtest with guaranteed future performance.
+
+Never claim the application is fully completed while a release-blocking condition remains.
+
+BEGIN NOW: inspect the latest repository state, establish the baseline, and execute the remediation phases in order.

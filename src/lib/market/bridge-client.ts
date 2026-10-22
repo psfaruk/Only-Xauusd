@@ -25,6 +25,7 @@
 
 import { config } from '@/lib/config';
 import type {
+  BridgeCandlesRangeResponse,
   BridgeCandlesResponse,
   BridgeHealth,
   BridgeQuote,
@@ -48,6 +49,9 @@ export interface BridgeClient {
   getSymbols(): Promise<BridgeResult<BridgeSymbolsResponse>>;
   getQuote(symbol: string): Promise<BridgeResult<BridgeQuote>>;
   getCandles(params: { symbol: string; timeframe: string; limit: number }): Promise<BridgeResult<BridgeCandlesResponse>>;
+  /** Phase 3 historical acquisition — bounded UTC range query (closed bars,
+   *  forming edge flagged). Read-only, same auth + fail-closed semantics. */
+  getCandlesRange(params: { symbol: string; timeframe: string; fromUtcSec: number; toUtcSec: number }): Promise<BridgeResult<BridgeCandlesRangeResponse>>;
 }
 
 const MAX_BRIDGE_ERROR_MESSAGE = 300;
@@ -213,6 +217,22 @@ export function createBridgeClient(options: BridgeClientOptions = {}): BridgeCli
         (b) => {
           if (!isRecord(b) || !Array.isArray(b.bars) || typeof b.source !== 'string') return null;
           return b as unknown as BridgeCandlesResponse;
+        },
+      ),
+
+    getCandlesRange: ({ symbol, timeframe, fromUtcSec, toUtcSec }) =>
+      requestJson<BridgeCandlesRangeResponse>(
+        `/api/candles/range?symbol=${encodeURIComponent(symbol)}&tf=${encodeURIComponent(timeframe)}&fromUtc=${Math.trunc(fromUtcSec)}&toUtc=${Math.trunc(toUtcSec)}`,
+        (b) => {
+          if (
+            !isRecord(b) ||
+            !Array.isArray(b.bars) ||
+            typeof b.source !== 'string' ||
+            typeof b.fromUtc !== 'number' ||
+            typeof b.toUtc !== 'number' ||
+            typeof b.paginated !== 'boolean'
+          ) return null;
+          return b as unknown as BridgeCandlesRangeResponse;
         },
       ),
   };

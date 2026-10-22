@@ -188,6 +188,13 @@ export interface BridgeStatus {
   accountEquity?: number | null;
   /** Phase 0 — explicit read-only posture marker served by the bridge. */
   readOnly?: boolean;
+  /** Phase 3 (six-month acquisition) — provenance extras served by the
+   *  bridge snapshot: active gateway, MASKED login (never the raw number),
+   *  live-measured broker clock offset. */
+  gateway?: string | null;
+  loginMasked?: string | null;
+  brokerOffsetSec?: number;
+  brokerOffsetVerified?: boolean;
 }
 
 export interface BridgeQuote {
@@ -215,6 +222,15 @@ export interface BridgeCandlesResponse {
   digits?: number;
   source: BridgeFeedSource | string;
   bars: BridgeBar[];
+}
+
+/** Range-query response (Phase 3 historical acquisition — bridge
+ * GET /api/candles/range). Same bar contract as BridgeCandlesResponse plus
+ * the echoed UTC window and pagination marker. */
+export interface BridgeCandlesRangeResponse extends BridgeCandlesResponse {
+  fromUtc: number;  // unix seconds UTC — requested window start (echoed)
+  toUtc: number;    // unix seconds UTC — requested window end (echoed)
+  paginated: boolean;
 }
 
 export interface BridgeSymbolsResponse {

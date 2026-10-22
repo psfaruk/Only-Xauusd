@@ -9,6 +9,8 @@
  *   GET /api/symbols                             (auth)
  *   GET /api/quote?symbol=XAUUSDm                (auth)
  *   GET /api/candles?symbol=&tf=&limit=          (auth)
+ *   GET /api/candles/range?symbol=&tf=&fromUtc=&toUtc= (auth — Phase 3
+ *        historical acquisition; broker-time conversion both ways, span-capped)
  *
  * TASK 33/35 — ADMIN CREDENTIAL SWAP (always available, auth-gated; a session
  * CONFIG endpoint, not an order endpoint — it only (re)connects the market-data
@@ -28,7 +30,7 @@
 
 import {
   connect, snapshot, getQuote, getSymbolInfo, listSymbols, resolvableWatchlist,
-  fetchCandles, stop, config,
+  fetchCandles, fetchCandlesRange, stop, config,
   applyCredentials,
 } from "./src/manager";
 
@@ -283,6 +285,68 @@ const server = Bun.serve({
           : msg.startsWith("TIMEFRAME_NOT_SUPPORTED") ? "TIMEFRAME_NOT_SUPPORTED"
           : "BRIDGE_UNAVAILABLE";
         return json(null, 503, { ok: false, error: code, detail: msg });
+      }
+    }
+
+    if (path === "/api/candles/range") {
+      const symbol = (url.searchParams.get("symbol") ?? "").trim();
+      const tf = (url.searchParams.get("tf") ?? "").trim().toUpperCase();
+      const fromUtc = Number(url.searchParams.get("fromUtc"));
+      const toUtc = Number(url.searchParams.get("toUtc"));
+      if (!symbol || !tf) {
+        return json(null, 400, { ok: false, error: "BAD_REQUEST", detail: "symbol and tf required" });
+      }
+      if (!Number.isFinite(fromUtc) || !Number.isFinite(toUtc) || fromUtc <= 0 || toUtc <= 0 || fromUtc >= toUtc) {
+        return json(null, 400, { ok: false, error: "BAD_REQUEST", detail: "fromUtc and toUtc must be positive unix seconds (UTC) with fromUtc < toUtc" });
+      }
+      // Span cap: the range endpoint serves bounded research windows (the
+      // 6-month acquisition + retries), not unbounded crawls.
+      const MAX_RANGE_SPAN_SEC = 400 * 86400;
+      if (toUtc - fromUtc > MAX_RANGE_SPAN_SEC) {
+        return json(null, 400, { ok: false, error: "BAD_REQUEST", detail: `range span must be ≤ ${MAX_RANGE_SPAN_SEC}s (~400 days)` });
+      }
+      // No future windows — the range path is for CLOSED history.
+      const nowUtc = Math.floor(Date.now() / 1000);
+      if (fromUtc > nowUtc + 3600) {
+        return json(null, 400, { ok: false, error: "BAD_REQUEST", detail: "fromUtc is in the future" });
+      }
+      const info = getSymbolInfo(symbol);
+      if (snapshot().connected && !info) {
+        return json(null, 404, { ok: false, error: "SYMBOL_NOT_FOUND", detail: `${symbol} not in broker symbol table` });
+      }
+      try {
+        const offsetSec = snapshot().brokerOffsetSec;
+        // UTC → broker time for the protocol call; broker → UTC on output
+        // (same normalization rule as /api/quote and /api/candles).
+        const fetched = await fetchCandlesRange(symbol, tf, fromUtc + offsetSec, toUtc + offsetSec);
+        const bars = fetched.bars.map((b, i) => {
+          const last = i === fetched.bars.length - 1;
+          const forming = last && fetched.formingCount > 0 && b.time === fetched.bars[fetched.bars.length - 1].time;
+          return {
+            t: b.time - offsetSec, // UTC-normalized bar open
+            o: b.open, h: b.high, l: b.low, c: b.close,
+            v: b.tickVolume,
+            f: forming ? 1 : 0,
+          };
+        });
+        return json(null, 200, {
+          symbol: fetched.symbol,
+          tf: fetched.tf,
+          digits: fetched.digits,
+          source: "mt5",
+          fromUtc,
+          toUtc,
+          paginated: fetched.paginated,
+          bars,
+        });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        const code = msg.startsWith("SYMBOL_NOT_FOUND") ? "SYMBOL_NOT_FOUND"
+          : msg.startsWith("TIMEFRAME_NOT_SUPPORTED") ? "TIMEFRAME_NOT_SUPPORTED"
+          : msg.startsWith("BAD_RANGE") ? "BAD_REQUEST"
+          : "BRIDGE_UNAVAILABLE";
+        const status = code === "BAD_REQUEST" ? 400 : code === "SYMBOL_NOT_FOUND" || code === "TIMEFRAME_NOT_SUPPORTED" ? 404 : 503;
+        return json(null, status, { ok: false, error: code, detail: msg });
       }
     }
 

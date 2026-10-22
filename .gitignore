@@ -74,3 +74,4 @@ tool-results/
 
 # Task 33/35 — broker settings store key (auto-generated; NEVER commit)
 db/settings.key
+.zscripts/tmp/

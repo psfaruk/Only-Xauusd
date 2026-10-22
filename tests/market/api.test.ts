@@ -455,9 +455,43 @@ describe('case 18 — signal-only surface containment (Phase 0: execution code D
 
   test('bridge client exposes ONLY read-only methods', async () => {
     const mod = await import('@/lib/market/bridge-client');
-    const client = mod.createBridgeClient({ baseUrl: 'http://127.0.0.1:1' });
+    const client = mod.createBridgeClient({ baseUrl: 'http://x', token: 't' });
+    // Task 43 (Phase 3 six-month acquisition): getCandlesRange joined the
+    // surface — GET /api/candles/range, historical data acquisition ONLY
+    // (broker-authorized deep history). Still zero order capability.
     const methods = Object.keys(client);
-    expect(methods.sort()).toEqual(['getCandles', 'getHealth', 'getQuote', 'getStatus', 'getSymbols']);
+    expect(methods.sort()).toEqual([
+      'getCandles',
+      'getCandlesRange',
+      'getHealth',
+      'getQuote',
+      'getStatus',
+      'getSymbols',
+    ]);
+    // The new method exists and is a callable method on the instance…
+    expect(typeof client.getCandlesRange).toBe('function');
+    // …and the source file defines NO order-submission vocabulary whatsoever
+    // (same pattern family as the route scan above — precise tokens, so the
+    // module's "READ-ONLY" doc-comments never false-positive).
+    const src = readFileSync(
+      join(import.meta.dir, '../../src/lib/market/bridge-client.ts'),
+      'utf8',
+    );
+    const orderPatterns = [
+      /ORDER_TYPE_/i,
+      /positions_add/i,
+      /trade_action/i,
+      /OrderSend/i,
+      /\/api\/trader\//,
+      /placeBridgeOrder/i,
+      /closeBridgePosition/i,
+      /placeMarketOrder/i,
+      /modifyOrder/i,
+      /cancelOrder/i,
+      /openPosition/i,
+      /closePosition/i,
+    ];
+    expect(orderPatterns.some((p) => p.test(src))).toBe(false);
   });
 
   test('the tools registry contains ONLY read-only tools (no execution capability)', async () => {

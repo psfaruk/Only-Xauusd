@@ -461,3 +461,67 @@ function countForming(bars: Mt5Candle[], durSec: number): number {
   return n;
 }
 
+/**
+ * Range query (master-prompt Phase 3 — historical acquisition): fetch every
+ * CLOSED bar in the broker-time window [fromSec, toSec] (bar OPEN times),
+ * paginating FORWARD in ≤ maxBarsPerWindow-bar slices. This is the
+ * broker-authorized deep-history path the limit-only endpoint cannot serve.
+ *
+ * Semantics:
+ *   · Windows advance forward; bars merge by open-time (dedup across slice
+ *     boundaries). Ascending output.
+ *   · A slice that returns ZERO bars means the broker has no data there
+ *     (history depth limit or market closure) — recorded honestly, never
+ *     fabricated.
+ *   · The forming bar (still open at the broker) is returned LAST and counted
+ *     separately — the importer drops it.
+ *   · Broker time in/out — the HTTP layer normalizes UTC↔broker.
+ */
+export async function fetchCandlesRange(
+  symbol: string,
+  tf: string,
+  fromSec: number,
+  toSec: number,
+): Promise<CandleFetch> {
+  const info = symbolTable.get(symbol);
+  if (!info) throw new Error(`SYMBOL_NOT_FOUND: ${symbol} not in broker symbol table`);
+  const code = TF_CODE[tf];
+  const dur = TF_SECONDS[tf];
+  if (!code || !dur) throw new Error(`TIMEFRAME_NOT_SUPPORTED: ${tf}`);
+  if (!client?.isOpen) throw new Error("not connected");
+  if (!Number.isFinite(fromSec) || !Number.isFinite(toSec) || fromSec >= toSec) {
+    throw new Error("BAD_RANGE: fromSec must be < toSec");
+  }
+
+  const byTime = new Map<number, Mt5Candle>();
+  let paginated = false;
+  const sliceSpan = config.maxBarsPerWindow * dur;
+  let cursor = fromSec;
+
+  while (cursor < toSec) {
+    const sliceEnd = Math.min(cursor + sliceSpan, toSec);
+    const win = await client.candles(symbol, code, cursor, sliceEnd);
+    for (const b of win) byTime.set(b.time, b);
+    if (sliceEnd < toSec) paginated = true;
+    // Guard: a slice that returned data ending before its window still
+    // advances by the window (forward march) — gaps stay gaps.
+    cursor = sliceEnd;
+  }
+
+  const bars = [...byTime.values()].sort((a, b) => a.time - b.time);
+  // Keep only bars whose OPEN lies in the requested window [fromSec, toSec).
+  // (The protocol's ±1d slack may deliver a boundary bar just outside — never
+  // include it in a range answer; the forming edge is marked, not dropped,
+  // so the importer can exclude it explicitly.)
+  const inWindow = bars.filter((b) => b.time >= fromSec && b.time < toSec);
+
+  return {
+    symbol, tf, digits: info.digits,
+    bars: inWindow,
+    formingCount: countForming(inWindow, dur),
+    windowFromSec: fromSec,
+    windowToSec: toSec,
+    paginated,
+  };
+}
+

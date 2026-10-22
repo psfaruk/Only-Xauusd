@@ -1,0 +1,267 @@
+{
+  "generatedAtUtc": "2026-10-22T12:46:30.148Z",
+  "preRegisteredDesign": {
+    "dataset": "all verified closed broker candles (bridge-mt5, VALID, non-forming)",
+    "split": "chronological dev/OOS 70/30",
+    "costs": {
+      "spreadPrice": 0.24,
+      "slippagePrice": 0.02,
+      "label": "ASSUMPTION — historical per-bar spread not served by source"
+    },
+    "bootstrap": {
+      "iterations": 1000,
+      "seed": 42
+    },
+    "classificationRules": [
+      "engine INSUFFICIENT_DATA → INSUFFICIENT_DATA",
+      "OOS completed trades < 30 → INSUFFICIENT_SAMPLE",
+      "OOS bootstrap p95 ≤ 0 → REJECTED",
+      "OOS bootstrap median ≤ 0 → REJECTED",
+      "otherwise → PAPER_FORWARD_REQUIRED"
+    ]
+  },
+  "dataset": {
+    "symbol": "XAUUSDm",
+    "executionTf": "M15",
+    "m15": {
+      "candles": 11956,
+      "excluded": 0,
+      "from": "2026-04-23T00:45:00.000Z",
+      "to": "2026-10-22T12:30:00.000Z"
+    },
+    "m5": {
+      "candles": 35867,
+      "excluded": 0,
+      "from": "2026-04-23T00:45:00.000Z → 2026-10-22T12:40:00.000Z"
+    },
+    "h1": {
+      "candles": 2989,
+      "excluded": 0,
+      "from": "2026-04-23T01:00:00.000Z → 2026-10-22T11:00:00.000Z"
+    },
+    "h4": {
+      "candles": 810,
+      "excluded": 0,
+      "from": "2026-04-22T12:00:00.000Z → 2026-10-22T08:00:00.000Z"
+    },
+    "fingerprint": "eb65207f122c2ffcf4ff50ae400c16fd04c8e88fb9385a468fb2fe5f59dd41f0",
+    "digits": 3
+  },
+  "baseline": {
+    "strategyVersion": "hybrid-structure-retest/9.0.0",
+    "backtestVersion": "hybrid-structure-retest/9.0.0-validation",
+    "counters": {
+      "evaluations": 11956,
+      "blockedEvaluations": 2918,
+      "noSetup": 6129,
+      "wait": 2594,
+      "candidateSetups": 4980,
+      "validSetups": 315,
+      "hypotheticalFills": 75,
+      "completedOutcomes": 75
+    },
+    "dev": {
+      "trades": 42,
+      "completed": 42,
+      "wins": 14,
+      "winRate": 0.333,
+      "netPnlPrice": 93.55,
+      "sumR": 0,
+      "profitFactor": 1.11,
+      "maxDrawdownR": -13,
+      "maxConsecutiveLosses": 8,
+      "status": "OK"
+    },
+    "oos": {
+      "trades": 33,
+      "completed": 33,
+      "wins": 7,
+      "winRate": 0.212,
+      "netPnlPrice": -175.26,
+      "sumR": -11.32,
+      "profitFactor": 0.72,
+      "maxDrawdownR": -17.32,
+      "maxConsecutiveLosses": 16,
+      "status": "OK"
+    },
+    "bootstrapAll": {
+      "iterations": 1000,
+      "samples": 75,
+      "dropped": 0,
+      "expectancyR": -0.150986,
+      "medianExpectancyR": -0.150986,
+      "p05ExpectancyR": -0.430986,
+      "p95ExpectancyR": 0.12,
+      "note": "বুটস্ট্র্যাপ ব্যান্ড নির্দিষ্ট ট্রেড-তালিকার পুনঃনমুনায়ন মাত্র — ভবিষ্যতের প্রতিশ্রুতি নয়; নমুনা যত ছোট, ব্যান্ড তত চওড়া।"
+    },
+    "bootstrapOos": {
+      "iterations": 1000,
+      "samples": 33,
+      "dropped": 0,
+      "expectancyR": -0.343151,
+      "medianExpectancyR": -0.343151,
+      "p05ExpectancyR": -0.686302,
+      "p95ExpectancyR": 0.040971,
+      "note": "বুটস্ট্র্যাপ ব্যান্ড নির্দিষ্ট ট্রেড-তালিকার পুনঃনমুনায়ন মাত্র — ভবিষ্যতের প্রতিশ্রুতি নয়; নমুনা যত ছোট, ব্যান্ড তত চওড়া।"
+    },
+    "adequacy": {
+      "dev": {
+        "sampleAdequacy": "PRELIMINARY",
+        "tradeCount": 42,
+        "uncertaintyNote": "নমুনা মাঝারি (৩০–৯৯ ট্রেড) — ফলাফল প্রাথমিক, চূড়ান্ত নয়",
+        "dataRangeUtc": {
+          "fromUtc": "2026-04-23T00:45:00.000Z",
+          "toUtc": "2026-10-22T12:30:00.000Z"
+        }
+      },
+      "oos": {
+        "sampleAdequacy": "PRELIMINARY",
+        "tradeCount": 33,
+        "uncertaintyNote": "নমুনা মাঝারি (৩০–৯৯ ট্রেড) — ফলাফল প্রাথমিক, চূড়ান্ত নয়",
+        "dataRangeUtc": {
+          "fromUtc": "2026-04-23T00:45:00.000Z",
+          "toUtc": "2026-10-22T12:30:00.000Z"
+        }
+      }
+    },
+    "classification": {
+      "classification": "REJECTED",
+      "rule": "OOS bootstrap median -0.343R ≤ 0"
+    },
+    "limitations": [
+      "Backtests are simulations over verified broker candles — NEVER proof of live profitability.",
+      "The live engine references the REAL-TIME quote; this validation uses the decision bar's close and a fixed spread assumption (0.24 price units) + slippage (0.02) — a documented, honest difference.",
+      "Entries assume next-bar-open fills; real fills can differ.",
+      "When one candle touches both stop and target, the LOSS is assumed (conservative rule).",
+      "The out-of-sample segment is reported separately and was NEVER optimized against.",
+      "Small samples stay INSUFFICIENT_DATA — no metric is invented for thin segments.",
+      "H4 history is broker-bounded (see /api/data/health H4 coverage) — long-horizon statistics are limited by that depth."
+    ]
+  },
+  "candidate": {
+    "strategyVersion": "11.0.0-candidate.1 (pre-registered, unmodified)",
+    "counters": {
+      "evaluations": 11956,
+      "blockedEvaluations": 2918,
+      "noSetup": 23,
+      "wait": 8630,
+      "validSetups": 385,
+      "hypotheticalFills": 90,
+      "completedOutcomes": 90,
+      "setupsByModel": {
+        "A": 315,
+        "B": 44,
+        "C": 26
+      },
+      "modelAValidSuppressed": 0,
+      "suppressedByPrecedence": 0,
+      "conflicts": 0,
+      "distinctCandidateSetups": 179,
+      "repeatEmissions": 206,
+      "reasonCounts": {
+        "INSUFFICIENT_DATA": 2918,
+        "DATA_MISSING": 4,
+        "INSUFFICIENT_H1_HISTORY": 880,
+        "INSUFFICIENT_H4_HISTORY": 2918,
+        "ZONE_INVALIDATED": 2048,
+        "PULLBACK_NO_TOUCH": 607,
+        "RANGE_NOT_DETECTED": 8217,
+        "STRUCTURE_BREAK_TOO_OLD": 4013,
+        "RETEST_PENDING": 1020,
+        "HTF_H1_OPPOSITE": 501,
+        "RANGE_SWEEP_PENDING": 277,
+        "EMA_TREND_OPPOSITE": 567,
+        "RANGE_RECLAIM_PENDING": 68,
+        "HTF_H4_OPPOSITE": 462,
+        "PULLBACK_CONTEXT_NOT_ALIGNED": 7198,
+        "PRICE_BEYOND_ENTRY_ZONE": 663,
+        "RSI_OUT_OF_RANGE": 79,
+        "ADX_BELOW_MIN": 92,
+        "M5_CONFIRMATION_PENDING": 80,
+        "PULLBACK_TOO_DEEP": 32,
+        "LEVEL_CALC_INVALID": 9
+      }
+    },
+    "dev": {
+      "trades": 54,
+      "completed": 54,
+      "wins": 16,
+      "winRate": 0.296,
+      "netPnlPrice": -6.24,
+      "sumR": -6,
+      "profitFactor": 0.99,
+      "maxDrawdownR": -15,
+      "maxConsecutiveLosses": 11,
+      "status": "OK"
+    },
+    "oos": {
+      "trades": 36,
+      "completed": 36,
+      "wins": 9,
+      "winRate": 0.25,
+      "netPnlPrice": -100.78,
+      "sumR": -9.74,
+      "profitFactor": 0.85,
+      "maxDrawdownR": -17,
+      "maxConsecutiveLosses": 16,
+      "status": "OK"
+    },
+    "bootstrapOos": {
+      "iterations": 1000,
+      "samples": 36,
+      "dropped": 0,
+      "expectancyR": -0.270643,
+      "medianExpectancyR": -0.270643,
+      "p05ExpectancyR": -0.603976,
+      "p95ExpectancyR": 0.083333,
+      "note": "বুটস্ট্র্যাপ ব্যান্ড নির্দিষ্ট ট্রেড-তালিকার পুনঃনমুনায়ন মাত্র — ভবিষ্যতের প্রতিশ্রুতি নয়; নমুনা যত ছোট, ব্যান্ড তত চওড়া।"
+    },
+    "modelAEquality": {
+      "candidateModelA": 315,
+      "baselineValidSetups": 315,
+      "equal": true,
+      "barsIdentical": true
+    },
+    "classification": {
+      "classification": "REJECTED",
+      "rule": "OOS bootstrap median -0.271R ≤ 0"
+    }
+  },
+  "spreadSensitivity": [
+    {
+      "spreadPrice": 0.2,
+      "devTrades": 42,
+      "oosTrades": 33,
+      "devNetPnlPrice": 93.5528,
+      "oosNetPnlPrice": -175.0211,
+      "oosSumR": -11.32
+    },
+    {
+      "spreadPrice": 0.24,
+      "devTrades": 42,
+      "oosTrades": 33,
+      "devNetPnlPrice": 93.5528,
+      "oosNetPnlPrice": -175.2611,
+      "oosSumR": -11.32
+    },
+    {
+      "spreadPrice": 0.3,
+      "devTrades": 42,
+      "oosTrades": 33,
+      "devNetPnlPrice": 93.5528,
+      "oosNetPnlPrice": -175.6211,
+      "oosSumR": -11.32
+    },
+    {
+      "spreadPrice": 0.35,
+      "devTrades": 42,
+      "oosTrades": 33,
+      "devNetPnlPrice": 93.5528,
+      "oosNetPnlPrice": -175.9211,
+      "oosSumR": -11.33
+    }
+  ],
+  "paperForwardLedger": {
+    "note": "The runtime paper-forward ledger was reset by the platform DB wipe on 2026-10-22 — completed forward outcomes = 0 at this run. Forward evidence must re-accumulate under the pre-registered protocol before any reliability claim."
+  }
+}
