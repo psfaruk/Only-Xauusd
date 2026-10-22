@@ -147,7 +147,11 @@ export function SystemView({
   return (
     <div className="space-y-4">
       <Tabs defaultValue="audit" className="space-y-4">
-        <TabsList className="h-auto w-full max-w-full flex-nowrap overflow-x-auto bg-panel p-1">
+        {/* Task 40 fix: was flex-nowrap overflow-x-auto — a hidden horizontal
+         * scroll row where "নিরাপত্তা" and "আর্কিটেকচার" sat off-screen on
+         * mobile (invisible functions). A 4-column grid keeps all 8 sub-tabs
+         * on-screen in exactly two rows at every width. */}
+        <TabsList className="h-auto w-full max-w-full grid grid-cols-4 gap-1 bg-panel p-1">
           {(
             [
               ['audit', 'নিরীক্ষণ v2'],
@@ -163,7 +167,7 @@ export function SystemView({
             <TabsTrigger
               key={v}
               value={v}
-              className="min-h-[40px] px-4 data-[state=active]:bg-sun/15 data-[state=active]:text-sun"
+              className="min-h-[40px] whitespace-normal px-2 text-center text-xs leading-tight sm:px-4 sm:text-sm data-[state=active]:bg-sun/15 data-[state=active]:text-sun"
             >
               {label}
             </TabsTrigger>
@@ -672,7 +676,7 @@ export function SystemView({
                   </p>
                 </div>
               ) : (
-                <div className="custom-scrollbar max-h-96 overflow-y-auto">
+                <div className="custom-scrollbar max-h-96 overflow-auto">
                   <Table>
                     <TableHeader className="sticky top-0 z-10 bg-panel">
                       <TableRow className="border-border hover:bg-transparent">
@@ -1280,7 +1284,7 @@ export function SystemView({
           <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">SystemEvent টেবিল থেকে সরাসরি (append-only)।</p>
         </div>
         <CardContent className="p-0">
-          <div className="custom-scrollbar max-h-96 overflow-y-auto">
+          <div className="custom-scrollbar max-h-96 overflow-auto">
             <Table>
               <TableHeader className="sticky top-0 z-10 bg-panel">
                 <TableRow className="border-border hover:bg-transparent">

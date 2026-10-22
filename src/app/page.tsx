@@ -20,7 +20,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { BarChart3, Home, MessageCircle, Settings as SettingsIcon, ShieldCheck, Activity } from 'lucide-react';
+import { BarChart3, ChevronRight, Home, MessageCircle, Settings as SettingsIcon, ShieldCheck, Activity } from 'lucide-react';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { useToast } from '@/hooks/use-toast';
 import { useTickStream } from '@/hooks/use-tick-stream';
@@ -62,6 +62,7 @@ import { TerminalHeader } from '@/components/terminal/TerminalHeader';
 import { AppSidebar } from '@/components/terminal/AppSidebar';
 import { CommandPalette } from '@/components/terminal/CommandPalette';
 import { HeroStrip } from '@/components/terminal/HeroStrip';
+import { AppInfoCard } from '@/components/terminal/AppInfoCard';
 import { ChartPanel } from '@/components/terminal/ChartPanel';
 import { CandidateSignalCard } from '@/components/terminal/CandidateSignalCard';
 import { ScalperSignalCard } from '@/components/terminal/ScalperSignalCard';
@@ -699,6 +700,9 @@ export default function TradingTerminal() {
       loading={loading}
     />
   );
+  // Task 40 — the former 3-line footer status block now lives as a compact
+  // card (AppInfoCard) at the TOP of the সিস্টেম tab; the persistent footer
+  // stays a single slim line so it never eats screen space.
   const systemView = (
     <SystemView
       audit={audit}
@@ -821,10 +825,16 @@ export default function TradingTerminal() {
             </>
             )}
 
-            {/* Task 39 — desktop views switch via the sidebar (no more tabs) */}
+            {/* Task 39 — desktop views switch via the sidebar (no more tabs).
+             * Task 40 — AppInfoCard (the former footer block) leads the stack. */}
             {view === 'history' && historyView}
             {view === 'analysis' && analysisView}
-            {view === 'system' && systemView}
+            {view === 'system' && (
+              <div className="space-y-4">
+                <AppInfoCard health={health} />
+                {systemView}
+              </div>
+            )}
             {view === 'settings' && (
               <div className="space-y-4">
                 <BrokerSettingsView />
@@ -835,7 +845,7 @@ export default function TradingTerminal() {
 
         {/* ================= Mobile views (<lg) ================= */}
         <div className="lg:hidden">
-          <div className="space-y-4 px-3 pb-28 pt-3" data-testid="mobile-view-root">
+          <div className="space-y-4 px-3 pb-6 pt-3" data-testid="mobile-view-root">
             {loadErrorBanner}
             {view === 'dashboard' && (
               <div className="space-y-4">
@@ -887,6 +897,10 @@ export default function TradingTerminal() {
             )}
             {view === 'system' && (
               <div className="space-y-4">
+                {/* Task 40 — AppInfoCard first: the সিস্টেম tab opens on the
+                 * app identity/posture card (former footer block), then the
+                 * analysis surfaces, then the diagnostics mega-view. */}
+                <AppInfoCard health={health} />
                 <AnalysisView
                   analysisLatest={analysisLatest}
                   analysisError={analysisError}
@@ -939,26 +953,32 @@ export default function TradingTerminal() {
         onRunAiReview={() => void runAiReview()}
       />
 
-      {/* ================= Footer (sticky bottom) ================= */}
+      {/* ================= Footer (sticky bottom — Task 40 slimmed) =================
+          * Was a 3-line status block (~190px on mobile) — that content now
+          * lives in AppInfoCard at the top of the সিস্টেম tab. One slim line
+          * stays; its bottom padding clears the fixed mobile bottom-nav. */}
       <footer className="mt-auto border-t border-border bg-panel">
-        <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-2 px-4 pb-20 pt-4 text-xs text-muted-foreground sm:px-6 lg:pb-4 md:flex-row md:items-center md:justify-between">
-          <p className="flex items-center gap-1.5">
-            <ShieldCheck className="h-3.5 w-3.5 text-up" aria-hidden />
-            XAUUSD AI Trading Agent · {health?.phaseLabel ?? 'Phase —'} ·{' '}
-            {health && !health.executionLocked
-              ? 'লাইভ ডেমো ট্রেডিং সচল — সিগন্যাল অনুযায়ী অর্ডার যায়'
-              : 'রিড-ওনলি মোড'}
+        <div className="mx-auto flex w-full max-w-[1600px] flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 pb-[calc(env(safe-area-inset-bottom)+4.5rem)] pt-3 text-xs text-muted-foreground sm:px-6 lg:pb-3">
+          <p className="flex min-w-0 items-center gap-1.5">
+            <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-up" aria-hidden />
+            <span className="truncate">
+              XAUUSD AI Trading Agent · {health?.phaseLabel ?? 'Phase —'} ·{' '}
+              {health && !health.executionLocked ? 'ডেমো ট্রেডিং সচল' : 'রিড-ওনলি মোড'}
+            </span>
           </p>
-          <p className="font-mono text-[11px] text-content">
-            Next.js 16 · TypeScript · Prisma/SQLite · z-ai-web-dev-sdk (glm-4-plus)
-          </p>
-          {/* Honest live posture derived from the backend state — no stale
-           * release-gate messaging (Phase 12: the app is fully operational). */}
-          <p className="text-content">
-            {health && !health.executionLocked
-              ? 'স্ক্যাল্পার M1·M5·M15 সিগন্যাল সচল — রিস্ক-চেক পাস করলে অটো-অর্ডার কার্যকর হয়'
-              : `Live Trading: Phase ${health?.executionGatePhase ?? 11} গেট পাস হলে চালু হবে`}
-          </p>
+          <button
+            type="button"
+            onClick={() => {
+              setView('system');
+              window.scrollTo({ top: 0 });
+            }}
+            className="flex min-h-[32px] shrink-0 items-center gap-1 rounded-md px-2 text-[11px] text-muted-foreground transition-colors hover:text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            data-testid="footer-about-link"
+            aria-label="অ্যাপ ও সিস্টেম তথ্য — সিস্টেম ট্যাবে দেখুন"
+          >
+            অ্যাপ ও সিস্টেম তথ্য
+            <ChevronRight className="h-3 w-3" aria-hidden />
+          </button>
         </div>
       </footer>
 

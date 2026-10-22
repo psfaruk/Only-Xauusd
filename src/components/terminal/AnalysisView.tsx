@@ -136,7 +136,10 @@ export function AnalysisView({
   return (
     <div className="space-y-4">
       <Tabs defaultValue="engine" className="space-y-4">
-        <TabsList className="h-auto w-full max-w-full flex-nowrap overflow-x-auto bg-panel p-1">
+        {/* Task 40: flex-wrap instead of the hidden overflow-x-auto row — on
+         * narrow screens the second tab simply wraps below instead of
+         * scrolling off-screen. */}
+        <TabsList className="h-auto w-full max-w-full flex-wrap gap-1 bg-panel p-1">
           <TabsTrigger value="engine" className="min-h-[40px] px-4 data-[state=active]:bg-sun/15 data-[state=active]:text-sun">
             বিশ্লেষণ ইঞ্জিন
           </TabsTrigger>

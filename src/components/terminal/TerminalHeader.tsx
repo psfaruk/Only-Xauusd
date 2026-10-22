@@ -179,9 +179,13 @@ export function TerminalHeader({
           </div>
         </div>
 
-        {/* Row 2 — quote strip */}
+        {/* Row 2 — quote strip.
+         * Task 40 fix: flex-wrap instead of overflow-x-auto — with the old
+         * hidden horizontal scroll the "শেষ ডেটা" age was pushed off-screen
+         * on mobile and effectively invisible. Wrapping keeps every quote
+         * cell on-screen at every width. */}
         <div
-          className="flex items-center gap-2 overflow-x-auto border-t border-border/70 py-1.5 sm:gap-4"
+          className="flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-border/70 py-1.5 sm:gap-x-4"
           aria-label="লাইভ কোট"
         >
           <span className="shrink-0 rounded-md border border-sun/30 bg-sun/10 px-2 py-0.5 font-mono text-xs font-semibold text-sun">
