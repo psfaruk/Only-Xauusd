@@ -7,7 +7,7 @@
  * exactly one active view driven by this model.
  */
 
-export type TerminalView = 'dashboard' | 'chart' | 'chat' | 'history' | 'analysis' | 'system' | 'settings';
+export type TerminalView = 'dashboard' | 'chart' | 'chat' | 'signals' | 'history' | 'analysis' | 'system' | 'settings';
 
 export interface NavItem {
   id: TerminalView;
@@ -24,7 +24,10 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { id: 'dashboard', labelBn: 'ড্যাশবোর্ড', shortBn: 'হোম', testId: 'nav-dashboard' },
   { id: 'chart', labelBn: 'চার্ট', shortBn: 'চার্ট', testId: 'nav-chart' },
   { id: 'chat', labelBn: 'এআই চ্যাট', shortBn: 'চ্যাট', testId: 'nav-chat' },
-  { id: 'history', labelBn: 'সিগন্যাল', shortBn: 'সিগন্যাল', testId: 'nav-history' },
+  // Task 45 — the Fresh Signal Table: the PRIMARY signals surface (live
+  // table + pipeline health). The archive detail view stays under 'history'.
+  { id: 'signals', labelBn: 'ফ্রেশ সিগন্যাল', shortBn: 'ফ্রেশ', testId: 'nav-signals' },
+  { id: 'history', labelBn: 'সিগন্যাল ইতিহাস', shortBn: 'ইতিহাস', testId: 'nav-history' },
   { id: 'system', labelBn: 'সিস্টেম', shortBn: 'সিস্টেম', testId: 'nav-system' },
   // Task 33/35 — সেটিংস: UI-import for Exness MT5 credentials (bridge
   // re-credentials live; .env never touched again).

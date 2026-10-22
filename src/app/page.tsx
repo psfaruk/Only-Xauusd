@@ -21,7 +21,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { BarChart3, ChevronRight, Home, MessageCircle, Settings as SettingsIcon, ShieldCheck, Activity } from 'lucide-react';
+import { BarChart3, ChevronRight, Home, MessageCircle, Settings as SettingsIcon, ShieldCheck, Activity, Zap } from 'lucide-react';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { useToast } from '@/hooks/use-toast';
 import { useTickStream } from '@/hooks/use-tick-stream';
@@ -71,6 +71,7 @@ import { SignalCard } from '@/components/terminal/SignalCard';
 import { DashboardView, MarketSnapshot, SystemMiniCards } from '@/components/terminal/DashboardView';
 import { ChatView } from '@/components/terminal/ChatView';
 import { HistoryView } from '@/components/terminal/HistoryView';
+import { FreshSignalTable } from '@/components/terminal/FreshSignalTable';
 import { AnalysisView } from '@/components/terminal/AnalysisView';
 import { SystemView } from '@/components/terminal/SystemView';
 import { AiReviewPanel } from '@/components/terminal/AiReviewPanel';
@@ -727,6 +728,15 @@ export default function TradingTerminal() {
 
             {/* Task 39 — desktop views switch via the sidebar (no more tabs).
              * Task 40 — AppInfoCard (the former footer block) leads the stack. */}
+            {view === 'signals' && (
+              <div className="space-y-4">
+                <AppInfoCard health={health} />
+                {/* Task 45 — Fresh Signal Table: live signals + pipeline health.
+                 * Self-contained data lifecycle (own 30s poll + filters) —
+                 * deliberately NOT wired into the 15s shared refresh loop. */}
+                <FreshSignalTable />
+              </div>
+            )}
             {view === 'history' && historyView}
             {view === 'analysis' && analysisView}
             {view === 'system' && (
@@ -792,6 +802,11 @@ export default function TradingTerminal() {
               </div>
             )}
             {view === 'chat' && <div className="h-[calc(100dvh-11.5rem)] min-h-[420px]">{chatView}</div>}
+            {view === 'signals' && (
+              <div className="space-y-4">
+                <FreshSignalTable />
+              </div>
+            )}
             {view === 'history' && historyView}
             {view === 'settings' && (
               <div className="pb-2">
@@ -895,16 +910,17 @@ export default function TradingTerminal() {
         className="fixed inset-x-0 bottom-0 z-50 border-t border-border bg-panel/95 backdrop-blur lg:hidden"
         style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
       >
-        <div className="mx-auto grid max-w-lg grid-cols-6">
+        <div className="mx-auto grid max-w-lg grid-cols-7">
           {NAV_ITEMS.map((item) => {
             const active = view === item.id;
             const Icon =
               item.id === 'dashboard' ? Home
                 : item.id === 'chart' ? BarChart3
                   : item.id === 'chat' ? MessageCircle
-                    : item.id === 'history' ? Activity
-                      : item.id === 'settings' ? SettingsIcon
-                        : ShieldCheck;
+                    : item.id === 'signals' ? Zap
+                      : item.id === 'history' ? Activity
+                        : item.id === 'settings' ? SettingsIcon
+                          : ShieldCheck;
             return (
               <button
                 key={item.id}

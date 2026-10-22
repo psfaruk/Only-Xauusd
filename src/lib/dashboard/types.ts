@@ -400,6 +400,104 @@ export interface SignalHistoryResponse {
 }
 
 // ---------------------------------------------------------------------------
+// /api/signal/fresh — Fresh Signal Table (Task 45, Phase 3+5)
+// ----------------------------------------------------------------------------
+import type { FreshSignalStatus } from '@/lib/signal/freshness';
+
+export interface FreshLevelsView {
+  entryReference: number | null;
+  entryZoneLow: number | null;
+  entryZoneHigh: number | null;
+  stopLoss: number | null;
+  target: number | null;
+  riskPrice: number | null;
+  rewardPrice: number | null;
+  rewardRiskRatio: number | null;
+}
+
+export interface FreshPaperView {
+  id: string;
+  status: string;
+  outcome: string | null;
+  rMultiple: number | null;
+  netPnlPrice: number | null;
+  exitPrice: number | null;
+  observations: number;
+  openedAtUtc: string;
+  lastCheckedBarTimeUtc: string | null;
+  resolvedAtUtc: string | null;
+}
+
+export interface FreshSignalRowView {
+  id: string;
+  symbol: string;
+  direction: 'BUY' | 'SELL' | null;
+  outcome: string;
+  status: FreshSignalStatus;
+  statusBn: string;
+  sourceTimeframe: string | null;
+  strategyVersion: string;
+  engineVersion: string;
+  levels: FreshLevelsView;
+  smc: { score: number; tier: string | null } | null;
+  reasonCodes: string[];
+  reasonSummaryBn: string;
+  validation: {
+    source: string;
+    headlineBn: string;
+    category: string | null;
+    checks: Array<{ id: string; labelBn: string; category: string; passed: boolean | null; detailBn: string | null }>;
+  };
+  decisionCandleTimeUtc: string | null;
+  setupKnownAtUtc: string | null;
+  createdAtUtc: string;
+  expiryUtc: string | null;
+  ageSec: number;
+  marketDataTimeUtc: string | null;
+  dataAgeSec: number | null;
+  currentPrice: { price: number; atUtc: string; source: string } | null;
+  movementPrice: number | null;
+  movementR: number | null;
+  paper: FreshPaperView | null;
+  lifecycle: Array<{ atUtc: string; event: string; detailBn: string }>;
+  quote: unknown;
+  live: boolean;
+}
+
+export interface FreshTableResponse {
+  ok: boolean;
+  symbol: string;
+  scope: 'live' | 'archive';
+  strategy: string;
+  sort: string;
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+  scanned: number;
+  rows: FreshSignalRowView[];
+  pipeline: {
+    symbol: string;
+    generatedAtUtc: string;
+    dataFreshness: Record<string, { latestClosedUtc: string | null; ageSec: number | null; staleTfSec: number; state: string }>;
+    lastSync: { atUtc: string; status: string; inserted: number } | null;
+    engines: Array<{
+      strategyVersion: string;
+      lastEvalAtUtc: string | null;
+      lastOutcome: string | null;
+      lastReasonCodes: string[];
+      evals24h: number;
+      setups24h: number;
+    }>;
+    reasonDistribution24h: Array<{ code: string; n: number }>;
+    paper: { open: number; resolved: number; targeted: number; stopped: number; invalidated: number; expired: number };
+    tick: { mid: number | null; atUtc: string | null; source: string | null };
+  };
+  policy?: { note: string; statuses: string[]; staleTfSec: Record<string, number> };
+  error?: string;
+  detail?: string;
+}
+
 // /api/signal/scalper — Phase 12 live scalper strategy (M1/M5/M15 OR-logic)
 // ---------------------------------------------------------------------------
 

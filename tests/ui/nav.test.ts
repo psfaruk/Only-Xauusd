@@ -14,8 +14,8 @@ import {
 } from '@/lib/dashboard/nav';
 
 describe('terminal bottom navigation (mobile)', () => {
-  test('has exactly the six designed views in order (settings added Task 33/35)', () => {
-    expect(NAV_ITEMS.map((n) => n.id)).toEqual(['dashboard', 'chart', 'chat', 'history', 'system', 'settings']);
+  test('has exactly the seven designed views in order (signals added Task 45; settings Task 33/35)', () => {
+    expect(NAV_ITEMS.map((n) => n.id)).toEqual(['dashboard', 'chart', 'chat', 'signals', 'history', 'system', 'settings']);
   });
 
   test('every item carries a non-empty Bengali label and a stable test id', () => {
@@ -31,7 +31,7 @@ describe('terminal bottom navigation (mobile)', () => {
   });
 
   test('isTerminalView accepts the designed ids and rejects everything else', () => {
-    for (const id of ['dashboard', 'chart', 'chat', 'history', 'system', 'settings']) {
+    for (const id of ['dashboard', 'chart', 'chat', 'signals', 'history', 'system', 'settings']) {
       expect(isTerminalView(id)).toBe(true);
     }
     for (const bad of ['', 'orders', 'broker', null, undefined, 42, 'DASHBOARD']) {

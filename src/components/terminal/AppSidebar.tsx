@@ -22,6 +22,7 @@ import {
   Home,
   Settings as SettingsIcon,
   ShieldCheck,
+  Zap,
 } from 'lucide-react';
 import {
   Tooltip,
@@ -83,6 +84,8 @@ const GROUPS: Array<{ labelBn: string; items: SidebarNavItem[] }> = [
     labelBn: 'ট্রেডিং',
     items: [
       { id: 'dashboard', labelBn: 'ড্যাশবোর্ড', icon: Home },
+      // Task 45 — the Fresh Signal Table: primary signals surface.
+      { id: 'signals', labelBn: 'ফ্রেশ সিগন্যাল', icon: Zap },
       { id: 'history', labelBn: 'সিগন্যাল ইতিহাস', icon: Activity },
       { id: 'analysis', labelBn: 'বিশ্লেষণ', icon: BarChart3 },
     ],
