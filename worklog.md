@@ -1338,3 +1338,23 @@ Stage Summary:
 - Complete visual identity: sky blue primary, sunlight amber accent, dark navy terminal (primary experience), clean white light mode; organized sidebar/header/hero/footer/palette/panels.
 - All backend integrations preserved (verified live: Exness session connected, live candles/signals rendering).
 - Committed with .env tracked (anti-rollback strategy from Tasks 35/38).
+
+---
+Task ID: 40
+Agent: Z.ai Code (main orchestrator)
+Task: Reclaim bottom screen space (move footer status block to a tab) + fix functions pushed outside the visible screen (user Bengali feedback: "Bottom area তে এই গুলো কেনো দরকার... অন্য একটি ট্যাব এ ঢুকিয়ে দেন" + "বিভিন্ন ফাংশন স্ক্রীন এর বাহিয়ে চলে গেছে। আমি দেখতে পাচ্ছি না")
+
+Work Log:
+- Diagnosed with agent-browser at 390×844: footer was 190px tall on mobile (3 stacked status lines + pb-20) + mobile view root pb-28 (112px) = ~300px dead bottom space; TerminalHeader quote strip overflow-x-auto pushed "শেষ ডেটা" age off-screen (right edge 479px on 390px viewport); SystemView 8 sub-tabs in flex-nowrap overflow-x-auto left "নিরাপত্তা"/"আর্কিটেকচার" invisible (right edges 425/512px).
+- Created src/components/terminal/AppInfoCard.tsx — the footer's 3 status lines (trading posture · scalper status · tech stack + new safety tile) as a compact card with phase/posture badges; exact same health-driven conditionals (executionLocked fail-closed default preserved).
+- page.tsx: footer rewritten to ONE slim line (app name + phase + short posture + "অ্যাপ ও সিস্টেম তথ্য" button → setView('system') + scrollTo top; data-testid=footer-about-link); bottom padding = calc(env(safe-area-inset-bottom)+4.5rem) to clear fixed bottom-nav; mobile view root pb-28 → pb-6; AppInfoCard inserted FIRST in both desktop and mobile 'system' view stacks (mobile: AppInfoCard → AnalysisView → SystemView).
+- TerminalHeader.tsx: quote strip Row 2 flex-wrap instead of overflow-x-auto — every quote cell + data age always on-screen.
+- SystemView.tsx: TabsList grid-cols-4 (all 8 sub-tabs visible in exactly 2 rows at every width; triggers whitespace-normal text-xs on mobile, 40px targets); quality-issues + events tables overflow-y-auto → overflow-auto.
+- AnalysisView.tsx: TabsList flex-nowrap overflow-x-auto → flex-wrap.
+- Verified end-to-end: typecheck PASS · lint PASS · mobile 390 (dashboard/chart/chat/history/settings — 0 uncontained overflow, "শেষ ডেটা" visible, all 8 sub-tabs on-screen 16→374px, arch tab activates via native click, footer link navigates to system tab with AppInfoCard at top) · lg 1024 + desktop 1440 (0 overflow, footer 57px) · live data intact (LIVE badge, bid 4089.663, scalper card) · 0 console errors · dev.log clean · VLM clean on mobile footer/system-top/tabgrid + desktop system.
+- Screenshots: audit/ui-redesign-shots/{before,after}-*.png (9 new).
+
+Stage Summary:
+- Bottom space reclaimed: mobile footer 190px → ~137px total (1 slim line + nav clearance), content pb-28 → pb-6; all former footer info now lives in AppInfoCard at the top of the সিস্টেম tab (footer link navigates there).
+- Off-screen functions fixed: header quote age, নিরাপত্তা + আর্কিটেকচার sub-tabs, and wide-table scroll behavior all visible/contained at every tested width.
+- Zero API-contract changes (no fetch/handler/prop/testid touched except new footer link testid); committed as "Task 40 — reclaim bottom screen space + fix off-screen functions".
