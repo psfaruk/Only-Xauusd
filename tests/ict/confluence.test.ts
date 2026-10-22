@@ -10,6 +10,11 @@
  * killzone. Verified verdict: BUY, score 78, tier A, zero vetoes.
  */
 
+// Hermeticity (Task 44 order-dependence fix): imports
+// @/lib/signal/scalper/rules → @/lib/config. Setup must run FIRST so bun's
+// .env auto-load can never poison the process-wide config cache with the
+// real MT5_BRIDGE_URL before the fail-closed tests/market/* assertions.
+import '../market/helpers/setup';
 import { describe, expect, test } from 'bun:test';
 import type { AnalysisCandle } from '@/lib/analysis/types';
 import { evaluateSmcConfluence, tierForScore } from '@/lib/signal/ict/confluence';

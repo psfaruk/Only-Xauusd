@@ -26,6 +26,11 @@
  * hold for ANY rule input; the variant only makes a synthetic SETUP reachable.
  */
 
+// Hermeticity (Task 44 order-dependence fix): imports @/lib/signal/rules and
+// @/lib/signal/scalper/rules → @/lib/config. Setup must run FIRST so bun's
+// .env auto-load can never poison the process-wide config cache with the
+// real MT5_BRIDGE_URL before the fail-closed tests/market/* assertions.
+import '../market/helpers/setup';
 import { describe, expect, test } from 'bun:test';
 import { evaluateSignal } from '@/lib/signal/core';
 import { evaluateScalper, scalperSetupFingerprint, setupFingerprintOf } from '@/lib/signal/scalper/core';

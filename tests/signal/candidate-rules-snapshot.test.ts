@@ -14,6 +14,13 @@
  *   · no timestamps inside the snapshot
  */
 
+// Hermeticity (Task 44 order-dependence fix): this file imports
+// @/lib/signal/rules → @/lib/config. Without the market setup import FIRST,
+// bun's .env auto-load can evaluate @/lib/config with the REAL
+// MT5_BRIDGE_URL before tests/market/* runs, poisoning the process-wide
+// config cache — the fail-closed api tests would then probe the LIVE bridge
+// instead of asserting BRIDGE_NOT_CONFIGURED.
+import '../market/helpers/setup';
 import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 
