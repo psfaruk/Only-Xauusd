@@ -1608,3 +1608,14 @@ Stage Summary:
 - HONEST VERDICT: both strategies REJECTED on six-month OOS (pre-registered rules); dev-profit/OOS-loss = overfit signature; signals must NOT be treated as reliable/profitable — paper-forward ledger restarts from zero and only pre-registered forward evidence can change that.
 - M1 older than ~100 days is UNAVAILABLE from the broker (explicitly reported, not fabricated).
 - Release decision: PASS WITH LIMITATIONS for the engineering remediation (all gates green, read-only intact); strategy itself: REJECTED for live-reliance purposes.
+---
+Task ID: 43 (addendum — branch-safety incident, disclosed)
+Agent: Z.ai Code (main orchestrator)
+
+Work Log:
+- The sandbox platform switched HEAD back to `main` twice during Task 43 (observed by 43-c and post-hoc by the orchestrator) despite explicit `git checkout remediation/six-month-backtest`. As a result commits 2f99d5d + d701eb8 landed on main and were pushed to origin/main (a plain `git push` of the then-current branch).
+- No history was rewritten (force-push is forbidden). Remediation branch was fast-forwarded to d701eb8 and pushed — both refs now point at identical, fully verified content.
+- USER DECISION REQUIRED (either is safe): (a) accept origin/main = d701eb8 as-is (all gates green: 958/958 tests, tsc 0, lint 0, secret-scan PASS, no secrets committed); or (b) approve a history reset of main back to be57152 keeping the work only on remediation/six-month-backtest (requires explicit approval for the force-push).
+
+Stage Summary:
+- Transparent disclosure; no data loss; remediation branch carries the complete verified work.
