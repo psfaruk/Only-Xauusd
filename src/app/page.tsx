@@ -14,9 +14,10 @@
  *                   bottom navigation (ড্যাশবোর্ড · চার্ট · এআই চ্যাট ·
  *                   সিগন্যাল · সিস্টেম), safe-area aware, no horizontal scroll.
  *
- * Safety contract (unchanged): order execution is LOCKED behind the four
- * fail-closed switches; the UI can never bypass backend authorization; the
- * MT5 bridge stays read-only. All data is real or honestly absent.
+ * Safety contract (Phase 0): SIGNAL-ONLY product — order-execution code was
+ * DELETED from the app and the MT5 bridge (market-data gateway only). The UI
+ * has no order surface; the backend has no order path. All data is real or
+ * honestly absent.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -47,7 +48,6 @@ import type {
   ChatResponse,
   DataHealthResponse,
   DataLatestResponse,
-  ExecutionStateResponse,
   HealthReport,
   MarketStatusResponse,
   QualityResponse,
@@ -72,7 +72,7 @@ import { ChatView } from '@/components/terminal/ChatView';
 import { HistoryView } from '@/components/terminal/HistoryView';
 import { AnalysisView } from '@/components/terminal/AnalysisView';
 import { SystemView } from '@/components/terminal/SystemView';
-import { AiReviewPanel, ExecutionPanel } from '@/components/terminal/ExecutionPanel';
+import { AiReviewPanel } from '@/components/terminal/AiReviewPanel';
 
 const SYMBOL = 'XAUUSDm';
 
@@ -109,12 +109,9 @@ export default function TradingTerminal() {
   const [validationLatest, setValidationLatest] = useState<ValidationLatestResponse | null>(null);
   const [dataLatest, setDataLatest] = useState<DataLatestResponse | null>(null);
 
-  // ---- Phase 6/11 state (AI review + approval-based execution) -----------------
+  // ---- Phase 6 state (advisory AI review; execution UI removed in Phase 0) -----
   const [aiReview, setAiReview] = useState<AiReviewLatestResponse | null>(null);
   const [aiReviewRunning, setAiReviewRunning] = useState(false);
-  const [executionState, setExecutionState] = useState<ExecutionStateResponse | null>(null);
-  const [deciding, setDeciding] = useState(false);
-  const [closingPositionId, setClosingPositionId] = useState<string | null>(null);
 
   /** Per-endpoint unavailability codes (F-04 fix: unavailable ≠ empty). */
   const [apiErrors, setApiErrors] = useState<Record<string, string | null>>({});
@@ -143,9 +140,9 @@ export default function TradingTerminal() {
   // Master-audit fix: every fetch is bounded by a client-side timeout so a
   // network blackhole can never wedge the 15s refresh loop (each promise
   // settles as a rejection → honest NETWORK_ERROR code, next tick retries).
-  // Task 36-rt: the sweep runs every 15 s now — the heavy/audit endpoints stay
-  // polled, while price (250 ms), positions (3 s) and account (2 s) ride the
-  // realtime tick-stream socket instead.
+  // Task 36-rt: the sweep runs every 15 s; live price rides the realtime
+  // tick-stream socket instead (Phase 0: the positions/account realtime
+  // channels were removed with the execution panel).
   const refresh = useCallback(async () => {
     try {
       const results = await Promise.allSettled([
@@ -162,7 +159,6 @@ export default function TradingTerminal() {
         fetch('/api/signal/history?symbol=XAUUSDm&limit=20', { cache: 'no-store', signal: AbortSignal.timeout(20_000) }),
         fetch('/api/signal/history?symbol=XAUUSDm&limit=20&strategy=candidate', { cache: 'no-store', signal: AbortSignal.timeout(20_000) }),
         fetch('/api/ai/review/latest?symbol=XAUUSDm', { cache: 'no-store', signal: AbortSignal.timeout(20_000) }),
-        fetch('/api/execution/state', { cache: 'no-store', signal: AbortSignal.timeout(20_000) }),
         fetch('/api/signal/scalper?symbol=XAUUSDm', { cache: 'no-store', signal: AbortSignal.timeout(20_000) }),
       ]);
       const resOf = (i: number): Response | null =>
@@ -182,8 +178,7 @@ export default function TradingTerminal() {
       };
       /** /api/health deliberately answers HTTP 503 while its JSON body still
        *  carries the full report (status "degraded" — e.g. GLM not yet
-       *  verified, or the execution-lock check honestly flagged DANGER now
-       *  that live orders are enabled). The dashboard needs that PAYLOAD
+       *  verified). The dashboard needs that PAYLOAD
        *  regardless of the HTTP status — without this, a permanently
        *  "degraded" (but fully operational) backend would leave health=null
        *  and the UI would fall back to stale lock messaging forever. */
@@ -239,10 +234,8 @@ export default function TradingTerminal() {
       setApiError('candidateHistory', await errCode(11));
       setAiReview((await body<AiReviewLatestResponse>(12)) ?? null);
       setApiError('aiReview', await errCode(12));
-      setExecutionState((await body<ExecutionStateResponse>(13)) ?? null);
-      setApiError('execution', await errCode(13));
-      setScalperLatest((await body<ScalperLatestResponse>(14)) ?? null);
-      setApiError('scalper', await errCode(14));
+      setScalperLatest((await body<ScalperLatestResponse>(13)) ?? null);
+      setApiError('scalper', await errCode(13));
 
       setLoadError(null);
     } catch (e) {
@@ -267,30 +260,6 @@ export default function TradingTerminal() {
   );
   const quoteDigitsMismatch =
     dataHealth?.quote.digits != null && priceSpec.verified && dataHealth.quote.digits !== priceSpec.digits;
-
-  // ---- Task 36-rt — realtime bundles for the execution panel --------------------
-  // The live channel wins ONLY while it is fresh (socket live, payload not
-  // stale) AND newer than the last completed 15 s poll; otherwise the polled
-  // view renders unchanged (honest fallback — the two are never mixed).
-  const liveExecutionPositions = useMemo(() => {
-    if (tickStream.status !== 'live') return null;
-    const updatedAtMs = tickStream.positionsUpdatedAtMs;
-    if (updatedAtMs === null || tickStream.positionsStale) return null;
-    if (lastRefreshAtMs !== null && updatedAtMs <= lastRefreshAtMs) return null;
-    return {
-      positions: tickStream.positions,
-      updatedAtMs,
-      stale: tickStream.positionsStale,
-    };
-  }, [tickStream.status, tickStream.positions, tickStream.positionsUpdatedAtMs, tickStream.positionsStale, lastRefreshAtMs]);
-
-  const liveExecutionAccount = useMemo(() => {
-    if (tickStream.status !== 'live') return null;
-    const a = tickStream.account;
-    if (!a || a.balance === null) return null;
-    if (lastRefreshAtMs !== null && a.updatedAtMs <= lastRefreshAtMs) return null;
-    return { balance: a.balance, currency: a.currency, updatedAtMs: a.updatedAtMs };
-  }, [tickStream.status, tickStream.account, lastRefreshAtMs]);
 
   // ---- Actions (same endpoints, same honest error handling) ---------------------
 
@@ -480,7 +449,6 @@ export default function TradingTerminal() {
         ok?: boolean;
         outcome?: string;
         evaluation?: { reasonCodes: string[] };
-        execution?: { attempted: boolean; code: string; message: string; lots: number | null } | null;
         error?: { code: string; message: string };
       } | null;
       if (!res.ok || !body?.ok) {
@@ -492,9 +460,7 @@ export default function TradingTerminal() {
       } else if (body.outcome === 'BUY_SETUP' || body.outcome === 'SELL_SETUP') {
         toast({
           title: `স্ক্যাল্পার সেটআপ: ${body.outcome === 'BUY_SETUP' ? 'BUY' : 'SELL'}`,
-          description: body.execution
-            ? body.execution.message
-            : 'রিস্ক-চেক/অটো-এক্সিকিউশন পাইপলাইনে গেছে।',
+          description: 'সেটআপ রেকর্ড ও পেপার-ট্র্যাক হয়েছে (সিগন্যাল-অনলি — অর্ডার যায় না)।',
         });
       } else {
         toast({
@@ -594,60 +560,6 @@ export default function TradingTerminal() {
     }
   }, [marketStatus?.symbol, refresh, toast]);
 
-  // ---- Phase 11 — approval decision (the human gate) ---------------------------
-  const decideApproval = useCallback(
-    async (approvalId: string, decision: 'approve' | 'reject') => {
-      setDeciding(true);
-      try {
-        const res = await fetch('/api/execution/decide', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ approvalId, decision }),
-          signal: AbortSignal.timeout(60_000),
-        });
-        const body = (await res.json().catch(() => null)) as { ok?: boolean; message?: string; code?: string } | null;
-        if (body?.ok) {
-          toast({ title: decision === 'approve' ? 'অর্ডার কার্যকর' : 'অনুমোদন বাতিল', description: body.message ?? '' });
-        } else {
-          toast({ title: 'সিদ্ধান্ত নেওয়া যায়নি', description: body?.message ?? bnForCode(body?.code ?? '') ?? 'অজানা ত্রুটি।', variant: 'destructive' });
-        }
-        await refresh();
-      } catch (e) {
-        toast({ title: 'সিদ্ধান্ত নেওয়া যায়নি', description: e instanceof Error ? e.message : 'unknown error', variant: 'destructive' });
-      } finally {
-        setDeciding(false);
-      }
-    },
-    [refresh, toast],
-  );
-
-  // ---- Phase 11 — manual position close ------------------------------------------
-  const closePosition = useCallback(
-    async (positionId: string) => {
-      setClosingPositionId(positionId);
-      try {
-        const res = await fetch('/api/execution/close', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ positionId }),
-          signal: AbortSignal.timeout(60_000),
-        });
-        const body = (await res.json().catch(() => null)) as { ok?: boolean; message?: string } | null;
-        if (body?.ok) {
-          toast({ title: 'পজিশন ক্লোজ সম্পন্ন', description: body.message ?? '' });
-        } else {
-          toast({ title: 'ক্লোজ করা যায়নি', description: body?.message ?? 'অজানা ত্রুটি।', variant: 'destructive' });
-        }
-        await refresh();
-      } catch (e) {
-        toast({ title: 'ক্লোজ করা যায়নি', description: e instanceof Error ? e.message : 'unknown error', variant: 'destructive' });
-      } finally {
-        setClosingPositionId(null);
-      }
-    },
-    [refresh, toast],
-  );
-
   // ---- Shared view fragments -----------------------------------------------------
 
   const historyView = (
@@ -663,25 +575,12 @@ export default function TradingTerminal() {
       candidateHistoryError={apiErrors.candidateHistory ?? null}
       loading={loading}
       below={
-        <>
-          <AiReviewPanel
-            review={aiReview}
-            running={aiReviewRunning}
-            onRun={() => void runAiReview()}
-            error={apiErrors.aiReview ?? null}
-          />
-          <ExecutionPanel
-            state={executionState}
-            deciding={deciding}
-            closingId={closingPositionId}
-            onDecide={(id, d) => void decideApproval(id, d)}
-            onClose={(pid) => void closePosition(pid)}
-            error={apiErrors.execution ?? null}
-            livePositions={liveExecutionPositions}
-            liveTick={tickStream.status === 'live' ? tickStream.tick : null}
-            liveAccount={liveExecutionAccount}
-          />
-        </>
+        <AiReviewPanel
+          review={aiReview}
+          running={aiReviewRunning}
+          onRun={() => void runAiReview()}
+          error={apiErrors.aiReview ?? null}
+        />
       }
     />
   );
@@ -783,7 +682,7 @@ export default function TradingTerminal() {
               />
               <div className="space-y-4">
                 {/* Phase 12 — the LIVE scalper strategy is the PRIMARY signal
-                 * surface (M1/M5/M15 OR-logic; auto-execution when armed). */}
+                 * surface (M1/M5/M15 OR-logic; signal-only, paper-tracked). */}
                 <ScalperSignalCard
                   scalper={scalperLatest}
                   running={scalperRunning}
@@ -963,7 +862,7 @@ export default function TradingTerminal() {
             <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-up" aria-hidden />
             <span className="truncate">
               XAUUSD AI Trading Agent · {health?.phaseLabel ?? 'Phase —'} ·{' '}
-              {health && !health.executionLocked ? 'ডেমো ট্রেডিং সচল' : 'রিড-ওনলি মোড'}
+              রিড-ওনলি সিগন্যাল মোড
             </span>
           </p>
           <button

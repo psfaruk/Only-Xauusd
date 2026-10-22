@@ -16,9 +16,9 @@
  *   · ERROR ISOLATION: demo-labelled M5 rows → the candidate step is skipped
  *     (CANDIDATE_EVALUATION_SKIPPED, no candidate row) and the baseline
  *     verdict/row is COMPLETELY unaffected.
- *   · EXECUTION ISOLATION: a candidate actionable row NEVER triggers
- *     processActionableSignal / TradeApproval / RiskCheck; run_risk_check
- *     honestly skips (no actionable baseline setup).
+ *   · EXECUTION ISOLATION: nothing can create TradeApproval rows anymore
+ *     (the execution service was DELETED in Phase 0); run_risk_check honestly
+ *     skips (no actionable baseline setup).
  *   · API SHAPES: /api/signal/latest exposes the additive candidate card
  *     (evaluation + levels + model + paperStats + protocol verdict INCOMPLETE)
  *     and stays baseline-scoped in `signal`; /api/signal/history stays
@@ -44,7 +44,6 @@ import { buildCandidateRulesSnapshot } from '@/lib/signal/candidate-rules-snapsh
 import { parseCandidateRulesSnapshot } from '@/lib/signal/candidate-rules-snapshot';
 import { CANDIDATE_STRATEGY_VERSION, CANDIDATE_RULES } from '@/lib/signal/candidate/types';
 import { SIGNAL_STRATEGY_VERSION } from '@/lib/signal/types';
-import { processActionableSignal } from '@/lib/execution/service';
 import { executeTool } from '@/lib/tools/registry';
 import { GET as getSignalLatest } from '@/app/api/signal/latest/route';
 import { GET as getSignalHistory } from '@/app/api/signal/history/route';
@@ -312,9 +311,13 @@ describe('Phase 11-E dual evaluation — baseline untouched + candidate added', 
 // ---------------------------------------------------------------------------
 
 describe('Phase 11-E execution isolation — candidate rows can never reach the execution pipeline', () => {
-  test('a candidate actionable row NEVER triggers processActionableSignal / TradeApproval / RiskCheck', async () => {
+  test('NO code path can create TradeApproval rows (execution service deleted in Phase 0)', async () => {
+    // The execution module (the ONLY TradeApproval writer) was deleted in the
+    // Phase 0 signal-only remediation. Even with an actionable candidate row
+    // seeded as the newest evaluation, nothing in the app can create an
+    // approval — the table is historical audit data only.
     await db.signalEvaluation.deleteMany();
-    // Seed ONLY a candidate BUY_SETUP row (the newest evaluation overall).
+    await db.tradeApproval.deleteMany();
     const decisionSec = FIXED_NOW_SEC - 10 * M15;
     await db.signalEvaluation.create({
       data: {
@@ -341,12 +344,8 @@ describe('Phase 11-E execution isolation — candidate rows can never reach the 
         durationMs: 3,
       },
     });
-
-    const res = await processActionableSignal(SYMBOL);
-    expect(res.ran).toBe(false); // the baseline-scoped latest read found NOTHING
-    expect(res.approvalId).toBeNull();
+    // No writer exists: approvals stay at zero by construction.
     expect(await db.tradeApproval.count()).toBe(0); // NEVER
-    expect(await db.riskCheck.count()).toBe(0); // no risk row for a candidate setup
   });
 
   test('run_risk_check honestly skips when only a candidate setup exists (baseline-scoped tool)', async () => {

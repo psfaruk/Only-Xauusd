@@ -1098,7 +1098,7 @@ Task: Third-environment-rollback recovery + permanent Settings layer (সেট�
 
 Work Log:
 - THIRD ROLLBACK DETECTED (user report: "app টি আবার পুরাতন কোড দিয়ে চলছে, সেটিংস ট্যাব দেখা যাচ্ছে না"): Task 33/35-era settings layer absent from disk AND git; .env stripped to DATABASE_URL; db/custom.db zeroed; duplicate mt5-bridge processes running; every guarded API route 503 (fail-closed guards working as designed).
-- Restored .env with the user's NEW credentials (Exness-MT5Trial6 / 414350770 / 56529050Fk/) + Phase-14 full-activation posture; deliberately FORCE-COMMITTED .env to git (untracked files get wiped by rollbacks; push to origin already fails closed — Task 29 evidence) so the app now self-heals from git on any future rollback.
+- Restored .env with the user's NEW credentials (Exness-MT5Trial6 / [REDACTED-LOGIN] / [REDACTED-PW]/) + Phase-14 full-activation posture; deliberately FORCE-COMMITTED .env to git (untracked files get wiped by rollbacks; push to origin already fails closed — Task 29 evidence) so the app now self-heals from git on any future rollback.
 - Prisma: BrokerSettings singleton model (password AES-256-GCM encrypted at rest, revision counter); additive update of the consolidated baseline migration + migration-chain test pin 17→18 tables (deploy output verified byte-equivalent to db:push on a scratch DB).
 - src/lib/settings.ts (new): encrypted credential store (auto-generated key db/settings.key chmod 600, gitignored), validateCredentials, getActiveCredentials (db→env fallback), pushCredentialsToBridge, getBridgeCredentialState, syncBridgeCredentials (drift detection via revision comparison).
 - mt5-bridge: applyCredentials() live credential swap (config swap → clean teardown → fresh connect, no restart) + POST /admin/credentials (token-gated, strict body, password never in any response/log/error) + settingsRevision in /api/status. EMPIRICAL FIX 1: gateway cmd-4 POSITIONS is a LOGIN-TIME snapshot — long-lived sessions never see positions opened after login (live-proven: main session frozen at 0 while a fresh probe session returned the live one; the first auto-trade was invisible to /api/positions for its whole life) → all position reads now open a short-lived probe session (fetchPositionsFresh with gateway fail-over). EMPIRICAL FIX 2: position volume u64@124 is ÷1e8 (live 0.01 lot = raw 1,000,000), not the briefed ÷1e5 (would misreport as 10 lots).
@@ -1193,7 +1193,7 @@ Stage Summary:
 ---
 Task ID: 38
 Agent: Z.ai Code (main orchestrator)
-Task: User complaint — "frontend-এ Exness (Exness-MT5Trial6 / 414350770 / 56529050Fk/) দিলে লাইভ ডেটা আসে না, কানেক্ট হয় না; তুমি নিজেই backtest করে verify করো; permanent solution চাই" → env self-heal architecture + self-verified backtest → momentum OFF posture
+Task: User complaint — "frontend-এ Exness (Exness-MT5Trial6 / [REDACTED-LOGIN] / [REDACTED-PW]/) দিলে লাইভ ডেটা আসে না, কানেক্ট হয় না; তুমি নিজেই backtest করে verify করো; permanent solution চাই" → env self-heal architecture + self-verified backtest → momentum OFF posture
 
 Work Log:
 - ROLLBACK #6 DETECTED on session start (6th platform rollback): .env stripped to bare DATABASE_URL (mtime 16:36 = same instant all services restarted), code survived via git (only `M .env`). Bridge on :3031 answered UNAUTHORIZED — it booted with the stripped env (bun --hot never reloads env files), which alone explains the user's "কানেক্ট হয় না". DB file survived (294 KB, schema intact) but the BrokerSettings row was still absent from rollback #5.
@@ -1376,3 +1376,32 @@ Stage Summary:
 - Full project live on GitHub: https://github.com/psfaruk/Only-Xauusd (main branch, 60 commits, .env included per user's anti-rollback strategy).
 - Origin remote now permanently authenticated with embedded PAT — future `git push` self-healing works without interaction.
 - All prior work (Phase 14 demo trading, credential layer, Sky Terminal redesign, Task 40 layout fixes) is now backed up remotely.
+
+---
+Task ID: 42 (Phase 0)
+Agent: Z.ai Code (main orchestrator)
+Task: Deep remediation Phase 0 (per upload/Only-Xauusd_Deep_Implementation_Master_Prompt.txt): secret remediation + READ-ONLY signal-only enforcement
+
+Work Log:
+- Baseline audit CONFIRMED every report claim: .env + .zscripts/env.golden tracked WITH real secrets (broker login/password/bridge token); worklog.md:1101,1196 carried credentials; ensure-env.mjs restored secrets from git/golden; execution flags all ON (TRADING_MODE=demo, EXECUTION_ARMED/AUTO=true, BRIDGE_ORDERS_ENABLED=true); next.config ignoreBuildErrors:true; hardcoded /home/z paths in dev scripts.
+- SECRETS: redacted worklog credentials to [REDACTED-*]; .env untracked (git rm --cached) + execution flags removed + TRADING_MODE=read_only + TRADING_PHASE=15; env.golden deleted; .gitignore hardened (.zscripts/env.local backup path); local backup created at .zscripts/env.local (gitignored, chmod 600).
+- ensure-env.mjs REWRITTEN fail-closed: never restores from git or a committed golden file; only local backup fallback; missing secrets → clear non-secret error + manual fix instructions.
+- .env.example rewritten (placeholders only, read-only defaults, security header).
+- NEW .zscripts/secret-scan.mjs (bun run secrets:scan): scans all tracked files; rules = env-secret assignment / bridge-token shape / tracked env artifact / literal broker password shape (code-context aware); sanity-tested (fake secret caught); PASS on 1568 files.
+- NEW docs/security-rotation.md: incident summary, rotation USER-ACTION list (Exness password, bridge token, repo-visibility check), optional filter-repo/BFG history-cleanup runbook with impact plan.
+- BRIDGE: entire order layer DELETED — index.ts (POST /api/order, /api/position-close, GET /api/positions removed; version 2.0.0-signal-only; readOnly marker on /api/status), manager.ts (placeMarketOrder/closePosition/listPositions/ordersEnabled/maxOrderLots/OrderOutcomeRecord deleted, snapshot fields removed), mt5-client.ts (TRADE cmd 12/POSITIONS cmd 4/TRADE_EVENT/buildOpPayload/pendingTrade deleted — 749→401 lines), probe-orders.ts deleted. Live-verified: /api/order→405, /api/position-close→405, /api/positions→404, /health + /api/status + /api/quote + /api/candles all 200 with Exness connected+authenticated.
+- APP EXECUTION DELETED: src/lib/execution/* (service, position-manager, bridge-orders, loss-state) + src/app/api/execution/* (state/decide/close) removed. Pure backtest-sim functions preserved in NEW src/lib/backtest/managed-position-sim.ts (pinned empirical thresholds, no network/DB/clock).
+- scalper-service.ts: auto-execution hook + loss-state import + awaitExecution option + execution result field REMOVED; purpose relabeled live-signal-research-only; executionLocked always true.
+- instrumentation.ts: position-manager loop + processActionableSignal hook removed; scheduler = sync + scalper + baseline + paper tracking only.
+- config.ts: four-switch execution gate REMOVED; tradingMode hard-locked 'read_only' as const (env value inert); positionManager block removed; version 2.0.0-signal-only; phaseLabel "Phase 15 — Signal-Only (read-only)".
+- Consumers fixed: health.ts (always locked, gate-phase field dropped), audit/report.ts + static-audit.ts (module-deleted posture), data/health route, dashboard/types, tools/registry (run_risk_check now reads bridge /api/status via the read-only market client; advisory analysis tool kept), signal/run + signal/scalper routes (execution blocks removed), scalper/core purpose literals, bridge-status BridgeStatus type (+accountBalance/accountEquity/readOnly).
+- FRONTEND: ExecutionPanel.tsx deleted → AiReviewPanel.tsx (kept advisory GLM review panel only); page.tsx surgery (execution state/fetch/decide/close/liveExecution memos removed, fetch array renumbered, scalper toast signal-only copy, header safety contract updated); AppInfoCard posture copy → signal-only Bengali text.
+- TESTS: tests/ui/execution-lock-invariants.test.ts REWRITTEN (13 tests: config hard-lock + subprocess env probes demo/live/armed→read_only, structural absence of execution module/routes/bridge code, frontend no order API, registry no order tool, scalper no execution field); tests/market/api.test.ts case-18 containment updated (NO execution routes anywhere); tests/signal/candidate-dual-run.test.ts execution-isolation rewritten (no writer can create TradeApproval); position-manager.test.ts deleted; test setup env pins cleaned.
+- GATES: bunx tsc --noEmit 0 errors; bun run lint 0 problems; bun test 839/840 → after fix 840/840 (1 self-inflicted assertion pattern bug fixed); secret-scan PASS; dev server restarted (relaunch-dev.py) — /api/health 200 (read_only, locked, Phase 15), / 200, scalper 200, chart 200, /api/execution/state 404; bridge restarted (relaunch-bridge.py).
+- Browser-verified via agent-browser: renders clean, footer "Phase 15 — Signal-Only (read-only) · রিড-ওনলি সিগন্যাল মোড", 0 console/page errors, signal cards live (screenshot audit/phase0-after-signal-only.png).
+
+Stage Summary:
+- READ-ONLY enforced by CONSTRUCTION: no env toggle can re-enable ordering anywhere (app + bridge code deleted; config hard-locked; regression tests pin it).
+- Secrets removed from the tracked tree; scanner + rotation runbook in place. Git HISTORY still contains the old secrets until the optional filter-repo purge — rotation is the mandatory fix (USER ACTION REQUIRED, documented).
+- Market data pipeline untouched and live (Exness connected); signals/scalper/paper-tracking/analysis/backtest/chat all functional.
+- Remaining phases (1-11) delegated to subagents 42-S1..S5 (see following entries); Phase 9 api-guard same-origin hardening + Phase 11 release gate stay with the orchestrator.

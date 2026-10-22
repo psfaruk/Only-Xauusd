@@ -1,26 +1,26 @@
 #!/usr/bin/env bun
 /**
- * ensure-env.mjs — SELF-HEALING ENV GUARD (Task 38 permanent solution)
+ * ensure-env.mjs — FAIL-CLOSED ENV GUARD (Phase 0 rewrite, deep-remediation)
  * ----------------------------------------------------------------------------
- * Platform rollbacks (observed 6×) strip /home/z/my-project/.env down to a
- * single DATABASE_URL line and then RESTART every service via its
- * `bun run dev` script. Every service then boots credential-less: the bridge
- * answers UNAUTHORIZED, the app can't push, the frontend "কানেক্ট হয় না".
+ * SECURITY CONTRACT (master prompt Phase 0):
+ *   · NEVER restores credentials from any git-tracked file. The old behavior
+ *     (restore from .zscripts/env.golden / `git checkout .env`) is REMOVED —
+ *     committing secrets to a repository is a security incident, not a
+ *     self-healing feature.
+ *   · The ONLY fallback is a LOCAL, git-ignored operator backup at
+ *     .zscripts/env.local (never committed; .gitignore enforces it). This
+ *     keeps the platform-rollback self-healing that this sandbox needs
+ *     without pushing secrets into version control.
+ *   · If neither .env nor the local backup is complete, the script fails
+ *     CLOSED with a clear, non-secret error: which keys are missing, and the
+ *     exact manual step (copy .env.example and fill real values).
+ *   · No secret VALUE is ever printed, logged or echoed — key names only.
  *
- * This script is wired as a PRE-STEP of every dev script (root Next.js app +
- * both mini-services). On every boot it:
- *
- *   1. Verifies .env still contains the required runtime keys.
- *   2. If stripped → atomically restores the committed golden copy
- *      (.zscripts/env.golden) BEFORE the service reads it.
- *   3. (--with-db, root only) Verifies the SQLite schema survived; if the DB
- *      was zeroed/wiped → `bunx prisma db push` under a mkdir-lock so
- *      concurrent boots can't race. Rows self-heal afterwards (instrumentation
- *      boot-seeds BrokerSettings from env; candles re-sync from the bridge).
+ * (--with-db, root only) Verifies the SQLite schema survived; if the DB was
+ * zeroed/wiped → `bunx prisma db push` under a mkdir-lock so concurrent boots
+ * can't race.
  *
  * Idempotent, <100 ms when healthy, never touches a healthy .env.
- * Exit 1 ONLY when restoration is impossible (git + golden both gone) —
- * failing fast is more debuggable than silently booting broken.
  *
  * Usage:  bun .zscripts/ensure-env.mjs [--with-db]
  */
@@ -31,18 +31,19 @@ import { execFileSync } from 'node:child_process';
 
 const PROJECT = dirname(dirname(fileURLToPath(import.meta.url)));
 const ENV_PATH = join(PROJECT, '.env');
-const GOLDEN_PATH = join(PROJECT, '.zscripts', 'env.golden');
+/** LOCAL-ONLY operator backup — MUST be git-ignored (verified below). */
+const LOCAL_BACKUP_PATH = join(PROJECT, '.zscripts', 'env.local');
+const EXAMPLE_PATH = join(PROJECT, '.env.example');
 const LOG_PATH = join(PROJECT, '.zscripts', 'ensure-env.log');
 const LOCK_DIR = join(PROJECT, '.zscripts', '.ensure-env-db.lock');
 const DB_DEFAULT = join(PROJECT, 'db', 'custom.db');
 
-/** Keys whose absence means "the platform stripped .env again". */
+/** Keys whose absence means ".env is incomplete". Secret VALUES are never
+ * read, compared or printed by this script — only key NAMES are checked. */
 const REQUIRED_KEYS = [
   'DATABASE_URL',
   'TRADING_PHASE',
-  'EXECUTION_ARMED',
-  'ALLOW_EXECUTION',
-  'EXECUTION_AUTO',
+  'TRADING_MODE',
   'MARKET_SYNC_INTERVAL_MS',
   'MARKET_SYMBOLS',
   'MT5_SERVER',
@@ -96,7 +97,7 @@ function atomicWriteEnv(content) {
   }
 }
 
-// ── Step 1+2: .env integrity ────────────────────────────────────────────────
+// ── Step 1+2: .env integrity (fail-closed, LOCAL fallback ONLY) ────────────
 let envOk = false;
 const current = envKeys(ENV_PATH);
 if (current) {
@@ -105,7 +106,7 @@ if (current) {
     envOk = true;
     log(`.env intact (${REQUIRED_KEYS.length} required keys present)`);
   } else {
-    log(`.env STRIPPED — missing ${missing.length} key(s): ${missing.join(', ')}`);
+    log(`.env INCOMPLETE — missing ${missing.length} key(s): ${missing.join(', ')}`);
   }
 } else {
   log('.env MISSING entirely');
@@ -113,31 +114,28 @@ if (current) {
 
 if (!envOk) {
   let restored = false;
-  // Plan A: the committed golden copy (deterministic, no git dependency)
-  const goldenKeys = envKeys(GOLDEN_PATH);
-  if (goldenKeys && missingKeys(goldenKeys).length === 0) {
-    atomicWriteEnv(readFileSync(GOLDEN_PATH, 'utf8'));
+  // The ONLY fallback: the local, git-ignored operator backup.
+  // NEVER from git. NEVER from a committed golden copy (deleted in Phase 0).
+  const backupKeys = envKeys(LOCAL_BACKUP_PATH);
+  if (backupKeys && missingKeys(backupKeys).length === 0) {
+    atomicWriteEnv(readFileSync(LOCAL_BACKUP_PATH, 'utf8'));
     const verify = envKeys(ENV_PATH);
     if (verify && missingKeys(verify).length === 0) {
       restored = true;
-      log(`RESTORED .env from .zscripts/env.golden (${REQUIRED_KEYS.length} keys verified)`);
+      log(`RESTORED .env from LOCAL backup .zscripts/env.local (${REQUIRED_KEYS.length} keys verified — never from git)`);
     }
   }
-  // Plan B: git working tree still has the committed .env
   if (!restored) {
-    try {
-      execFileSync('git', ['-C', PROJECT, 'checkout', '--', '.env'], { stdio: 'pipe', timeout: 10_000 });
-      const verify = envKeys(ENV_PATH);
-      if (verify && missingKeys(verify).length === 0) {
-        restored = true;
-        log(`RESTORED .env via git checkout (${REQUIRED_KEYS.length} keys verified)`);
-      }
-    } catch { /* git unavailable or no committed copy */ }
-  }
-  if (!restored) {
-    log('FATAL: could not restore .env (golden copy and git both unavailable) — booting broken');
+    const msg = [
+      '[ensure-env] FATAL: .env is incomplete and no complete local backup exists (.zscripts/env.local).',
+      `         Missing key(s): ${current ? missingKeys(current).join(', ') : REQUIRED_KEYS.join(', ')}`,
+      `         Manual fix: cp ${'.env.example'} .env  →  fill REAL values (broker login/password, bridge token),`,
+      '         then:  cp .env .zscripts/env.local   (keeps the local self-heal working).',
+      '         Credentials are NEVER committed to git — if you lost them, rotate them with your broker.',
+    ].join('\n');
+    log('FATAL: .env unrestorable (no complete local backup) — booting refused (fail-closed)');
     flushLog();
-    process.stderr.write('[ensure-env] FATAL: .env unrestorable — see .zscripts/ensure-env.log\n');
+    process.stderr.write(`${msg}\n`);
     process.exit(1);
   }
 }

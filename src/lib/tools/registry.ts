@@ -489,12 +489,14 @@ const runRiskCheckTool: ToolDefinition = {
       db.symbolSpec.findUnique({ where: { symbol: sym.symbol } }).catch(() => null),
     ]);
 
-    // Phase 11 — the bridge /api/status now carries the live account financial
-    // state (balance/equity). When reachable it feeds the risk gate real
-    // numbers; otherwise equity/balance stay honestly null and
-    // EQUITY_AVAILABLE fails closed.
-    const accountRes = await import('@/lib/execution/bridge-orders')
-      .then((m) => m.getBridgeAccountState())
+    // Read-only bridge /api/status carries the live account financial state
+    // (balance/equity — observation only). When reachable it feeds the risk
+    // gate real numbers; otherwise equity/balance stay honestly null and
+    // EQUITY_AVAILABLE fails closed. (Phase 0: the old bridge-orders client
+    // was deleted with the execution layer; the read-only market bridge
+    // client serves the same fields.)
+    const accountRes = await callTimeBridge()
+      .getStatus()
       .catch(() => null);
     const equity: number | null = accountRes?.ok ? accountRes.data?.accountEquity ?? null : null;
     const balance: number | null = accountRes?.ok ? accountRes.data?.accountBalance ?? null : null;

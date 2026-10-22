@@ -41,7 +41,7 @@ import {
   initialManagedState,
   managerThresholdsFromConfig,
   type ManagedPositionState,
-} from '@/lib/execution/position-manager';
+} from '@/lib/backtest/managed-position-sim';
 import { atrSeries } from '@/lib/analysis/indicators';
 import type { AnalysisCandle } from '@/lib/analysis/types';
 import { TIMEFRAME_SECONDS, type Timeframe } from '@/lib/market/types';

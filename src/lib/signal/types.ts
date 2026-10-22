@@ -229,7 +229,7 @@ export interface SignalEvaluation {
   symbol: string;
   /** Baseline/candidate rows are research signals; scalper rows (Phase 12)
    *  are live trading instructions driven to the auto-execution pipeline. */
-  purpose: 'research-signal-not-an-execution-instruction' | 'live-signal-auto-execution';
+  purpose: 'research-signal-not-an-execution-instruction' | 'live-signal-research-only';
   outcome: SignalOutcome;
   reasonCodes: SignalReasonCode[];
   decisionCandleTimeUtc: string | null;

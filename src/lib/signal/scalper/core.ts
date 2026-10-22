@@ -593,7 +593,7 @@ export function evaluateScalper(input: ScalperCoreInput): ScalperEvaluation {
   const rules = input.rules;
   const fingerprint = computeScalperFingerprint(input);
   const iso = (sec: number) => new Date(sec * 1000).toISOString();
-  const purpose = 'live-signal-auto-execution' as const;
+  const purpose = 'live-signal-research-only' as const;
 
   const blocked = (codes: SignalReasonCode[]): ScalperEvaluation => ({
     engineVersion: SCALPER_ENGINE_VERSION,

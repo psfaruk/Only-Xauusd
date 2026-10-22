@@ -132,7 +132,7 @@ export const securityMeasures = [
   },
   {
     measure: 'Execution hard-locked in code',
-    detail: 'config.ts computes executionEnabled = false unless phase ≥ 11 AND EXECUTION_ARMED AND ALLOW_EXECUTION AND mode ≠ read_only. No Phase 9 code path can send orders — none exists.',
+    detail: 'Phase 0: the execution module was DELETED. config.ts hard-locks tradingMode=read_only in code; no env combination can enable trading. No code path can send orders — the code does not exist.',
   },
   {
     measure: 'AI cannot touch the system directly',
@@ -251,7 +251,7 @@ export const repositoryTree = `xauusd-ai-trading-agent/
 │   │       └── chat/       # Bengali chat agent (allowlisted tools)
 │   ├── components/ui/      # shadcn/ui
 │   └── lib/
-│       ├── config.ts       # env + 4-switch execution lock + signal/chat cfg
+│       ├── config.ts       # env + hard read-only posture + signal/chat cfg
 │       ├── db.ts · logger.ts · health.ts · api-guard.ts
 │       ├── audit/          # v2 model · runtime checks · historical evidence
 │       ├── market/         # bridge client · ingestion · quality · integrity
@@ -273,11 +273,11 @@ export const acceptanceChecklist = [
   { id: 'glm-live', label: 'Live re-verification available via /api/ai/verify (still active)', done: true },
   { id: 'mt5', label: 'MT5 infeasibility proven & bridge options documented (Phase 1 — superseded by the TS bridge)', done: true },
   { id: 'schema', label: 'Foundation DB schema pushed (models phase-tagged)', done: true },
-  { id: 'config', label: 'Config module with hard execution lock', done: true },
+  { id: 'config', label: 'Config module hard-locks read-only mode', done: true },
   { id: 'logger', label: 'Audit logger with secret masking', done: true },
   { id: 'registry', label: 'Allowlisted tool registry (active tools grow per phase)', done: true },
   { id: 'apis', label: 'Health + audit + GLM-verify APIs live', done: true },
   { id: 'dashboard', label: 'Dashboard renders with live data', done: true },
-  { id: 'readonly', label: 'No order-execution code exists anywhere', done: true },
+  { id: 'readonly', label: 'Order-execution code DELETED (app + bridge) — signal-only', done: true },
   { id: 'docs', label: 'README, .env.example, worklog maintained', done: true },
 ];

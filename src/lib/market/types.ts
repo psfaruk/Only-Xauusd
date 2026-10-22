@@ -178,6 +178,12 @@ export interface BridgeStatus {
   lastError?: string | null;
   lastErrorAtMs?: number | null;
   uptimeMs?: number;
+  /** Account financial state (read-only observation, informational in the
+   *  signal-only product; NOT secrets). */
+  accountBalance?: number | null;
+  accountEquity?: number | null;
+  /** Phase 0 — explicit read-only posture marker served by the bridge. */
+  readOnly?: boolean;
 }
 
 export interface BridgeQuote {

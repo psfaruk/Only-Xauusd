@@ -1,5 +1,5 @@
 /**
- * mt5-bridge — MT5 WebSocket protocol client (Phase 8 read-only core + gated Phase 11 trade subset)
+ * mt5-bridge — MT5 WebSocket protocol client (READ-ONLY market-data core)
  * ----------------------------------------------------------------------------
  * Speaks the Exness MT5 web-terminal binary protocol over
  * `wss://<gateway-ip>:443/terminal` (AES-256-CBC framed) — the same protocol
@@ -12,18 +12,13 @@
  *   AUTH (0) · ACCOUNT (3) · SUBSCRIBE (7) · QUOTES push (8) · CANDLES (11)
  *   LOGIN (28) · SYMBOLS (34) · HEARTBEAT (51)
  *
- * ─── PHASE 11 TRADE LAYER (explicitly gated — added Task 30-b) ──────────────
- * A minimal trading subset exists in this file and is DEAD by default:
- *   TRADE (12) — market open / close-by-position ONLY
- *   POSITIONS (4) — open-position listing
- *   TRADE_EVENT (19) — server push carrying the final trade result
- * NOTHING else from the reference trading layer was ported: no pending
- * orders, no modify, no cancel, no deals history, no account transfers.
- * Every path to these commands is gated by the manager's `ordersEnabled`
- * flag (env BRIDGE_ORDERS_ENABLED must be exactly 'true' or '1'); with the
- * flag unset the REST surface never reaches these methods at all, and this
- * client only ever sends the read-only command set. Enforced end-to-end
- * (index.ts method gate → manager validation → this client).
+ * ─── PHASE 0 DEEP-REMEDIATION (signal-only product contract) ────────────
+ * The Phase 11 trade layer (TRADE cmd 12, POSITIONS cmd 4, TRADE_EVENT
+ * push 19, trade serialization, trade waiter state) was DELETED from this
+ * client. This ws client sends ONLY the read-only command set by
+ * construction: AUTH/ACCOUNT/SUBSCRIBE/QUOTES/CANDLES/LOGIN/SYMBOLS/
+ * HEARTBEAT. No env toggle can re-enable ordering — the code no longer
+ * exists.
  *
  * Framing per WS binary message:
  *   wire:   [payload_len:u32 LE][version:u32 LE = 1][AES-256-CBC ciphertext]
@@ -49,35 +44,18 @@ export const TF_CODE: Record<string, number> = {
   H1: 16385, H4: 16388, D1: 16408,
 };
 
-/**
- * Command ids. Market-data set (always active) plus the Phase 11 trade subset
- * — POSITIONS/TRADE/TRADE_EVENT are reachable ONLY through manager methods
- * that first refuse unless BRIDGE_ORDERS_ENABLED is armed (exactly 'true'/'1').
- */
+/** Command ids — the read-only market-data set (the trade command ids were
+ *  deleted in Phase 0; this client cannot construct an order frame). */
 const CMD = {
   AUTH: 0,
   ACCOUNT: 3,
-  POSITIONS: 4,      // Phase 11 (gated): open-position listing
   SUBSCRIBE: 7,
   QUOTES: 8,
   CANDLES: 11,
-  TRADE: 12,         // Phase 11 (gated): market open / close-by-position ONLY
-  TRADE_EVENT: 19,   // Phase 11 (gated): server PUSH — final trade results
   LOGIN: 28,
   SYMBOLS: 34,
   HEARTBEAT: 51,
 } as const;
-
-/** MT5 trade retcodes that matter to the Phase 11 layer. */
-export const TRADE_RETCODE = {
-  ACK: 10002,         // intermediate acknowledgement (first of two events)
-  ACCEPTED: 10009,    // TRADE_RETCODE_DONE — final success, deal details attached
-  INVALID: 10013,     // invalid request
-  UNSUPPORTED: 10030, // unsupported command (e.g. trade_action 10 "CLOSE")
-} as const;
-
-/** Overall budget for one cmd-12 round trip (immediate response + final event). */
-const TRADE_TIMEOUT_MS = 15000;
 
 export interface Mt5Candle {
   time: number; // unix seconds, broker server time (bar OPEN)
@@ -111,79 +89,6 @@ export interface AccountInfo {
 
 interface Mt5Response { tag: number; cmdId: number; resCode: number; body: Buffer; }
 
-// ── Phase 11 trade layer types ───────────────────────────────────────────────
-
-/** One market order (open, or close-by-position). `digits` comes from the
- *  live broker symbol table (the manager supplies it). */
-export interface TradeRequest {
-  symbol: string;
-  type: "BUY" | "SELL";      // trade_type: 0 = BUY, 1 = SELL
-  lots: number;             // manager clamps to [0.01, maxOrderLots], step 0.01
-  price: number;            // current ask (BUY) / bid (SELL)
-  digits: number;           // symbol digits
-  sl: number;               // stop-loss price, 0 = none
-  tp: number;               // take-profit price, 0 = none
-  comment?: string;         // ≤ 32 UTF-16 code units (64-byte wire field)
-  closePositionId?: bigint; // position id when CLOSING; absent/undefined = new order
-}
-
-/** Honest result of one cmd-12 round trip. */
-export interface TradeResult {
-  retcode: number;          // final event retcode when finalEvent, else immediate
-  immediateRetcode: number; // 4-byte u32 from the cmd-12 response (-1 if absent)
-  resCode: number;          // protocol-level res_code of the cmd-12 response
-  finalEvent: boolean;      // true = final TRADE_EVENT (retcode ≠ 10002) observed
-  accepted: boolean;        // retcode === 10009 (TRADE_ACCEPTED / DONE)
-  dealId: string | null;    // final event only (Ap.deal, i64 → string)
-  orderId: string | null;   // final event only (Ap.order, i64 → string)
-  price: number | null;     // execution price (final event only)
-  dealtLots: number | null; // deal volume in lots (final event only; unit
-                            // calibrated against the requested volume — see
-                            // emitTradeEvent)
-  dealVolumeRaw: string;    // raw Ap.volume integer, exposed for honest verification
-  comment: string | null;   // broker comment from the final event ('ok' on success)
-  waitedMs: number;         // total cmd-12 round-trip time
-}
-
-/** One open position from POSITIONS (cmd 4). IDs are strings (i64-safe JSON).
- *  Times are the RAW record values (broker server time; Exness trial ≈ UTC,
- *  runtime-verified) — the manager subtracts the live-measured broker offset
- *  before serving them, exactly like quotes/candles. */
-export interface PositionInfo {
-  positionId: string;
-  orderId: string;
-  timeCreateUtcSec: number;
-  timeUpdateUtcSec: number;
-  symbol: string;
-  direction: "BUY" | "SELL";
-  lots: number;        // trade_volume ÷ 1e8 (empirical, 2025-10-21)
-  priceOpen: number;
-  priceClose: number;  // 0 while the position is open
-  sl: number;
-  tp: number;
-  profit: number;
-  commission: number;
-  swap: number;        // storage_
-}
-
-/** Parsed final TRADE_EVENT (module-internal). */
-interface TradeEventParsed {
-  retcode: number;
-  symbol: string;
-  dealId: string | null;
-  orderId: string | null;
-  volumeRaw: string;
-  lots: number | null;
-  price: number | null;
-  comment: string | null;
-}
-
-/** Write `text` as UTF-16LE into a fixed-size field (zero-padded; the caller
- *  pre-validates the length so truncation can never corrupt an order). */
-function writeUtf16Fixed(buf: Buffer, offset: number, text: string, maxBytes: number): void {
-  Buffer.from(text, "utf16le").subarray(0, maxBytes).copy(buf, offset);
-}
-
 /** Resolve `p` with null after `ms` (never rejects; the timer is cleared on
  *  early resolution so no stray timeouts accumulate). */
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | null> {
@@ -194,73 +99,6 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | null> {
       () => { clearTimeout(timer); resolve(null); },
     );
   });
-}
-
-/**
- * Phase 11 (gated): serialize the 248-byte TRADE (cmd 12) request payload.
- * Layout per the verified reference protocol (little-endian, packed):
- *   action_id       u32 @0   = 0 (new request)
- *   trade_action    u32 @4   = 3 (MARKET — verified for open AND close;
- *                                action 10 "CLOSE" returns 10030)
- *   symbol          64B @8   UTF-16LE
- *   volume          u64 @72  = lots × 100000000 (0.01 lot = 1000000)
- *   digits          u32 @80  symbol digits
- *   trade_order     u64 @84  = 0 (server-assigned, echoed by TRADE_EVENT)
- *   trade_type      u32 @92  0 = BUY, 1 = SELL
- *   type_filling    u32 @96  = 0 (FOK)
- *   type_time       u32 @100 = 0 (GTC)
- *   type_flags      u32 @104 = 2 (new order)
- *   type_reason     u32 @108 = 0
- *   price_order     f64 @112 current ask (BUY) / bid (SELL)
- *   price_trigger   f64 @120 = 0
- *   price_sl        f64 @128 stop loss (0 = none)
- *   price_tp        f64 @136 take profit (0 = none)
- *   price_deviation u32 @144 = 0
- *   price_top       f64 @148 = 0
- *   price_bottom    f64 @156 = 0
- *   comment         64B @164 UTF-16LE
- *   trade_position  u64 @228 = 0 for new; = position id for CLOSE
- *   position_by     u64 @236 = 0
- *   time_expiration u32 @244 = 0
- * (The field list sums to exactly 248 bytes and matches the TRADE_EVENT
- * Op-echo offsets — price@112, trade_order@84, trade_type@92.)
- *
- * Exported ONLY so probe-orders.ts can dry-run the serialization offline; the
- * manager never calls it directly.
- */
-export function buildOpPayload(req: TradeRequest): Buffer {
-  if (!req.symbol) throw new Error("trade payload: symbol required");
-  if (req.symbol.length > 32) throw new Error("trade payload: symbol longer than the 64-byte field");
-  if (req.comment && req.comment.length > 32) throw new Error("trade payload: comment longer than the 64-byte field");
-  if (!Number.isFinite(req.lots) || req.lots <= 0) throw new Error("trade payload: lots must be a positive finite number");
-  if (!Number.isFinite(req.price) || req.price <= 0) throw new Error("trade payload: price must be a positive finite number");
-  if (!Number.isFinite(req.sl) || req.sl < 0) throw new Error("trade payload: sl must be a finite non-negative price");
-  if (!Number.isFinite(req.tp) || req.tp < 0) throw new Error("trade payload: tp must be a finite non-negative price");
-  if (!Number.isInteger(req.digits) || req.digits < 0) throw new Error("trade payload: digits must be a non-negative integer");
-  const op = Buffer.alloc(248);
-  op.writeUInt32LE(0, 0);                                            // action_id
-  op.writeUInt32LE(3, 4);                                            // trade_action = 3 MARKET
-  writeUtf16Fixed(op, 8, req.symbol, 64);                            // symbol
-  op.writeBigUInt64LE(BigInt(Math.round(req.lots * 100000000)), 72); // volume (0.01 lot = 1000000)
-  op.writeUInt32LE(req.digits, 80);                                  // digits
-  op.writeBigUInt64LE(0n, 84);                                       // trade_order (server-assigned)
-  op.writeUInt32LE(req.type === "BUY" ? 0 : 1, 92);                  // trade_type
-  op.writeUInt32LE(0, 96);                                           // type_filling = 0 FOK
-  op.writeUInt32LE(0, 100);                                          // type_time = 0 GTC
-  op.writeUInt32LE(2, 104);                                          // type_flags = 2 new order
-  op.writeUInt32LE(0, 108);                                          // type_reason
-  op.writeDoubleLE(req.price, 112);                                  // price_order
-  op.writeDoubleLE(0, 120);                                          // price_trigger
-  op.writeDoubleLE(req.sl, 128);                                     // price_sl (0 = none)
-  op.writeDoubleLE(req.tp, 136);                                     // price_tp (0 = none)
-  op.writeUInt32LE(0, 144);                                          // price_deviation
-  op.writeDoubleLE(0, 148);                                          // price_top
-  op.writeDoubleLE(0, 156);                                          // price_bottom
-  writeUtf16Fixed(op, 164, req.comment ?? "", 64);                   // comment
-  op.writeBigUInt64LE(req.closePositionId ?? 0n, 228);               // trade_position (position id on CLOSE)
-  op.writeBigUInt64LE(0n, 236);                                      // position_by
-  op.writeUInt32LE(0, 244);                                          // time_expiration
-  return op;
 }
 
 function aesEncrypt(key: Buffer, plaintext: Buffer): Buffer {
@@ -308,9 +146,6 @@ export class Mt5WsClient {
   private queue: Promise<unknown> = Promise.resolve();
   private quoteHandler: ((q: LiveQuote) => void) | null = null;
   private onCloseCb: (() => void) | null = null;
-  /** Single in-flight cmd-12 waiter (trades are serialized through run(), so
-   *  at most one trade awaits its final TRADE_EVENT at any moment). */
-  private pendingTrade: { symbol: string; lots: number; resolve: (e: TradeEventParsed | null) => void } | null = null;
   closed = false;
   readonly host: string;
   lastRecvAt = Date.now();
@@ -360,7 +195,6 @@ export class Mt5WsClient {
       const resp = parseResponse(plain);
       if (!resp) return;
       if (resp.cmdId === CMD.QUOTES) { client.emitQuotes(resp.body); return; }
-      if (resp.cmdId === CMD.TRADE_EVENT) { client.emitTradeEvent(resp.body); return; }
       if (resp.cmdId === CMD.HEARTBEAT) {
         client.lastHeartbeatRttMs = Date.now() - client.hbSentAt;
         return;
@@ -372,7 +206,6 @@ export class Mt5WsClient {
       }
     });
     ws.on("close", () => {
-      client.releasePendingTrade(); // an in-flight trade falls back to its immediate retcode honestly
       if (!client.closed) { client.closed = true; client.onCloseCb?.(); }
     });
     ws.on("error", () => {
@@ -552,188 +385,6 @@ export class Mt5WsClient {
       }
       return out;
     });
-  }
-
-  // ── Phase 11 trade layer (gated upstream by the manager) ────────────────────
-
-  /**
-   * Submit ONE market order (open or close-by-position) as cmd 12: await the
-   * immediate 4-byte retcode AND collect the final TRADE_EVENT push (cmd 19,
-   * retcode ≠ 10002) that carries the deal details. Serialized through the
-   * run() queue exactly like candles(). Budget: TRADE_TIMEOUT_MS overall —
-   * if no final event arrives inside the window the immediate retcode is
-   * returned honestly with finalEvent=false (deal details unknown; the caller
-   * must verify via positions() before assuming anything).
-   */
-  async trade(req: TradeRequest): Promise<TradeResult> {
-    return this.run(async () => {
-      const startedAt = Date.now();
-      const op = buildOpPayload(req);
-
-      // Register the event waiter BEFORE sending: the final TRADE_EVENT can
-      // arrive before the immediate response resolves.
-      let resolveEvent!: (e: TradeEventParsed | null) => void;
-      const eventP = new Promise<TradeEventParsed | null>((res) => { resolveEvent = res; });
-      this.pendingTrade = { symbol: req.symbol, lots: req.lots, resolve: resolveEvent };
-
-      try {
-        const r = await this.request(CMD.TRADE, op, undefined, TRADE_TIMEOUT_MS);
-        const immediateRetcode = r.body.length >= 4 ? r.body.readUInt32LE(0) : -1;
-        if (immediateRetcode < 0 && r.resCode !== 0) {
-          throw new Error(`TRADE protocol error: res_code=${r.resCode} body_len=${r.body.length}`);
-        }
-        const remainingMs = Math.max(250, TRADE_TIMEOUT_MS - (Date.now() - startedAt));
-        const ev = await withTimeout(eventP, remainingMs);
-        const waitedMs = Date.now() - startedAt;
-        if (ev) {
-          return {
-            retcode: ev.retcode,
-            immediateRetcode,
-            resCode: r.resCode,
-            finalEvent: true,
-            accepted: ev.retcode === TRADE_RETCODE.ACCEPTED,
-            dealId: ev.dealId,
-            orderId: ev.orderId,
-            price: ev.price,
-            dealtLots: ev.lots,
-            dealVolumeRaw: ev.volumeRaw,
-            comment: ev.comment,
-            waitedMs,
-          };
-        }
-        // No final event inside the window — report the immediate retcode
-        // honestly instead of guessing (finalEvent=false tells the caller the
-        // deal details are unknown).
-        return {
-          retcode: immediateRetcode,
-          immediateRetcode,
-          resCode: r.resCode,
-          finalEvent: false,
-          accepted: immediateRetcode === TRADE_RETCODE.ACCEPTED,
-          dealId: null,
-          orderId: null,
-          price: null,
-          dealtLots: null,
-          dealVolumeRaw: "",
-          comment: null,
-          waitedMs,
-        };
-      } finally {
-        this.pendingTrade = null;
-        resolveEvent(null); // release the waiter (no-op once resolved)
-      }
-    });
-  }
-
-  /**
-   * List open positions (cmd 4). 344-byte packed records; the pending-orders
-   * block that follows is observed but NOT parsed (out of scope by design).
-   */
-  async positions(): Promise<PositionInfo[]> {
-    return this.run(async () => {
-      const r = await this.request(CMD.POSITIONS);
-      if (r.resCode !== 0) throw new Error(`POSITIONS failed: res_code=${r.resCode}`);
-      const b = r.body;
-      if (b.length < 4) return [];
-      const posCount = b.readUInt32LE(0);
-      const REC = 344;
-      const out: PositionInfo[] = [];
-      let off = 4;
-      for (let i = 0; i < posCount && off + REC <= b.length; i++, off += REC) {
-        const rec = b.subarray(off, off + REC);
-        const action = rec.readUInt32LE(88); // 0 = BUY, 1 = SELL
-        if (action !== 0 && action !== 1) continue; // unknown record shape — skipped honestly
-        out.push({
-          positionId: rec.readBigInt64LE(0).toString(),
-          orderId: rec.readBigInt64LE(8).toString(),
-          timeCreateUtcSec: rec.readUInt32LE(16),
-          timeUpdateUtcSec: rec.readUInt32LE(20),
-          symbol: utf16(rec.subarray(24, 88)),
-          direction: action === 0 ? "BUY" : "SELL",
-          // volume u64 @124 — ÷1e8, empirically calibrated 2025-10-21:
-          // a live 0.01-lot position returned raw 1,000,000 (the brief's
-          // ÷1e5 assumption would misreport it as 10 lots).
-          lots: Number(rec.readBigUInt64LE(124)) / 100000000,
-          priceOpen: rec.readDoubleLE(92),
-          priceClose: rec.readDoubleLE(100),
-          sl: rec.readDoubleLE(108),
-          tp: rec.readDoubleLE(116),
-          profit: rec.readDoubleLE(132),
-          commission: rec.readDoubleLE(156),
-          swap: rec.readDoubleLE(164),
-        });
-      }
-      if (out.length < posCount) {
-        console.warn(`[mt5-client] POSITIONS truncated: count=${posCount} parsed=${out.length} len=${b.length}`);
-      }
-      return out;
-    });
-  }
-
-  /**
-   * TRADE_EVENT push (cmd 19). Body = [prefix 4B][Op echo 248B][Ap 128B]
-   * (380 bytes). Two events arrive per trade: retcode 10002 (ACK), then the
-   * FINAL event (10009 accepted / 10013 invalid / 10030 unsupported …).
-   * Only a final event resolves the pending trade; 10002 keeps us waiting.
-   *
-   * Cross-talk caveat (documented residual risk): the event carries no
-   * client-generated correlation id, so a LATE final event for a previous
-   * timed-out trade on the SAME symbol could resolve a newer in-flight trade.
-   * Trades are serialized through run() and events normally arrive < 1 s, so
-   * the window requires a full 15 s timeout followed by an immediate retry —
-   * callers that hit finalEvent=false must verify via positions() first.
-   */
-  private emitTradeEvent(body: Buffer): void {
-    const AP = 252; // Ap block starts at byte 252 of the body (4 + 248)
-    if (body.length < AP + 36) return; // need retcode/deal/order/volume/price
-    const retcode = body.readUInt32LE(AP);
-    if (retcode === TRADE_RETCODE.ACK) return; // intermediate ACK — keep waiting
-    const pending = this.pendingTrade;
-    if (!pending) return;
-    const symbol = utf16(body.subarray(4 + 8, 4 + 8 + 64)); // Op echo symbol@8
-    if (symbol && pending.symbol && symbol !== pending.symbol) return; // different instrument
-    const deal = body.readBigInt64LE(AP + 4);
-    const order = body.readBigInt64LE(AP + 12);
-    const volumeRaw = body.readBigInt64LE(AP + 20);
-    const price = body.readDoubleLE(AP + 28);
-    const comment = body.length >= AP + 128 ? utf16(body.subarray(AP + 64, AP + 128)) : null;
-    // The reference does not document the Ap volume UNIT (the Op request uses
-    // lots × 1e8, position records use lots × 1e5). Calibrate against the
-    // known requested volume instead of guessing; the raw integer is always
-    // exposed for honest verification.
-    let dealtLots: number | null = null;
-    if (volumeRaw > 0n && pending.lots > 0) {
-      const asOpUnit = Number(volumeRaw) / 1e8;
-      const asPosUnit = Number(volumeRaw) / 1e5;
-      const best = Math.abs(asOpUnit - pending.lots) <= Math.abs(asPosUnit - pending.lots)
-        ? asOpUnit
-        : asPosUnit;
-      if (Number.isFinite(best) && best > 0) dealtLots = Math.round(best * 100) / 100;
-    }
-    const parsed: TradeEventParsed = {
-      retcode,
-      symbol,
-      dealId: deal > 0n ? deal.toString() : null,
-      orderId: order > 0n ? order.toString() : null,
-      volumeRaw: volumeRaw.toString(),
-      lots: dealtLots,
-      price: Number.isFinite(price) && price > 0 ? price : null,
-      comment,
-    };
-    if (process.env.MT5_DEBUG) {
-      console.log(`[mt5-client] TRADE_EVENT retcode=${retcode} deal=${parsed.dealId} order=${parsed.orderId} volumeRaw=${parsed.volumeRaw} price=${parsed.price} comment=${JSON.stringify(comment)}`);
-    }
-    this.pendingTrade = null;
-    pending.resolve(parsed);
-  }
-
-  /** Resolve (and clear) an in-flight trade waiter WITHOUT an event — used on
-   *  socket close so trade() falls back to the immediate retcode honestly. */
-  private releasePendingTrade(): void {
-    const pending = this.pendingTrade;
-    if (!pending) return;
-    this.pendingTrade = null;
-    pending.resolve(null);
   }
 
   subscribe(...symbolIds: number[]) {

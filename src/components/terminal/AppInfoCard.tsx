@@ -55,7 +55,7 @@ export function AppInfoCard({ health }: { health: HealthReport | null }) {
             title={health?.executionReason ?? 'Execution locked — read-only by design'}
           >
             <ShieldCheck className="h-3 w-3" aria-hidden />
-            {locked ? 'রিড-ওনলি মোড' : 'লাইভ ডেমো সচল'}
+            রিড-ওনলি সিগন্যাল মোড
           </Badge>
         </span>
       </div>
@@ -68,9 +68,7 @@ export function AppInfoCard({ health }: { health: HealthReport | null }) {
             ট্রেডিং মোড
           </dt>
           <dd className="mt-1.5 text-xs leading-relaxed text-content">
-            {health && !health.executionLocked
-              ? 'লাইভ ডেমো ট্রেডিং সচল — সিগন্যাল অনুযায়ী অর্ডার যায়'
-              : 'রিড-ওনলি মোড'}
+            {'সিগন্যাল-অনলি রিড-ওনলি মোড — অর্ডার কোড সম্পূর্ণ সরানো হয়েছে (Phase 0)'}
           </dd>
         </div>
         <div className="rounded-lg border border-border/60 bg-surface p-3">
@@ -79,9 +77,7 @@ export function AppInfoCard({ health }: { health: HealthReport | null }) {
             স্ক্যাল্পার সিগন্যাল
           </dt>
           <dd className="mt-1.5 text-xs leading-relaxed text-content">
-            {health && !health.executionLocked
-              ? 'স্ক্যাল্পার M1·M5·M15 সিগন্যাল সচল — রিস্ক-চেক পাস করলে অটো-অর্ডার কার্যকর হয়'
-              : `Live Trading: Phase ${health?.executionGatePhase ?? 11} গেট পাস হলে চালু হবে`}
+            {'স্ক্যাল্পার M1·M5·M15 সিগন্যাল সচল — সেটআপ রেকর্ড ও পেপার-ট্র্যাক হয়, ব্রোকার অর্ডার যায় না'}
           </dd>
         </div>
         <div className="rounded-lg border border-border/60 bg-surface p-3">
@@ -99,8 +95,8 @@ export function AppInfoCard({ health }: { health: HealthReport | null }) {
             নিরাপত্তা
           </dt>
           <dd className="mt-1.5 text-xs leading-relaxed text-content">
-            অর্ডার এক্সিকিউশন চারটি fail-closed সুইচের পেছনে তালাবদ্ধ — UI কখনো
-            ব্যাকএন্ড অনুমোদন বাইপাস করতে পারে না।
+            অর্ডার এক্সিকিউশন কোড মুছে ফেলা হয়েছে — অ্যাপ শুধু বাজার দেখে,
+            বিশ্লেষণ ও সিগন্যাল দেয়; ব্রোকার অর্ডার পাঠাতে পারে না।
           </dd>
         </div>
       </dl>

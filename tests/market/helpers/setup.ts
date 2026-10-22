@@ -53,14 +53,12 @@ process.env.RISK_MAX_SPREAD_PRICE = '0.6';
 process.env.RISK_MIN_EQUITY = '0';
 process.env.RISK_LOT_STEP = '0.01';
 
-// Phase 11: pin the four-switch execution lock to the LOCKED posture so the
-// lock-invariant tests stay hermetic regardless of the developer's .env
-// (which may now deliberately arm the Phase 11 demo gate). Same set-not-delete
-// rule as above (prisma/dotenv merge semantics).
+// Phase 0: the execution switches were REMOVED with the execution module —
+// the trading mode is hard-locked to read_only in code. The historical env
+// pins are kept inertly for reproducibility. Same set-not-delete rule as
+// above (prisma/dotenv merge semantics).
 process.env.TRADING_PHASE = '4';
 process.env.TRADING_MODE = 'read_only';
-process.env.EXECUTION_ARMED = 'false';
-process.env.ALLOW_EXECUTION = 'false';
 
 const g = globalThis as unknown as { __marketTestPrepared?: boolean };
 

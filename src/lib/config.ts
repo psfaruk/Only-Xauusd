@@ -1,12 +1,19 @@
 /**
- * XAUUSD AI Trading Agent — Application Configuration (Phase 1)
+ * Only-Xauusd — Application Configuration (Phase 0 deep-remediation)
  * ----------------------------------------------------------------------------
  * Single source of truth for runtime configuration. Reads environment
- * variables, applies trading-safety gates, and exposes a JSON-safe snapshot
- * for API responses. Never logs or exposes secret values.
+ * variables and exposes a JSON-safe snapshot for API responses. Never logs
+ * or exposes secret values.
+ *
+ * SIGNAL-ONLY PRODUCT CONTRACT (master prompt Phase 0): this application is
+ * a market observation + signal + backtest + paper-forward product. Order
+ * execution code was DELETED — there is nothing to arm. The trading mode is
+ * HARD-LOCKED to 'read_only' in code: the TRADING_MODE env value is
+ * informational only and can NEVER re-enable execution (the execution
+ * modules no longer exist). Fail-closed by construction.
  */
 
-const VERSION = '0.2.0-phase9';
+const VERSION = '2.0.0-signal-only';
 
 function csv(name: string, fallback: string): string[] {
   const raw = process.env[name];
@@ -41,35 +48,16 @@ function clampNum(name: string, fallback: number, min: number, max: number): num
 }
 
 // ---------------------------------------------------------------------------
-// Trading safety gate — the single most important rule of Phase 1.
-// Order execution can only ever be enabled when ALL conditions hold:
-//   phase >= EXECUTION_GATE_PHASE  AND  EXECUTION_ARMED  AND  ALLOW_EXECUTION
-//   AND  mode != read_only
-// Until then `executionEnabled` is false and every execution path is dead.
+// Phase 0 deep-remediation — SIGNAL-ONLY, READ-ONLY BY CONSTRUCTION.
+// The historical four-switch execution gate (EXECUTION_GATE_PHASE /
+// EXECUTION_ARMED / ALLOW_EXECUTION / TRADING_MODE) was removed together with
+// the entire execution module. `tradingMode` is a hard constant: no env
+// value, absent or malformed, can ever produce a trading-capable posture.
 // ---------------------------------------------------------------------------
 
-/** The phase at which execution MAY be considered (all four switches must
- * still pass). Exported so the UI/health surface states the SAME gate the
- * lock logic uses (master-audit fix B-D3 — the footer previously hardcoded
- * a different, stale gate number). */
-export const EXECUTION_GATE_PHASE = 11;
-
 const phase = Math.max(1, Math.floor(num('TRADING_PHASE', 1)));
-const requestedMode = str('TRADING_MODE', 'read_only');
-const executionArmed = bool('EXECUTION_ARMED', false);
-const allowExecution = bool('ALLOW_EXECUTION', false);
-/** Phase 12: AUTO-execution — when true (and the four switches pass), an
- *  actionable signal that passes the risk check is executed IMMEDIATELY
- *  (single attempt) without waiting for a human approval. The risk gate
- *  (lot cap, exposure cap, daily cap, spread) still runs before every order. */
-const executionAuto = bool('EXECUTION_AUTO', false);
-
-const validModes = new Set(['read_only', 'demo', 'live']);
-const tradingMode = validModes.has(requestedMode) ? requestedMode : 'read_only';
-
-const phaseGatePassed = phase >= EXECUTION_GATE_PHASE;
-const executionEnabled =
-  phaseGatePassed && executionArmed && allowExecution && tradingMode !== 'read_only';
+const tradingMode = 'read_only' as const;
+const executionEnabled = false;
 
 export const config = {
   version: VERSION,
@@ -77,26 +65,19 @@ export const config = {
   /** Truthful status label (master-audit fix B-D3). The phase number is a
    * LOCK-GATE value, not roadmap progress — the old "Phase N of 12" framing
    * presented it as a progress bar it never was. */
-  phaseLabel: `Phase ${phase} — ${tradingMode === 'read_only' ? 'Read-Only Research' : `${tradingMode} mode`}`,
-  executionGatePhase: EXECUTION_GATE_PHASE,
+  phaseLabel: `Phase ${phase} — Signal-Only (read-only)`,
   tradingMode,
   execution: {
     enabled: executionEnabled,
-    // Phase 12: auto-execution switch (see above).
-    auto: executionEnabled && executionAuto,
-    // Individual switch states (read-only exposure for audit honesty).
+    auto: false,
+    // Phase 0: the switches no longer exist — the execution module was deleted.
     switches: {
-      phaseGatePassed,
-      executionArmed,
-      allowExecution,
+      executionModuleDeleted: true,
       tradingMode,
     },
     // Human-readable reason — surfaced in UI, logs and health checks.
-    reason: executionEnabled
-      ? 'Execution enabled (phase gate passed).'
-      : phaseGatePassed
-        ? 'Execution locked: arm switches (EXECUTION_ARMED / ALLOW_EXECUTION) are off.'
-        : `Execution locked: Phase ${phase} is read-only by design (Phase ${EXECUTION_GATE_PHASE} gate required).`,
+    reason:
+      'Signal-only product: order-execution code was removed (Phase 0). The app observes, analyzes, signals and paper-tracks — it cannot place, close or modify broker orders.',
   },
   symbol: str('TRADING_SYMBOL', 'XAUUSD'),
   glm: {
@@ -344,32 +325,6 @@ export const config = {
     maxToolRounds: Math.min(Math.max(1, num('CHAT_MAX_TOOL_ROUNDS', 3)), 5),
     /** Stricter per-IP rate limit for the (costlier) chat endpoint. */
     rateLimitPerMin: Math.min(Math.max(3, num('CHAT_RATE_LIMIT_PER_MIN', 12)), 60),
-  },
-  positionManager: {
-    /** ── Task 36 — software position manager (breakeven + trailing + time
-     *  stop). Runs inside the app scheduler; uses ONLY verified bridge paths
-     *  (positions probe + market CLOSE) — the broker-side SL/TP always remain
-     *  the hard protection. Empirical driver: TPs sat at 1.5R and never
-     *  filled while open profit swung +1R → 0 → −1R; the manager banks the
-     *  move at a trailing floor instead of round-tripping it. */
-    enabled: bool('POSITION_MANAGER_ENABLED', true),
-    /** Poll cadence for open positions, seconds (2–60). */
-    pollSec: Math.min(Math.max(2, num('POSITION_MANAGER_POLL_SEC', 5)), 60),
-    /** Move the software stop to entry + spread once floating profit ≥ this R. */
-    breakevenAtR: clampNum('POSITION_BREAKEVEN_AT_R', 1.0, 0.3, 5),
-    /** Start trailing once floating profit ≥ this R. */
-    trailAtR: clampNum('POSITION_TRAIL_AT_R', 1.5, 0.5, 10),
-    /** Trailing distance behind the best favorable price, in M1-ATR multiples. */
-    trailAtrMult: clampNum('POSITION_TRAIL_ATR_MULT', 1.0, 0.2, 5),
-    /** Time stop: close at market when a position is older than this many
-     *  minutes AND floating profit < 0.2 R (a dead trade frees the single
-     *  exposure slot). 0 disables. */
-    maxAgeMin: Math.min(Math.max(0, num('POSITION_MAX_AGE_MIN', 45)), 480),
-    /** Only positions whose broker comment starts with these prefixes are managed. */
-    managedCommentPrefixes: (process.env.POSITION_MANAGED_PREFIXES ?? 'xau-agent:,xau-auto:')
-      .split(',')
-      .map((p) => p.trim())
-      .filter((p) => p.length > 0),
   },
   risk: {
     /** Phase 7 deterministic risk gate (src/lib/risk/engine.ts). All values

@@ -11,18 +11,16 @@
  * 1-MINUTE cadence so the SCALPER strategy (M1/M5/M15 OR-logic) sees every
  * fresh M1 close:
  *
- *   every tick   → sync M1+M5+M15 → scalper evaluation → (setup + auto-armed
- *                  → risk check → single-attempt order, all inside the
- *                  scalper service's execution hook)
+ *   every tick   → sync M1+M5+M15 → scalper evaluation (signal-only —
+ *                  setups are recorded + paper-tracked, never executed)
  *   every 5th    → sync also H1+H4 → baseline signal evaluation (+ candidate
- *                  dual evaluation) → paper trackers → baseline execution
- *                  hook (approval/auto, same discipline as the scalper)
+ *                  dual evaluation) → paper trackers
  *
  * Task 36: the cadence floor dropped 30s → 10s so a 15-second interval makes
  * the scalper react to a fresh M1 close within seconds (user demand: data in
- * real time). The H1/H4 sync follows the same baseline tick math. The
- * position manager runs its OWN loop (position-manager.ts) and is started
- * below, independent of this sync cadence.
+ * real time). The H1/H4 sync follows the same baseline tick math. Phase 0:
+ * the position-manager loop and the execution hook were REMOVED — this
+ * scheduler is data + signal + paper-tracking only.
  *
  * The multi-agent GLM review still runs only on ACTIONABLE baseline setups.
  * Overlap is impossible: runSync refuses concurrent runs (SYNC_IN_PROGRESS).
@@ -78,20 +76,6 @@ export async function register() {
   const { bridgeClient } = await import('@/lib/market/bridge-client');
   const { db } = await import('@/lib/db');
 
-  // ── Task 36 — software position manager (breakeven / trailing / time stop).
-  //    Independent of the sync loop: it watches OUR open positions every
-  //    pollSec, banks moves at a trailing floor instead of round-tripping
-  //    them to the SL, and feeds the post-loss circuit breaker. Never blocks
-  //    the scheduler; disabled by POSITION_MANAGER_ENABLED=0.
-  if (process.env.NEXT_RUNTIME === 'nodejs') {
-    try {
-      const { startPositionManagerLoop } = await import('@/lib/execution/position-manager');
-      startPositionManagerLoop();
-    } catch {
-      // the manager must never break the scheduler
-    }
-  }
-
   const symbol = (process.env.MARKET_SYMBOLS ?? 'XAUUSDm').split(',')[0]?.trim() || 'XAUUSDm';
   const allTimeframes = (process.env.MARKET_TIMEFRAMES ?? 'M1,M5,M15,H1,H4')
     .split(',')
@@ -125,8 +109,8 @@ export async function register() {
       }
 
       // ── Phase 12: SCALPER loop — every successful sync ─────────────────
-      // (fire-and-forget, error-isolated; the execution hook lives inside
-      // the scalper service: risk check → single-attempt auto order).
+      // (fire-and-forget, error-isolated; signal-only: evaluations are
+      // recorded + paper-tracked, no execution hook exists).
       if (scalperEnabled && process.env.NEXT_RUNTIME === 'nodejs') {
         try {
           const { runScalperEvaluation } = await import('@/lib/signal/scalper-service');
@@ -180,17 +164,6 @@ export async function register() {
                     void runReviewForLatestEvaluation(symbol).catch(() => undefined);
                   } catch {
                     // the review must never break the scheduler
-                  }
-                }
-                // Phase 11/12 — risk gate + auto/pending approval path for
-                // the baseline. Fire-and-forget, error-isolated, idempotent
-                // by signal id.
-                if (r.outcome === 'BUY_SETUP' || r.outcome === 'SELL_SETUP') {
-                  try {
-                    const { processActionableSignal } = await import('@/lib/execution/service');
-                    void processActionableSignal(symbol).catch(() => undefined);
-                  } catch {
-                    // the approval pipeline must never break the scheduler
                   }
                 }
               })

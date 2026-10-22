@@ -570,30 +570,42 @@ export async function runCurrentChecks(symbol?: string, deps?: CurrentCheckDeps)
     await runCheck(ctx, {
       id: 'security.execution-lock',
       category: 'security',
-      description: 'Four-switch execution lock is ENGAGED (phase gate AND arm switches AND mode)',
+      description: 'Signal-only contract: execution is impossible (execution module DELETED, tradingMode hard-locked to read_only)',
       required: true,
-      expected: 'executionEnabled === false (phase < 11, EXECUTION_ARMED=false, ALLOW_EXECUTION=false, mode=read_only)',
+      expected: 'executionEnabled === false AND tradingMode === read_only AND src/lib/execution/* does not exist (Phase 0 deep-remediation)',
       actual: null,
       evidenceType: 'STATIC',
-      evidenceCommand: 'in-process evaluation of the four-switch gate (src/lib/config.ts) at request time',
+      evidenceCommand: 'in-process evaluation of the config posture + filesystem check that the execution module is gone',
       evidence: '',
       status: 'PASS',
       reason: '',
       freshnessPolicy: 'per-request',
     }, async () => {
-      if (config.execution.enabled) {
+      const fs = await import('node:fs');
+      const path = await import('node:path');
+      const execDir = path.join(process.cwd(), 'src', 'lib', 'execution');
+      const executionModuleExists = fs.existsSync(execDir);
+      if (config.execution.enabled || config.tradingMode !== 'read_only') {
         return {
           status: 'FAIL',
-          reason: `EXECUTION IS ENABLED (${config.execution.reason}) — this violates the Phase 9 read-only mandate.`,
-          actual: 'executionEnabled=true',
+          reason: `EXECUTION POSTURE VIOLATED (${config.execution.reason}) — mode=${config.tradingMode}.`,
+          actual: `executionEnabled=${config.execution.enabled}`,
           evidence: 'DANGER: execution gate open',
+        };
+      }
+      if (executionModuleExists) {
+        return {
+          status: 'FAIL',
+          reason: 'src/lib/execution still exists — the execution module must be deleted under the signal-only contract.',
+          actual: 'execution module present',
+          evidence: execDir,
         };
       }
       return {
         status: 'PASS',
         reason: config.execution.reason,
-        actual: 'executionEnabled=false',
-        evidence: `phase=${config.phase} (<11) · EXECUTION_ARMED=false · ALLOW_EXECUTION=false · mode=${config.tradingMode}`,
+        actual: 'executionEnabled=false · module deleted',
+        evidence: `mode=${config.tradingMode} (hard-locked in code) · src/lib/execution absent · bridge order layer absent`,
       };
     }),
   );
@@ -602,9 +614,9 @@ export async function runCurrentChecks(symbol?: string, deps?: CurrentCheckDeps)
     await runCheck(ctx, {
       id: 'security.read-only-surface',
       category: 'security',
-      description: 'No execution/order/trade/position capability on any programmatic surface (bridge client, tool registry, POST route inventory)',
+      description: 'No execution/order/trade/position capability on any programmatic surface (bridge client, tool registry, POST route inventory, bridge REST surface)',
       required: true,
-      expected: 'bridge client exposes only the 5 read-only methods; tool registry has no execution tool; POST route inventory contains only the 6 guard-protected action routes (5 trigger + chat)',
+      expected: 'bridge client exposes only the 5 read-only methods; tool registry has no execution tool; POST route inventory contains only the 6 guard-protected action routes (5 trigger + chat); the mt5-bridge serves no order/position endpoints',
       actual: null,
       evidenceType: 'STATIC',
       evidenceCommand: 'in-process structural inspection: Object.keys(bridgeClient) + TOOL_REGISTRY names + route inventory constant',

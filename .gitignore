@@ -34,6 +34,11 @@ yarn-error.log*
 .env*
 !.env.example
 
+# Phase 0 secret remediation — local-only env backup for the fail-closed
+# self-heal guard (.zscripts/ensure-env.mjs). NEVER commit real credentials.
+.zscripts/env.local
+.zscripts/env.golden
+
 # vercel
 .vercel
 

@@ -417,7 +417,7 @@ describe('case 15 — authentication (DATA_API_TOKEN, Phase 4 hardened posture)'
   });
 });
 
-describe('case 18 — execution surface containment (Phase 11: approval-gated, no bypass)', () => {
+describe('case 18 — signal-only surface containment (Phase 0: execution code DELETED)', () => {
   function walkRoutes(dir: string, acc: string[] = []): string[] {
     for (const entry of readdirSync(dir)) {
       const full = join(dir, entry);
@@ -427,22 +427,20 @@ describe('case 18 — execution surface containment (Phase 11: approval-gated, n
     return acc;
   }
 
-  test('execution/order vocabulary in route PATHS exists only under /api/execution/*', () => {
+  test('NO execution/order vocabulary exists in ANY route path (the surface is deleted)', () => {
     const routes = walkRoutes('/home/z/my-project/src/app/api');
     expect(routes.length).toBeGreaterThan(5); // sanity: we did scan
     const forbidden = /(order|trade|trading|position|close|modify|pending|execution)/i;
     const offenders = routes.filter((r) =>
-      forbidden.test(r.replace('/home/z/my-project/src/app/api', '')) &&
-      !r.replace('/home/z/my-project/src/app/api', '').startsWith('/execution/'));
+      forbidden.test(r.replace('/home/z/my-project/src/app/api', '')));
     expect(offenders).toEqual([]);
   });
 
-  test('no route source outside /api/execution contains order-submission code', () => {
+  test('NO route source anywhere contains order-submission code', () => {
     const routes = walkRoutes('/home/z/my-project/src/app/api');
-    const patterns = [/ORDER_TYPE_/i, /positions_add/i, /trade_action/i, /OrderSend/i, /\/api\/trader\//];
+    const patterns = [/ORDER_TYPE_/i, /positions_add/i, /trade_action/i, /OrderSend/i, /\/api\/trader\//, /placeBridgeOrder/i, /closeBridgePosition/i];
     const offenders: string[] = [];
     for (const r of routes) {
-      if (r.includes('/api/execution/')) continue; // Phase 11 gated surface (checked by its own tests)
       const src = readFileSync(r, 'utf8');
       if (patterns.some((p) => p.test(src))) offenders.push(r);
     }

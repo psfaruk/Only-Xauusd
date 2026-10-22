@@ -1,0 +1,180 @@
+ONLY-XAUUSD — Deep Phase-by-Phase Problem & Solution Report
+Repository: https://github.com/psfaruk/Only-Xauusd
+Report scope: Based on the repository review described in this conversation. This is a technical diagnosis and remediation plan, not a claim that fixes or tests have already been performed.
+
+মূল সিদ্ধান্ত
+============
+অ্যাপটিকে “সঠিক সিগন্যাল দেওয়ার নিশ্চয়তা” দেওয়ার মতো করে বানানো সম্ভব নয়—কোনো স্ট্র্যাটেজিই সবসময় সঠিক হতে পারে না। কিন্তু ভুল/দেরিতে সিগন্যাল, stale market data, repainting, look-ahead bias, দুর্বল backtest, অনিরাপদ trigger, এবং কৃত্রিম AI-agent আচরণ অনেক কমানো যায়। মূল লক্ষ্য হবে: (১) বিশ্বাসযোগ্য ও fresh data, (২) পরীক্ষা-প্রমাণিত সিগন্যাল, (৩) স্পষ্ট confidence/evidence ও expiry, (৪) signal না দেওয়ার ক্ষমতা, (৫) সত্যিকারের tool-using agent, এবং (৬) সম্পূর্ণ read-only architecture।
+
+প্রাথমিকভাবে চিহ্নিত গুরুত্বপূর্ণ ঝুঁকি
+=====================================
+1. Repository-তে tracked .env এবং .zscripts/env.golden-এ secret থাকার ঝুঁকি পাওয়া গেছে। বাস্তব secret কখনো report/log/prompt-এ কপি করা যাবে না। যদি secret public Git history-তে গিয়ে থাকে, শুধু ফাইল delete করলেই যথেষ্ট নয়: broker password ও bridge token rotate করতে হবে এবং Git history পরিষ্কারের পরিকল্পনা/কার্যক্রম করতে হবে।
+2. আগের repository review-এ execution সম্পর্কিত settings সক্রিয় দেখা গিয়েছিল: TRADING_PHASE=14, TRADING_MODE=demo, EXECUTION_ARMED=true, ALLOW_EXECUTION=true, EXECUTION_AUTO=true, BRIDGE_ORDERS_ENABLED=true, SCALPER_ENABLED=1। কোডে order/position-close routes ও bridge execution logic আছে। এটি পূর্বনির্ধারিত read-only/no-order design-এর সঙ্গে সাংঘর্ষিক। এটি order আসলেই পাঠানো হয়েছে—এমন প্রমাণ নয়; তবে risk surface আছে।
+3. MARKET_API_PUBLIC_READS=true এবং MARKET_API_PUBLIC_TRIGGERS=true থাকার কারণে API guard-এ unauthenticated read/trigger সম্ভব হওয়ার ঝুঁকি আছে। বাস্তবে বাইরে থেকে পৌঁছানো যায় কিনা deployment/network configuration দিয়ে যাচাই করতে হবে।
+4. Backtest snapshot-এ configuration অনুযায়ী ফল ভিন্ন: CURRENT 46 trades, 41.30% win rate, PF 0.879, -2.717R; LEGACY 43 trades, 34.88%, PF 0.629, -8.433R; NO-MOMENTUM 27 trades, 55.56%, PF 1.482, +5.788R; MOMENTUM-M15-ONLY 29 trades, 51.72%, PF 1.114, +1.224R। এগুলো ছোট sample; positive 27-trade sample কোনো স্থায়ী edge প্রমাণ করে না।
+5. next.config.ts-এ TypeScript build errors ignore করা থাকার ঝুঁকি আছে। dev script-এ sandbox-নির্ভর absolute path এবং কিছু Unix/Bun assumption থাকায় fresh clone/Windows setup ভাঙতে পারে। README ও runtime configuration-এ phase/architecture সংক্রান্ত অসামঞ্জস্যও আছে।
+6. phase10.2 paper snapshot (Oct 15) পুরোনো এবং 0/20 completed trades দেখিয়েছে; এটি বর্তমান paper-forward performance প্রমাণ করে না।
+7. কোনো বর্তমান build/test/MT5 connection এই report তৈরির সময় পুনরায় চালানো হয়নি; পুরোনো worklog-কে current independent verification মনে করা যাবে না।
+
+ফেজভিত্তিক সমাধান পরিকল্পনা
+==========================
+
+PHASE 0 — Safety Lock, Secret Remediation ও Read-only Enforcement
+সমস্যা:
+- tracked secret file/duplicate golden env; missing key হলে script secret পুনরুদ্ধার করতে পারে।
+- execution flags, scalper automation ও bridge-order routes read-only intent-এর বিরুদ্ধে।
+- default config ভুল হলে boot হওয়ার সময় trading-capable behavior ঘটতে পারে।
+সমাধান:
+- সব tracked secret খুঁজে identify করতে হবে কিন্তু secret value print/log/report করা যাবে না। .env, secret-bearing env.golden এবং equivalent artifacts repository থেকে বাদ দিন; .env.example-এ শুধু blank/placeholders রাখুন।
+- ensure-env logic fail-closed হবে: secret না থাকলে safe error দেখাবে; committed file থেকে secret restore করবে না।
+- defaults: TRADING_MODE=read_only; EXECUTION_ARMED=false; ALLOW_EXECUTION=false; EXECUTION_AUTO=false; BRIDGE_ORDERS_ENABLED=false; SCALPER_ENABLED=0; phase-কে read-only-র সঙ্গে সামঞ্জস্যপূর্ণ রাখুন।
+- order, close-position এবং bridge mutation endpoints remove করুন বা server-side hard-deny করুন; শুধু UI লুকানো নিরাপত্তা নয়। chat/agent tool registry-তেও execution tool থাকবে না।
+- broker password ও bridge token rotate করার external user-action প্রয়োজন; secret public হয়ে থাকলে Git history rewrite-এর জন্য impact/backup/force-push plan প্রস্তুত করুন। rotate হয়েছে বলে প্রমাণ না পাওয়া পর্যন্ত secret-কে compromised ধরে নিন।
+Acceptance gate:
+- automated test প্রমাণ করবে যে কোনো env combination, API call, chat tool বা scalper route order পাঠাতে পারে না।
+- codebase-এ কোনো secret value নেই; secret scanners pass।
+
+PHASE 1 — Repository Baseline, Architecture Map ও Reproducible Environment
+সমস্যা:
+- README/config/script mismatch; hardcoded sandbox path; Windows/Linux setup assumptions; build TS errors ignore করে যেতে পারে।
+সমাধান:
+- package manager, runtime, scripts, DB, API routes, market ingestion, strategy, agent tools ও UI-এর architecture map তৈরি করুন।
+- cross-platform scripts ব্যবহার; hardcoded /home/z/... সরান; Node/Bun requirements এক জায়গায় নথিভুক্ত করুন।
+- next.config.ts-এ ignoreBuildErrors বন্ধ করুন; strict typecheck/lint/unit/build scripts আলাদা ও বাধ্যতামূলক করুন।
+- .env.example, setup guide, migration instructions, local demo fixtures এবং one-command verification দিন।
+Acceptance gate:
+- fresh clean clone-এ secrets ছাড়া install/typecheck/lint/unit/build reproducibly চলে; failures সত্যভাবে report হয়।
+
+PHASE 2 — Market Data Truth, Freshness ও Tick/Candle Integrity
+সমস্যা:
+- chart আটকে থাকার অনুভূতি, stale quote বা candle, gaps/duplicates/out-of-order ticks থেকে ভুল signal; fake UI updates দিয়ে market data জীবন্ত দেখানোর প্রলোভন।
+সমাধান:
+- source tick timestamp, receive timestamp, symbol, bid/ask, spread, sequence/quality metadata সংরক্ষণ করুন।
+- XAUUSDm-কে configurable canonical symbol করুন; broker-specific digits, tick size, point value, session/timezone সঠিকভাবে resolve করুন।
+- tick থেকে OHLC candles deterministic ভাবে aggregate করুন; duplicate, delayed, out-of-order এবং malformed tick reject/quarantine করুন। candle boundary ও closed-candle status স্পষ্ট রাখুন।
+- M1/M5/M15/H1/H4 coverage, gaps, stale-quote age, last successful sync, reconnect attempts এবং source health expose করুন।
+- chart update real tick/stream/poll response থেকে হবে; feed না এলে “STALE / NO LIVE DATA” দেখান—synthetic price/ticks বানাবেন না।
+- real feed যদি প্রতি সেকেন্ডে 6–7 update না দেয়, সেই হার জোর করে fake করবেন না; actual tick cadence ও data latency instrument করুন।
+Acceptance gate:
+- fixtures দিয়ে gap, duplicate, reconnect, timezone, candle-close এবং stale feed tests pass। stale/bad data থাকলে signal suppressed হয়।
+
+PHASE 3 — Signal Contract ও Lifecycle
+সমস্যা:
+- signal কখন candidate, confirmed, expired বা invalid—এটি নির্ভরযোগ্যভাবে আলাদা না করলে পুরোনো/দ্বিধাপূর্ণ signal দেরিতে দেখাতে পারে।
+সমাধান:
+- বাধ্যতামূলক lifecycle: CANDIDATE → CONFIRMED → ISSUED → EXPIRED/CANCELLED → OUTCOME_RECORDED।
+- প্রতিটি signal-এ symbol, side, strategy/version, createdAt, source candle close time, last tick time, entry zone, invalidation, SL/TP logic, timeframe, expiry, spread-at-generation, evidence, reasons, blocked reasons এবং correlation/dedupe key রাখুন।
+- CONFIRMED signal শুধু closed candle-ভিত্তিক হবে। intrabar heads-up চাইলে আলাদা PROVISIONAL label; সেটিকে confirmed signal হিসেবে গণনা/উপস্থাপন করবেন না।
+- একই setup বারবার duplicate alert দেবে না; stale, expired, already invalidated অথবা price-entry zone থেকে অনেক দূরে গেলে cancel/expire করুন।
+- API এবং UI-তে server-generated timestamp UTC-তে রাখুন এবং user timezone-এ রূপান্তর করুন।
+Acceptance gate:
+- deterministic lifecycle, deduplication, expiry, cancellation, replay এবং out-of-order event tests pass।
+
+PHASE 4 — Strategy Quality ও Multi-timeframe Confluence
+সমস্যা:
+- শুধু indicator যোগ করলেই accurate signal হয় না; timeframe conflict, noisy scalper trigger, spread ও regime পরিবর্তন false signal বাড়াতে পারে।
+সমাধান:
+- deterministic strategy-কে একক, version-controlled strategy module-এ রাখুন। signal logic এবং AI explanation আলাদা থাকবে।
+- প্রাথমিক baseline হিসেবে H1/H4 context, M15 setup, M5 trigger, M1 entry timing পরীক্ষা করুন—এগুলোকে অন্ধভাবে hard-code নয়, backtest ও forward test দিয়ে যাচাই করুন। conflict হলে no-trade/no-signal হতে পারবে।
+- BOS/CHoCH/structure, retest, EMA trend, RSI/ADX, ATR volatility, spread filter ইত্যাদির প্রতিটি rule লিখিত ও testable করুন; look-ahead/repainting নিষিদ্ধ।
+- spread/volatility/session/news-like risk filters-এর সীমা data থেকে calibrate করুন; threshold-গুলো configuration-এ versionসহ রাখুন।
+- “confidence” কেবল calibrated probability হলে probability বলুন; অন্যথায় evidence score/quality tier বলুন।
+- low-quality market, stale data, excessive spread, contradictory timeframe, insufficient history বা weak edge হলে NO SIGNAL বলুন।
+Acceptance gate:
+- candle-close replay-তে একই input থেকে একই signal; future candles কোনো সিদ্ধান্তে ব্যবহৃত হয় না; প্রতিটি signal-এর evidence trace করা যায়।
+
+PHASE 5 — Backtest Correctness, Robustness ও Performance Evidence
+সমস্যা:
+- ছোট sample-এ PF/win rate বাড়তি দেখা যেতে পারে; look-ahead, spread/slippage বাদ পড়া ও overfitting ফলকে অবাস্তব করতে পারে।
+সমাধান:
+- current strategy version ও parameters-এর snapshot freeze করুন; event-by-event realistic simulation করুন। entry/exit price, bid/ask, spread, latency, slippage, fees/swaps (যেখানে প্রযোজ্য), stop execution ও missed fills model করুন।
+- signal candle close-এর পরে পাওয়া তথ্য দিয়ে একই candle-এর আগের দামে fill করা যাবে না। intrabar SL/TP ambiguity conservativeভাবে handle করুন।
+- chronological train/validation/test, walk-forward, untouched out-of-sample period, parameter sensitivity এবং Monte Carlo/bootstrap uncertainty দিন।
+- metrics: number of trades, win rate, expectancy/R, profit factor, max drawdown, average win/loss, exposure, streaks, spread/slippage sensitivity, signal coverage, false-positive/late-signal rate এবং confidence calibration।
+- strategy variants-এর ফল একসঙ্গে তুলনা করুন; ছোট sample-কে “প্রমাণিত” বলবেন না। baseline, experiment, final test আলাদা রাখুন।
+Acceptance gate:
+- reproducible backtest CLI/test fixture; version+dataset+parameters সংরক্ষিত; report থেকে একই ফল পুনরুৎপাদনযোগ্য। পর্যাপ্ত sample/robustness না হলে production gate pass নয়।
+
+PHASE 6 — Paper Forward Test ও Signal Timeliness Lab
+সমস্যা:
+- historical backtest বাস্তব সময়ের data lag, missed alerts, spread expansion বা operational failures ধরে না। পুরোনো 0/20 snapshot বর্তমান edge প্রমাণ নয়।
+সমাধান:
+- signal-only paper ledger তৈরি করুন; কোনো broker order পাঠাবে না। প্রতিটি signal এবং পরবর্তী price path record করুন।
+- time metrics: source tick age, candle close → decision latency, decision → API publish latency, publish → UI visible latency, alert delivery latency।
+- benchmark: signal price, entry-zone touch, max favorable/adverse excursion, expiry outcome, net R under realistic spread/slippage assumptions।
+- minimum evaluation window/trade sample পূর্বনির্ধারিত করুন; metrics যথেষ্ট না হলে “INSUFFICIENT EVIDENCE” দেখান।
+- threshold/strategy পরিবর্তনের পরে নতুন version ও fresh forward window শুরু করুন; পুরোনো data ও নতুন logic একত্রে গুলিয়ে ফেলবেন না।
+Acceptance gate:
+- predeclared criteria পাস না করলে strategy “validated” badge পাবে না। timing percentile ও missed/duplicate signal reports পাওয়া যায়।
+
+PHASE 7 — সত্যিকারের AI Agent Runtime, শুধু Chatbot নয়
+সমস্যা:
+- agent নামের কয়েকটি prompt যদি বাস্তব tools চালায় না, state সংরক্ষণ না করে এবং ফল যাচাই না করে—তাহলে সেটি autonomous agent নয়।
+সমাধান:
+- supervised multi-agent workflow: Orchestrator/Planner, Market-Data Auditor, Signal Analyst, Independent Critic, Risk/Data-Quality Reviewer, Backtest/QA Agent, Integrator/Reporter। শুধু স্বাধীন কাজগুলো parallel করুন; shared code edits lead agent সমন্বয় করবে।
+- agent run-এ explicit task state: CREATED → PLANNED → RUNNING → WAITING_FOR_TOOL → VERIFYING → COMPLETED/FAILED/BLOCKED। প্রত্যেক step-এর input, tool call, output, timestamp, retry count ও verification result persist হবে।
+- tools-এর typed schema, permission boundaries, timeout, retry/backoff, budget, cancellation ও idempotency থাকতে হবে। agent text output-কে tool execution-এর বিকল্প মনে করা যাবে না।
+- Orchestrator plan বানাবে, tool চালাবে, observation সংগ্রহ করবে, critic-এর review নেবে, failed acceptance test-এ সংশোধন করবে এবং শেষ ফল verify করবে। Infinite loops/ফাঁকা “working” status বন্ধ করতে hard limits/stop conditions রাখুন।
+- signal generation deterministic core-এর মাধ্যমে হবে; AI agent evidence ব্যাখ্যা/flag করতে পারে কিন্তু risk/data-quality gates override করতে পারবে না। AI review না থাকলেও deterministic signal engine নিরাপদভাবে কাজ করবে।
+- agent প্রতিটি claim-এর সঙ্গে source/tool evidence বা explicit “unknown” দেবে; কাজ না করে সম্পন্ন বলবে না; hidden failures গোপন করবে না।
+Acceptance gate:
+- integration tests প্রমাণ করবে agent পরিকল্পনা করে বাস্তব tool invoke করে, observation পায়, ফল যাচাই করে, error recover করে, task state/log persist করে এবং budget শেষে থামে।
+
+PHASE 8 — Frontend: Signal Clarity ও Live Status
+সমস্যা:
+- UI-তে chart সচল মনে না হওয়া, অসম consistent style, তথ্যের hierarchy দুর্বল হলে ব্যবহারকারী ভুল signal/time বুঝতে পারেন।
+সমাধান:
+- এক design system: spacing, typography, colors, status tokens, reusable cards, dropdowns, side panels, dialogs, responsive layouts।
+- Signal card-এ BUY/SELL/NO SIGNAL, CONFIRMED/PROVISIONAL, timeframe, generated time, candle close time, quote age, spread, entry zone, invalidation/SL/TP calculation, expiry, reasons, confluence ও missing evidence দেখান। “নিশ্চিত লাভ”/guaranteed accuracy copy নিষিদ্ধ।
+- chart-এ live tick timestamp, stale badge, candle countdown, connection status ও actual update age দেখান। reconnect বা data gap হলে স্পষ্ট banner দিন।
+- Agent Activity panel-এ actual run/task IDs, current step, tool call, result, retry, failure reason এবং audit log দেখান; fake animated activity নয়।
+- chart, signal state ও quote এক market snapshot/version থেকে render হবে; race condition এড়াতে query invalidation/stream state নকশা করুন।
+Acceptance gate:
+- desktop/mobile responsive browser tests; keyboard accessibility; stale/disconnected/error/loading/empty states যাচাই।
+
+PHASE 9 — API Security, Scheduler ও Backend Reliability
+সমস্যা:
+- public trigger/read settings, memory-only rate limiting, spoofable forwarded IP এবং multi-worker scheduler race risk।
+সমাধান:
+- public triggers বন্ধ করুন; sensitive endpoints-এ authentication, authorization, CSRF/CORS policy, schema validation, rate limiting ও audit logging যোগ করুন। frontend session/token কীভাবে পাঠায় তা end-to-end যাচাই করুন; কেবল config flag দিয়ে security দাবি করবেন না।
+- forwarded IP কেবল trusted reverse proxy থেকে বিশ্বাস করুন; production multi-instance হলে shared rate limit/lock (DB/Redis/atomic lease) ব্যবহার করুন।
+- trigger endpoints idempotent ও permission-guarded করুন; UI read endpoint এবং operational command endpoint আলাদা রাখুন।
+- dependency vulnerabilities, structured redacted logs, timeouts, retries, circuit breaker, health/readiness endpoints ও DB migration reliability পরীক্ষা করুন।
+Acceptance gate:
+- unauthenticated caller trigger চালাতে পারে না; role/permission tests pass; duplicate schedulers একই কাজ বহুবার চালায় না।
+
+PHASE 10 — Observability, Alert Delivery ও Incident Recovery
+সমস্যা:
+- signal তৈরি হলেও দেরিতে UI-তে আসা, duplicate alert, disconnected stream বা database failure বোঝা যায় না।
+সমাধান:
+- correlation ID দিয়ে ingestion → candle → signal → API → UI/notification path trace করুন। timestamps machine-readable ও consistent রাখুন।
+- latency SLO, stale-data alarms, queue lag, error rate, DB health, reconnect count, signal publish failures এবং agent stuck-task alerts দিন।
+- retry হলে idempotency key বজায় রাখুন; duplicate signals/notifications suppress করুন।
+- restart/reconnect-এর পরে state পুনরুদ্ধার, dead-letter handling, bounded retries ও documented recovery runbook দিন।
+Acceptance gate:
+- simulated API outage, DB outage, stale feed এবং process restart-এর পরে recovery tests pass; কোনো মিথ্যা fresh status দেখায় না।
+
+PHASE 11 — Release Gate, Documentation ও Ongoing Validation
+সমস্যা:
+- green-looking UI বা old worklog-কে সফলতা মনে করা; tested/untested, backtest/forward test ও demo/live architecture গুলিয়ে ফেলা।
+সমাধান:
+- test matrix: unit, integration, contract, replay, security, migration, build, typecheck, browser E2E, fault injection এবং paper-forward validation।
+- README, architecture decision record, env reference, API/tool inventory, signal methodology, limitations, setup, rollback ও troubleshooting update করুন।
+- প্রতিটি release report-এ commit SHA, changed files, commands run, pass/fail/skipped tests, backtest dataset/version, forward-test window, known blockers ও rollback step লিখুন।
+- “Validated” status শুধুমাত্র predeclared statistical + timing + reliability gates পাস করলে দিন।
+Acceptance gate:
+- release evidence সম্পূর্ণ; missing evidence হলে BLOCKED/NOT VALIDATED বলা হবে, সফল বলে দাবি নয়।
+
+প্রস্তাবিত বাস্তব Signal Contract
+===============================
+প্রতিটি signal-কে একটি prediction event হিসেবে ধরুন, নিশ্চয়তা হিসেবে নয়। সম্ভাব্য fields: signalId, symbol, side, strategyVersion, status, timeframe, createdAtUtc, sourceCandleCloseUtc, lastTickAtUtc, quoteAgeMs, spread, entryZone, invalidation, stopLossRule, takeProfitRule, expiryAtUtc, evidence[], filtersPassed[], filtersFailed[], dataQuality, confidenceType, confidenceValue (শুধু calibrated হলে), and outcome tracking. NO SIGNAL একটি first-class, auditable outcome হবে।
+
+Final Definition of Done
+========================
+- কোনো order execution নেই; backend স্তরে enforce করা read-only mode।
+- কোনো secret tracked বা log-এ প্রকাশিত নয়; leaked credentials rotation task নথিভুক্ত/সম্পন্ন।
+- stale/invalid market data থাকলে signal blocked এবং UI-তে দৃশ্যমান সতর্কতা।
+- confirmed signal closed candle ও explicit lifecycle rules অনুসরণ করে; provisional alerts আলাদা।
+- no look-ahead/repainting; realistic costs ও out-of-sample validation ছাড়া strategy validated নয়।
+- agent বাস্তব tools চালায়, state/log persist করে, independent critique ও verification করে, শেষে সত্যিকারের completion report দেয়।
+- reproducible tests/build/security checks pass; যা চালানো হয়নি তা স্পষ্টভাবে not run হিসেবে চিহ্নিত।

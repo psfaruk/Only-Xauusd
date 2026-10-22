@@ -57,7 +57,7 @@ export async function GET(req: Request) {
       candleHistory: history,
       lastSync,
       executionLock: {
-        enabled: config.execution.enabled,
+        enabled: false,
         reason: config.execution.reason,
         tradingMode: config.tradingMode,
       },

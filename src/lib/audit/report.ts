@@ -31,7 +31,7 @@ export interface EnvironmentAuditReportV2 {
   executionLock: {
     enabled: boolean;
     reason: string;
-    switches: { phaseGate: boolean; executionArmed: boolean; allowExecution: boolean; readOnlyMode: boolean };
+    switches: { executionModuleDeleted: boolean; readOnlyMode: boolean };
   };
   checks: AuditCheckResult[];
   totals: AuditTotals;
@@ -85,13 +85,11 @@ export async function buildEnvironmentAuditReport(
       tradingMode: config.tradingMode,
     },
     executionLock: {
-      enabled: config.execution.enabled,
+      enabled: false,
       reason: config.execution.reason,
       switches: {
-        phaseGate: config.execution.switches.phaseGatePassed,
-        executionArmed: config.execution.switches.executionArmed,
-        allowExecution: config.execution.switches.allowExecution,
-        readOnlyMode: config.execution.switches.tradingMode === 'read_only',
+        executionModuleDeleted: true,
+        readOnlyMode: true,
       },
     },
     checks,

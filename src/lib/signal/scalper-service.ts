@@ -11,9 +11,10 @@
  *   5. Demo/synthetic source policy — demo rows BLOCK.
  *
  * Then: evaluate → apply pure suppression (cooldown / same-bar dedup) →
- * persist append-only → when a setup survived AND auto-execution is armed,
- * hand the signal to the execution pipeline (risk check → single-attempt
- * order). Every step is logged; nothing is ever retried automatically.
+ * persist append-only. Phase 0 deep-remediation: the auto-execution hook was
+ * REMOVED — this service is signal-only by construction (no execution module
+ * exists to hand off to). Every step is logged; nothing is ever retried
+ * automatically.
  */
 
 import { db } from '@/lib/db';
@@ -24,7 +25,6 @@ import type { BridgeClient } from '@/lib/market/bridge-client';
 import { computeReadiness } from '@/lib/market/quality';
 import { defaultMarketSymbol } from '@/lib/market/service';
 import type { QuoteIntegrityReport } from '@/lib/market/integrity';
-import { lossCooldownActive } from '@/lib/execution/loss-state';
 import type { SignalReasonCode } from './types';
 import { evaluateScalper, setupFingerprintOf, suppressSetup } from './scalper/core';
 import { buildScalperRules } from './scalper/rules';
@@ -44,9 +44,6 @@ export interface RunScalperOptions {
   now?: () => number;
   /** Injectable bridge client (deterministic tests). */
   bridge?: BridgeClient;
-  /** Await the auto-execution hook instead of firing it in the background
-   *  (the manual API trigger wants the honest order outcome in its response). */
-  awaitExecution?: boolean;
 }
 
 export interface ScalperRunOutcome {
@@ -55,13 +52,6 @@ export interface ScalperRunOutcome {
   durationMs: number;
   evaluation: ScalperEvaluation;
   quoteReport: QuoteIntegrityReport | null;
-  execution?: {
-    attempted: boolean;
-    code: string;
-    message: string;
-    lots: number | null;
-    executionLogId: string | null;
-  } | null;
 }
 
 /** Map integrity blockedReasons → signal reason codes (same map as baseline). */
@@ -118,7 +108,7 @@ export async function runScalperEvaluation(opts: RunScalperOptions = {}): Promis
         durationMs: Date.now() - startedMs,
         rules,
         digits,
-        executionLocked: !config.execution.enabled,
+        executionLocked: true, // Phase 0: signal-only product — execution code removed
       });
       return saved.id;
     } catch {
@@ -135,7 +125,7 @@ export async function runScalperEvaluation(opts: RunScalperOptions = {}): Promis
       engineVersion: SCALPER_ENGINE_VERSION,
       strategyVersion: SCALPER_STRATEGY_VERSION,
       symbol,
-      purpose: 'live-signal-auto-execution',
+      purpose: 'live-signal-research-only',
       outcome: 'BLOCKED',
       reasonCodes: [...new Set(codes)],
       decisionCandleTimeUtc: null,
@@ -168,7 +158,7 @@ export async function runScalperEvaluation(opts: RunScalperOptions = {}): Promis
         engineVersion: SCALPER_ENGINE_VERSION,
         strategyVersion: SCALPER_STRATEGY_VERSION,
         symbol,
-        purpose: 'live-signal-auto-execution',
+        purpose: 'live-signal-research-only',
         outcome: 'BLOCKED',
         reasonCodes: ['SIGNAL_ERROR'],
         failureMessage: 'scalper disabled (SCALPER_ENABLED=0)',
@@ -295,18 +285,13 @@ export async function runScalperEvaluation(opts: RunScalperOptions = {}): Promis
       latestSetup.createdAtUtcSec + rules.cooldownSec > nowUtcSec &&
       !duplicate; // a duplicate is reported as a duplicate, not as cooldown
 
-    // ── Task 36 — post-loss circuit breaker. The position manager records a
-    //    realized loss the moment one of OUR positions closes negative; while
-    //    the window is active the setup is suppressed (WAIT) — the revenge
-    //    loop (SL → instant re-entry at a worse price) was the single
-    //    biggest observed loss-multiplier on 2025-10-21.
-    const postLossCooldown =
-      rules.postLossCooldownSec > 0 && lossCooldownActive(nowMs(), rules.postLossCooldownSec);
-
+    // Phase 0: the post-loss circuit breaker (which tracked OUR open
+    // positions) was removed with the execution layer — there are no app
+    // positions to record losses. Suppression stays purely data-driven.
     const evaluation = suppressSetup(rawEvaluation, {
       duplicate,
       cooldownActive,
-      postLossCooldown,
+      postLossCooldown: false,
     });
 
     const runId = await persist(evaluation, minimalQuote, windows.digits);
@@ -352,52 +337,12 @@ export async function runScalperEvaluation(opts: RunScalperOptions = {}): Promis
       }).catch(() => undefined);
     }
 
-    // ── Auto-execution hook (setup survived + execution armed) ────────────
-    let execution: ScalperRunOutcome['execution'] = null;
-    if (
-      (evaluation.outcome === 'BUY_SETUP' || evaluation.outcome === 'SELL_SETUP') &&
-      config.execution.enabled &&
-      config.execution.auto &&
-      runId !== null &&
-      !lossCooldownActive(nowMs(), rules.postLossCooldownSec) // Task 36: never fire INTO an active loss pause
-    ) {
-      const runExecution = async (): Promise<ScalperRunOutcome['execution']> => {
-        try {
-          const { processActionableSignal } = await import('@/lib/execution/service');
-          const res = await processActionableSignal(symbol, { strategyVersion: SCALPER_STRATEGY_VERSION });
-          return res.execution
-            ? { ...res.execution }
-            : {
-                attempted: false,
-                code: 'SKIPPED',
-                message: res.reason,
-                lots: null,
-                executionLogId: null,
-              };
-        } catch (err) {
-          await logEvent({
-            level: 'error',
-            category: 'scalper',
-            code: 'SCALPER_EXECUTION_HOOK_ERROR',
-            message: `Scalper execution hook failed for ${symbol}: ${err instanceof Error ? err.message : 'unknown'}`,
-          }).catch(() => undefined);
-          return null;
-        }
-      };
-      if (opts.awaitExecution) {
-        execution = await runExecution();
-      } else {
-        void runExecution().catch(() => undefined);
-      }
-    }
-
     return {
       runId,
       outcome: evaluation.outcome,
       durationMs: Date.now() - startedMs,
       evaluation,
       quoteReport,
-      execution,
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : 'unknown scalper failure';
@@ -405,7 +350,7 @@ export async function runScalperEvaluation(opts: RunScalperOptions = {}): Promis
       engineVersion: SCALPER_ENGINE_VERSION,
       strategyVersion: SCALPER_STRATEGY_VERSION,
       symbol,
-      purpose: 'live-signal-auto-execution',
+      purpose: 'live-signal-research-only',
       outcome: 'FAILED',
       reasonCodes: ['SIGNAL_ERROR'],
       decisionCandleTimeUtc: null,

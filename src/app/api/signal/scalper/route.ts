@@ -2,12 +2,12 @@
  * /api/signal/scalper — the Phase 12 SCALPER strategy surface.
  *
  *   GET  → latest scalper evaluation + setups emitted in the last hour
- *          (the 5–7/hour cadence counter) + recent setups + auto-execution
+ *          (the 5–7/hour cadence counter) + recent setups + read-only
  *          posture. READ-ONLY, honest absence when nothing ran yet.
  *   POST → trigger ONE evaluation NOW (same deterministic engine + gates as
  *          the scheduler loop; public-trigger posture identical to
- *          /api/signal/run). The response carries the honest auto-execution
- *          outcome when a setup fired and EXECUTION_AUTO is armed.
+ *          /api/signal/run). Signal-only: no execution outcome exists —
+ *          the app cannot place broker orders (Phase 0 read-only contract).
  */
 
 import { NextResponse } from 'next/server';
@@ -46,9 +46,9 @@ export async function GET(req: Request) {
       strategyVersion: SCALPER_STRATEGY_VERSION,
       enabled: config.signal.scalper.enabled,
       execution: {
-        enabled: config.execution.enabled,
-        auto: config.execution.auto,
-        mode: config.tradingMode,
+        enabled: false,
+        auto: false,
+        mode: 'read_only',
       },
       latest,
       setupsLastHour,
@@ -64,7 +64,7 @@ export async function GET(req: Request) {
         model: s.evidence?.scalper?.model ?? null,
       })),
       rules: buildScalperRules(),
-      note: 'Scalper = M1/M5/M15 OR-logic (any ONE timeframe agreeing is enough). When EXECUTION_AUTO is armed, every emitted setup that passes the risk check is executed automatically (single attempt).',
+      note: 'Scalper = M1/M5/M15 OR-logic (any ONE timeframe agreeing is enough). Signal-only product: emitted setups are recorded and paper-tracked; the app cannot place broker orders.',
     });
   } catch (e) {
     return NextResponse.json(
@@ -86,7 +86,7 @@ export async function POST(req: Request) {
   const symbol = parsed.data.symbol ?? config.market.symbols[0] ?? 'XAUUSDm';
 
   try {
-    const run = await runScalperEvaluation({ symbol, awaitExecution: true });
+    const run = await runScalperEvaluation({ symbol });
     return NextResponse.json({
       ok: true,
       symbol,
@@ -95,8 +95,7 @@ export async function POST(req: Request) {
       outcome: run.outcome,
       durationMs: run.durationMs,
       evaluation: run.evaluation,
-      execution: run.execution ?? null,
-      note: 'Manual trigger — same deterministic engine and fail-closed gates as the 1-minute scheduler loop.',
+      note: 'Manual trigger — same deterministic engine and fail-closed gates as the 1-minute scheduler loop. Signal-only: no execution path exists.',
     });
   } catch (e) {
     return NextResponse.json(
